@@ -1,0 +1,81 @@
+enabled: true
+
+groups:
+  - claude
+  - codex
+
+overrides:
+  # ── Claude: 스킬은 git-commit만 사용 ───────────────────────────────
+  claude/skills/api-design: false
+  claude/skills/database-schema: false
+  claude/skills/docker: false
+  claude/skills/kotest-guide: false
+  claude/skills/kotlin-spring-arch: false
+  claude/skills/migration-guide: false
+  claude/skills/planning: false
+  claude/skills/resolve-reviews: false
+  claude/skills/security-checklist: false
+  claude/skills/systematic-debugging: false
+  claude/skills/test: false
+  claude/skills/write-pr: false
+  claude/skills/the-sdk: false
+  claude/skills/java-spring-arch: false
+  claude/skills/nextjs-fsd-architecture: false
+  claude/skills/nextjs-turborepo-fsd: false
+  claude/skills/nextjs-package-boundaries: false
+  claude/skills/tailwind-shadcn: false
+  claude/skills/tanstack-query-zod: false
+
+  # ── Claude: 에이전트는 web-researcher만 사용 ──────────────────────
+  claude/agents/contradiction-finder: false
+  claude/agents/kotlin-convention-validator: false
+  claude/agents/frontend-convention-validator: false
+  claude/agents/doc-polisher: false
+  claude/agents/prompt-polisher: false
+  claude/agents/kotlin-test-fixer: false
+
+  # ── Claude: 훅 (opt-in) ──────────────────────────────────────────
+  claude/hooks/dispatcher: true
+  claude/settings: true
+  claude/hooks/secret-guard: true
+  claude/hooks/command-guard: true
+  claude/hooks/logging: true
+
+  # ── Codex: 스킬은 git-commit만 사용 ──────────────────────────────
+  codex/skills/api-design: false
+  codex/skills/database-schema: false
+  codex/skills/docker: false
+  codex/skills/kotest-guide: false
+  codex/skills/kotlin-spring-arch: false
+  codex/skills/migration-guide: false
+  codex/skills/planning: false
+  codex/skills/resolve-reviews: false
+  codex/skills/security-checklist: false
+  codex/skills/systematic-debugging: false
+  codex/skills/test: false
+  codex/skills/write-pr: false
+  codex/skills/the-sdk: false
+  codex/skills/java-spring-arch: false
+  codex/skills/nextjs-fsd-architecture: false
+  codex/skills/nextjs-turborepo-fsd: false
+  codex/skills/nextjs-package-boundaries: false
+  codex/skills/tailwind-shadcn: false
+  codex/skills/tanstack-query-zod: false
+
+  # ── Codex: 에이전트는 web-researcher만 사용 ─────────────────────
+  codex/agents/contradiction-finder: false
+  codex/agents/kotlin-convention-validator: false
+  codex/agents/frontend-convention-validator: false
+  codex/agents/doc-polisher: false
+  codex/agents/prompt-polisher: false
+  codex/agents/kotlin-test-fixer: false
+
+  # ── Codex: 훅 (opt-in, Claude와 별개) ───────────────────────────
+  codex/hooks/dispatcher: true
+  codex/hooks-json: true
+  codex/hooks/secret-guard: true
+  codex/hooks/command-guard: true
+  codex/hooks/logging: true
+
+base_branch: main
+language: ko
