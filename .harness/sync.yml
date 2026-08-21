@@ -1,11 +1,10 @@
-enabled: true
+enabled: false
 
 groups:
   - claude
   - codex
 
 overrides:
-  # ── Claude: 스킬은 git-commit만 사용 ───────────────────────────────
   claude/skills/api-design: false
   claude/skills/database-schema: false
   claude/skills/docker: false
@@ -25,23 +24,17 @@ overrides:
   claude/skills/nextjs-package-boundaries: false
   claude/skills/tailwind-shadcn: false
   claude/skills/tanstack-query-zod: false
-
-  # ── Claude: 에이전트는 web-researcher만 사용 ──────────────────────
   claude/agents/contradiction-finder: false
   claude/agents/kotlin-convention-validator: false
   claude/agents/frontend-convention-validator: false
   claude/agents/doc-polisher: false
   claude/agents/prompt-polisher: false
   claude/agents/kotlin-test-fixer: false
-
-  # ── Claude: 훅 (opt-in) ──────────────────────────────────────────
   claude/hooks/dispatcher: true
   claude/settings: true
   claude/hooks/secret-guard: true
   claude/hooks/command-guard: true
   claude/hooks/logging: true
-
-  # ── Codex: 스킬은 git-commit만 사용 ──────────────────────────────
   codex/skills/api-design: false
   codex/skills/database-schema: false
   codex/skills/docker: false
@@ -61,16 +54,12 @@ overrides:
   codex/skills/nextjs-package-boundaries: false
   codex/skills/tailwind-shadcn: false
   codex/skills/tanstack-query-zod: false
-
-  # ── Codex: 에이전트는 web-researcher만 사용 ─────────────────────
   codex/agents/contradiction-finder: false
   codex/agents/kotlin-convention-validator: false
   codex/agents/frontend-convention-validator: false
   codex/agents/doc-polisher: false
   codex/agents/prompt-polisher: false
   codex/agents/kotlin-test-fixer: false
-
-  # ── Codex: 훅 (opt-in, Claude와 별개) ───────────────────────────
   codex/hooks/dispatcher: true
   codex/hooks-json: true
   codex/hooks/secret-guard: true
