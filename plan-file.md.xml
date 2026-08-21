@@ -1,0 +1,11 @@
+# Plan
+
+## Stack
+
+- Built in Go.
+- May include a server application.
+
+## Approach
+
+- Register a GitHub App.
+- Perform code review based on that GitHub App.
