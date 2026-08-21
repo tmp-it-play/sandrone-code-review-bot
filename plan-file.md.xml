@@ -1,11 +1,11 @@
-# Plan
-
-## Stack
-
-- Built in Go.
-- May include a server application.
-
-## Approach
-
-- Register a GitHub App.
-- Perform code review based on that GitHub App.
+<?xml version="1.0" encoding="UTF-8"?>
+<plan>
+  <stack>
+    <item>Built in Go.</item>
+    <item>May include a server application.</item>
+  </stack>
+  <approach>
+    <item>Register a GitHub App.</item>
+    <item>Perform code review based on that GitHub App.</item>
+  </approach>
+</plan>
