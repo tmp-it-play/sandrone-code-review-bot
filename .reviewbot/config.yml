@@ -1,0 +1,14 @@
+language: ko
+minSeverity: minor
+maxFiles: 40
+maxInlineComments: 25
+threadReply: true
+
+exclude:
+  - "web/static/**"
+
+sandrone:
+  autoReview: true
+  autoReviewOnPush: true
+  summaryPlacement: new-comment
+  maxInstructionChars: 20000
