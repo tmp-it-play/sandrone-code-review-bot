@@ -22,6 +22,7 @@ func (u *UseCase) Execute(ctx context.Context, request Request) error {
 	if !request.Command.IsRecognized() {
 		return nil
 	}
+	u.acknowledge(ctx, request)
 	allowed, err := u.allowed(ctx, request)
 	if err != nil {
 		return err
@@ -31,7 +32,6 @@ func (u *UseCase) Execute(ctx context.Context, request Request) error {
 		u.reject(ctx, request)
 		return nil
 	}
-	u.acknowledge(ctx, request)
 	return u.enqueue(ctx, request)
 }
 
