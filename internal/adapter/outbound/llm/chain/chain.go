@@ -66,7 +66,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		if cooling {
 			continue
 		}
-		response, attemptErr := c.attempt(ctx, candidate, request, executor)
+		response, attemptErr := c.attemptWithRetry(ctx, candidate, request, executor)
 		if attemptErr == nil {
 			c.observe(ctx, candidate, "succeeded", 0)
 			return response, nil
@@ -91,6 +91,32 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		return llm.Response{}, ErrNoProviderAvailable
 	}
 	return llm.Response{}, fmt.Errorf("모든 프로바이더가 실패했습니다: %w", lastErr)
+}
+
+func (c *Chain) attemptWithRetry(ctx context.Context, candidate outbound.Provider, request llm.Request, executor outbound.ToolExecutor) (llm.Response, error) {
+	var lastErr error
+	for tryIndex := 0; tryIndex <= transientRetries; tryIndex++ {
+		if tryIndex > 0 {
+			select {
+			case <-ctx.Done():
+				return llm.Response{}, ctx.Err()
+			case <-time.After(retryPause(tryIndex)):
+			}
+		}
+		response, err := c.attempt(ctx, candidate, request, executor)
+		if err == nil {
+			return response, nil
+		}
+		lastErr = err
+		failure, ok := llm.AsFailure(err)
+		if !ok || !failure.Kind.IsTransient() || tryIndex == transientRetries {
+			return llm.Response{}, err
+		}
+		c.observe(ctx, candidate, string(failure.Kind), failure.Status)
+		c.logger.Warn("일시적인 오류라 같은 프로바이더로 다시 시도합니다",
+			"provider", candidate.Name(), "status", failure.Status, "attempt", tryIndex+1)
+	}
+	return llm.Response{}, lastErr
 }
 
 func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, request llm.Request, executor outbound.ToolExecutor) (llm.Response, error) {

@@ -13,3 +13,7 @@ const (
 func (k FailureKind) TriggersCooldown() bool {
 	return k == FailureQuota || k == FailureRateLimited || k == FailureAuth
 }
+
+func (k FailureKind) IsTransient() bool {
+	return k == FailureUnavailable
+}
