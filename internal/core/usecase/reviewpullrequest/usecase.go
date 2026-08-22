@@ -166,18 +166,20 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 	placed := review.Result{Summary: gathered.Summary, Findings: findings}
 	response.Usage = usage
 	attribution := attributionOf(response)
+	style := review.Style{Emoji: config.Emoji}
 	view := review.SummaryView{
 		Summary:     placed.Summary,
 		Fallback:    placed.Fallback(),
 		InlineCount: len(placed.Inline()),
 		Attribution: attribution,
+		Style:       style,
 		Trigger:     task.Trigger,
 		Incremental: incremental,
 		SkippedDup:  duplicates,
 		Unreviewed:  unreviewedOf(chosen.Skipped, plan.Overflow, failed),
 	}
 
-	if err := u.publish(ctx, target, view, placed, attribution); err != nil {
+	if err := u.publish(ctx, target, view, placed, attribution, style); err != nil {
 		return u.fail(ctx, task, startedAt, "리뷰를 게시하지 못했습니다", err)
 	}
 
@@ -241,7 +243,7 @@ func (u *UseCase) executor(target pullrequest.Target, config setting.RepoConfig)
 	return u.deps.Tools.ForTarget(target, target.HeadSHA, config.MaxExtraReads)
 }
 
-func (u *UseCase) publish(ctx context.Context, target pullrequest.Target, view review.SummaryView, result review.Result, attribution review.Attribution) error {
+func (u *UseCase) publish(ctx context.Context, target pullrequest.Target, view review.SummaryView, result review.Result, attribution review.Attribution, style review.Style) error {
 	commentID, err := u.deps.Publisher.CreateComment(ctx, target, u.deps.Renderer.SummaryBody(view))
 	if err != nil {
 		return err
@@ -257,7 +259,7 @@ func (u *UseCase) publish(ctx context.Context, target pullrequest.Target, view r
 		comments = append(comments, review.InlineComment{
 			Path: finding.File,
 			Line: finding.Line,
-			Body: u.deps.Renderer.InlineBody(finding, attribution),
+			Body: u.deps.Renderer.InlineBody(finding, attribution, style),
 		})
 	}
 	submitErr := u.deps.Publisher.SubmitReview(ctx, target, u.deps.Renderer.InlineReviewBody(attribution), comments)

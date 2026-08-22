@@ -1,6 +1,7 @@
 package prompt
 
-const reviewSchema = `출력은 아래 JSON 하나만 낸다. 코드 블록 표시나 설명을 덧붙이지 않는다.
+const reviewSchema = `출력은 아래 JSON 하나만 낸다. 코드 블록 표시, 인사, 감탄, 설명을 JSON 밖에 덧붙이지 않는다.
+JSON 키, severity 값, 파일 경로는 번역하거나 문체에 맞게 바꾸지 않는다.
 
 {
   "summary": {
@@ -22,7 +23,8 @@ const reviewSchema = `출력은 아래 JSON 하나만 낸다. 코드 블록 표�
 
 변경을 끝까지 살펴본 뒤에도 남길 것이 정말 없을 때만 findings를 빈 배열로 둔다.`
 
-const summarySchema = `출력은 아래 JSON 하나만 낸다. 코드 블록 표시나 설명을 덧붙이지 않는다.
+const summarySchema = `출력은 아래 JSON 하나만 낸다. 코드 블록 표시, 인사, 감탄, 설명을 JSON 밖에 덧붙이지 않는다.
+JSON 키와 파일 경로는 번역하거나 문체에 맞게 바꾸지 않는다.
 
 {
   "summary": {

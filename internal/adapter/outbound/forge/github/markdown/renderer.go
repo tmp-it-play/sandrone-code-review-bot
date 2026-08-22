@@ -41,7 +41,7 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 		builder.WriteString("이번 변경에서 따로 남길 지적은 없습니다.\n\n")
 	}
 	if len(view.Fallback) > 0 {
-		builder.WriteString(r.fallbackSection(view.Fallback))
+		builder.WriteString(r.fallbackSection(view.Fallback, view.Style))
 		builder.WriteString("\n")
 	}
 	if len(view.Unreviewed) > 0 {
@@ -58,11 +58,11 @@ func (r Renderer) InlineReviewBody(attribution review.Attribution) string {
 	return attributionLine(review.Attribution{Model: attribution.Model, Label: attribution.Label})
 }
 
-func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribution) string {
+func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribution, style review.Style) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("**%s**", finding.Severity.Label()))
+	builder.WriteString(severityBadge(finding.Severity, style))
 	if title := strings.TrimSpace(finding.Title); title != "" {
-		builder.WriteString(" · ")
+		builder.WriteString(" ")
 		builder.WriteString(title)
 	}
 	builder.WriteString("\n\n")
@@ -141,7 +141,7 @@ func (r Renderer) fileTable(notes []review.FileNote) string {
 	return builder.String()
 }
 
-func (r Renderer) fallbackSection(findings []review.Finding) string {
+func (r Renderer) fallbackSection(findings []review.Finding, style review.Style) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("<details>\n<summary>인라인으로 달지 못한 지적 %d건</summary>\n\n", len(findings)))
 	for _, finding := range findings {
@@ -149,7 +149,8 @@ func (r Renderer) fallbackSection(findings []review.Finding) string {
 		if finding.Line > 0 {
 			location = fmt.Sprintf("%s:%d", finding.File, finding.Line)
 		}
-		builder.WriteString(fmt.Sprintf("**`%s`** · %s", location, finding.Severity.Label()))
+		builder.WriteString(severityBadge(finding.Severity, style))
+		builder.WriteString(fmt.Sprintf(" `%s`", location))
 		if title := strings.TrimSpace(finding.Title); title != "" {
 			builder.WriteString(" · ")
 			builder.WriteString(title)

@@ -65,6 +65,9 @@ func mergeReviewSetting(config setting.RepoConfig, raw rawReviewSetting) setting
 			config.Tone = tone
 		}
 	}
+	if raw.Emoji != nil {
+		config.Emoji = *raw.Emoji
+	}
 	if raw.Temperature != nil {
 		config.Temperature = *raw.Temperature
 	}

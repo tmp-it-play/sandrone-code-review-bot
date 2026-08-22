@@ -5,6 +5,7 @@ type SummaryView struct {
 	Fallback    []Finding
 	InlineCount int
 	Attribution Attribution
+	Style       Style
 	Trigger     Trigger
 	Incremental bool
 	SkippedDup  int
