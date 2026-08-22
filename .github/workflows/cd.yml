@@ -3,6 +3,21 @@ name: CD
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "**.xml"
+      - LICENSE
+      - .gitignore
+      - .gitattributes
+      - .env.example
+      - docker-compose.yml
+      - .harness/**
+      - .reviewbot/**
+      - .claude/**
+      - .codex/**
+      - .agents/**
+      - .github/ISSUE_TEMPLATE/**
+      - .github/PULL_REQUEST_TEMPLATE/**
   workflow_dispatch:
 
 concurrency:
