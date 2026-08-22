@@ -14,24 +14,26 @@ import (
 )
 
 type Client struct {
-	name         string
-	model        string
-	baseURL      string
-	apiKey       string
-	capability   llm.Capability
-	extraHeaders map[string]string
-	httpClient   *http.Client
+	name           string
+	model          string
+	baseURL        string
+	apiKey         string
+	capability     llm.Capability
+	maxPromptChars int
+	extraHeaders   map[string]string
+	httpClient     *http.Client
 }
 
-func NewClient(name string, model string, baseURL string, apiKey string, capability llm.Capability, extraHeaders map[string]string, timeout time.Duration) *Client {
+func NewClient(name string, model string, baseURL string, apiKey string, capability llm.Capability, maxPromptChars int, extraHeaders map[string]string, timeout time.Duration) *Client {
 	return &Client{
-		name:         name,
-		model:        model,
-		baseURL:      strings.TrimRight(baseURL, "/"),
-		apiKey:       apiKey,
-		capability:   capability,
-		extraHeaders: extraHeaders,
-		httpClient:   &http.Client{Timeout: timeout},
+		name:           name,
+		model:          model,
+		baseURL:        strings.TrimRight(baseURL, "/"),
+		apiKey:         apiKey,
+		capability:     capability,
+		maxPromptChars: maxPromptChars,
+		extraHeaders:   extraHeaders,
+		httpClient:     &http.Client{Timeout: timeout},
 	}
 }
 
@@ -45,6 +47,10 @@ func (c *Client) Model() string {
 
 func (c *Client) Capability() llm.Capability {
 	return c.capability
+}
+
+func (c *Client) PromptLimit() int {
+	return c.maxPromptChars
 }
 
 func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Response, error) {

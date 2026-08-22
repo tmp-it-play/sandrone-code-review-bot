@@ -4,16 +4,17 @@
   <h1>프로바이더</h1>
   <p class="sub">위에서부터 순서대로 시도하고, 한도에 걸리면 다음으로 넘어간다.</p>
   <table>
-    <thead><tr><th>순위</th><th>이름</th><th>성공</th><th>실패</th><th>한도 차단</th><th>최근 사용</th><th>쿨다운</th></tr></thead>
+    <thead><tr><th>순위</th><th>이름</th><th>성공</th><th>실패</th><th>한도 차단</th><th>최근 사용</th><th>최근 실패 사유</th><th>쿨다운</th></tr></thead>
     <tbody>
     {{range .Providers}}
       <tr>
         <td>{{.Order}}</td><td>{{.Name}}</td><td>{{.Succeeded}}</td><td>{{.Failed}}</td><td>{{.QuotaBlocked}}</td>
         <td>{{if .LastUsedAt}}{{.LastUsedAt}}{{else}}-{{end}}</td>
+        <td>{{if .LastFailure}}{{.LastFailure}}<br><span class="muted">{{.LastFailureAt}}</span>{{else}}-{{end}}</td>
         <td>{{if .CooldownEnds}}<span class="badge failed">{{.CooldownEnds}}까지</span>{{else}}-{{end}}</td>
       </tr>
     {{else}}
-      <tr><td colspan="7" class="empty">설정된 프로바이더가 없습니다.</td></tr>
+      <tr><td colspan="8" class="empty">설정된 프로바이더가 없습니다.</td></tr>
     {{end}}
     </tbody>
   </table>

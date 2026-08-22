@@ -13,12 +13,13 @@
 
   <h2>프로바이더</h2>
   <table>
-    <thead><tr><th>순위</th><th>이름</th><th>성공</th><th>실패</th><th>한도 차단</th><th>최근 사용</th><th>쿨다운</th></tr></thead>
+    <thead><tr><th>순위</th><th>이름</th><th>성공</th><th>실패</th><th>한도 차단</th><th>최근 사용</th><th>최근 실패 사유</th><th>쿨다운</th></tr></thead>
     <tbody>
     {{range .Providers}}
       <tr>
         <td>{{.Order}}</td><td>{{.Name}}</td><td>{{.Succeeded}}</td><td>{{.Failed}}</td><td>{{.QuotaBlocked}}</td>
         <td>{{if .LastUsedAt}}{{.LastUsedAt}}{{else}}-{{end}}</td>
+        <td>{{if .LastFailure}}{{.LastFailure}}<br><span class="muted">{{.LastFailureAt}}</span>{{else}}-{{end}}</td>
         <td>{{if .CooldownEnds}}<span class="badge failed">{{.CooldownEnds}}까지</span>{{else}}-{{end}}</td>
       </tr>
     {{end}}

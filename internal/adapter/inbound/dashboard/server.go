@@ -243,13 +243,18 @@ func (s *Server) providerViews(ctx context.Context) []ProviderView {
 	}
 	byName := map[string]ProviderView{}
 	for _, snapshot := range snapshots {
-		byName[snapshot.Provider] = ProviderView{
+		view := ProviderView{
 			Name:         snapshot.Provider,
 			Succeeded:    snapshot.Succeeded,
 			Failed:       snapshot.Failed,
 			QuotaBlocked: snapshot.QuotaBlocked,
 			LastUsedAt:   formatTime(snapshot.LastUsedAt),
+			LastFailure:  failureLabel(snapshot.LastFailureKind, snapshot.LastFailureStatus),
 		}
+		if !snapshot.LastFailureAt.IsZero() {
+			view.LastFailureAt = formatTime(snapshot.LastFailureAt)
+		}
+		byName[snapshot.Provider] = view
 	}
 	views := make([]ProviderView, 0, len(s.deps.ProviderOrder))
 	for index, name := range s.deps.ProviderOrder {

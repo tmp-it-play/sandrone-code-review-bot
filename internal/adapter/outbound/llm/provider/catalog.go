@@ -9,24 +9,28 @@ type Catalog struct {
 func NewCatalog() Catalog {
 	return Catalog{descriptors: map[string]Descriptor{
 		"gemini": {
-			Name:       "gemini",
-			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
+			Name:           "gemini",
+			Capability:     llm.Capability{ToolCalling: true, JSONMode: true},
+			MaxPromptChars: 600000,
 		},
 		"groq": {
-			Name:       "groq",
-			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
+			Name:           "groq",
+			Capability:     llm.Capability{ToolCalling: true, JSONMode: true},
+			MaxPromptChars: 60000,
 		},
 		"openrouter": {
-			Name:       "openrouter",
-			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
+			Name:           "openrouter",
+			Capability:     llm.Capability{ToolCalling: true, JSONMode: true},
+			MaxPromptChars: 180000,
 			Headers: map[string]string{
 				"HTTP-Referer": "https://github.com/it-play/sandrone-code-review-bot",
 				"X-Title":      "sandrone-code-review-bot",
 			},
 		},
 		"nvidia": {
-			Name:       "nvidia",
-			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
+			Name:           "nvidia",
+			Capability:     llm.Capability{ToolCalling: true, JSONMode: true},
+			MaxPromptChars: 180000,
 		},
 	}}
 }

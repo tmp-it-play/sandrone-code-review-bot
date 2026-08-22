@@ -24,6 +24,7 @@ func buildProviders(config Config) []outbound.Provider {
 			entry.BaseURL,
 			entry.APIKey,
 			descriptor.Capability,
+			descriptor.MaxPromptChars,
 			descriptor.Headers,
 			config.RequestTimeout,
 		))

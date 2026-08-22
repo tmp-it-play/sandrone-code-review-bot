@@ -1,6 +1,8 @@
 package dashboard
 
 import (
+	"fmt"
+
 	"github.com/it-play/sandrone-code-review-bot/internal/core/command"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 )
@@ -31,6 +33,26 @@ var commandLabels = map[command.Kind]string{
 var placementLabels = map[review.Placement]string{
 	review.PlacementInline:   "인라인",
 	review.PlacementFallback: "요약 하단",
+}
+
+var failureLabels = map[string]string{
+	"quota":        "한도 소진",
+	"rate_limited": "호출 제한",
+	"unavailable":  "서비스 불가",
+	"invalid":      "요청 오류",
+	"auth":         "인증 오류",
+	"failed":       "알 수 없는 오류",
+}
+
+func failureLabel(kind string, status int) string {
+	if kind == "" {
+		return ""
+	}
+	label := lookup(failureLabels, kind, kind)
+	if status > 0 {
+		return fmt.Sprintf("%s (%d)", label, status)
+	}
+	return label
 }
 
 func triggerLabel(trigger review.Trigger) string {

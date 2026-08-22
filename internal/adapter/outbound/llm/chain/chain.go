@@ -90,6 +90,10 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 		attempt := request
 		attempt.Messages = messages
 		attempt.Tools = tools
+		if fitted, trimmed := trimMessages(attempt.Messages, candidate.PromptLimit()); trimmed {
+			attempt.Messages = fitted
+			c.logger.Warn("프로바이더 입력 한도에 맞추어 프롬프트를 줄였습니다", "provider", candidate.Name(), "limit", candidate.PromptLimit())
+		}
 		response, err := candidate.Complete(ctx, attempt)
 		if err != nil {
 			return llm.Response{}, err
@@ -119,6 +123,9 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 	final := request
 	final.Messages = messages
 	final.Tools = nil
+	if fitted, trimmed := trimMessages(final.Messages, candidate.PromptLimit()); trimmed {
+		final.Messages = fitted
+	}
 	response, err := candidate.Complete(ctx, final)
 	if err != nil {
 		return llm.Response{}, err

@@ -66,9 +66,41 @@ func (r *UsageRepository) Snapshot(ctx context.Context) ([]usage.Snapshot, error
 			snapshot.LastUsedAt = row.LastUsedAt
 		}
 	}
+	if err := r.attachLastFailure(ctx, byProvider); err != nil {
+		return nil, err
+	}
 	snapshots := make([]usage.Snapshot, 0, len(byProvider))
 	for _, snapshot := range byProvider {
 		snapshots = append(snapshots, *snapshot)
 	}
 	return snapshots, nil
+}
+
+func (r *UsageRepository) attachLastFailure(ctx context.Context, byProvider map[string]*usage.Snapshot) error {
+	var rows []struct {
+		Provider   string
+		Outcome    string
+		Status     int
+		OccurredAt time.Time
+	}
+	err := r.database.WithContext(ctx).
+		Model(&model.ProviderUsage{}).
+		Select("provider, outcome, status, occurred_at").
+		Where("outcome <> ?", "succeeded").
+		Order("occurred_at DESC").
+		Limit(500).
+		Scan(&rows).Error
+	if err != nil {
+		return fmt.Errorf("최근 실패 기록을 읽지 못했습니다: %w", err)
+	}
+	for _, row := range rows {
+		snapshot, ok := byProvider[row.Provider]
+		if !ok || !snapshot.LastFailureAt.IsZero() {
+			continue
+		}
+		snapshot.LastFailureKind = row.Outcome
+		snapshot.LastFailureStatus = row.Status
+		snapshot.LastFailureAt = row.OccurredAt
+	}
+	return nil
 }

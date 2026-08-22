@@ -65,6 +65,7 @@ td code { font-size: 13px; }
 td a, h1 a { color: var(--accent); text-decoration: none; }
 td a:hover, h1 a:hover { text-decoration: underline; }
 .empty { color: var(--muted); text-align: center; }
+.muted { color: var(--muted); font-size: 12px; }
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
 .badge.succeeded { color: var(--ok); border-color: var(--ok); }
