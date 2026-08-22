@@ -1,7 +1,7 @@
 {{template "head" .}}
 {{template "nav" .}}
 <main>
-  <h1>{{.Review.Repository}} #{{.Review.Number}}</h1>
+  <h1><a href="{{.Review.RepositoryURL}}" target="_blank" rel="noreferrer">{{.Review.Repository}}</a> <a href="{{.Review.NumberURL}}" target="_blank" rel="noreferrer">{{.Review.NumberLabel}}</a></h1>
   <dl class="meta">
     <div><dt>트리거</dt><dd>{{.Review.TriggerLabel}}</dd></div>
     <div><dt>결과</dt><dd><span class="badge {{.Review.Outcome}}">{{.Review.OutcomeLabel}}</span></dd></div>

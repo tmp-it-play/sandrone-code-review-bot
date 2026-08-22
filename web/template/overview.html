@@ -31,7 +31,9 @@
     <tbody>
     {{range .Commands}}
       <tr>
-        <td>{{.Repository}}</td><td>#{{.Number}}</td><td>{{.Invoker}}</td><td>{{.KindLabel}}</td>
+        <td><a href="{{.RepositoryURL}}" target="_blank" rel="noreferrer">{{.Repository}}</a></td>
+        <td><a href="{{.NumberURL}}" target="_blank" rel="noreferrer">{{.NumberLabel}}</a></td>
+        <td>{{.Invoker}}</td><td>{{.KindLabel}}</td>
         <td>{{if .Allowed}}<span class="badge succeeded">허용</span>{{else}}<span class="badge failed">거절</span>{{end}}</td>
         <td>{{.OccurredAt}}</td>
       </tr>
@@ -46,7 +48,7 @@
     <thead><tr><th>저장소</th><th>설치 ID</th><th>공개 범위</th></tr></thead>
     <tbody>
     {{range .Repositories}}
-      <tr><td>{{.FullName}}</td><td>{{.InstallationID}}</td><td>{{.VisibilityLabel}}</td></tr>
+      <tr><td><a href="{{.URL}}" target="_blank" rel="noreferrer">{{.FullName}}</a></td><td>{{.InstallationID}}</td><td>{{.VisibilityLabel}}</td></tr>
     {{else}}
       <tr><td colspan="3" class="empty">설치된 저장소가 없습니다.</td></tr>
     {{end}}

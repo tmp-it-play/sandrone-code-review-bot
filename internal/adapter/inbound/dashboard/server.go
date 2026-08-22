@@ -91,6 +91,7 @@ func (s *Server) overview(writer http.ResponseWriter, request *http.Request) {
 	for _, repository := range repositories {
 		data.Repositories = append(data.Repositories, RepositoryView{
 			FullName:        repository.FullName(),
+			URL:             repositoryURL(repository.Owner, repository.Name),
 			InstallationID:  repository.InstallationID,
 			Private:         repository.Private,
 			VisibilityLabel: visibilityLabel(repository.Private),
@@ -220,13 +221,16 @@ func (s *Server) recentCommands(ctx context.Context, limit int) []CommandView {
 	views := make([]CommandView, 0, len(invocations))
 	for _, invocation := range invocations {
 		views = append(views, CommandView{
-			Repository: invocation.Owner + "/" + invocation.Repository,
-			Number:     invocation.Number,
-			Invoker:    invocation.Invoker,
-			Kind:       string(invocation.Kind),
-			KindLabel:  commandLabel(invocation.Kind),
-			Allowed:    invocation.Allowed,
-			OccurredAt: formatTime(invocation.OccurredAt),
+			Repository:    invocation.Owner + "/" + invocation.Repository,
+			RepositoryURL: repositoryURL(invocation.Owner, invocation.Repository),
+			Number:        invocation.Number,
+			NumberLabel:   pullRequestLabel(invocation.Number),
+			NumberURL:     pullRequestURL(invocation.Owner, invocation.Repository, invocation.Number),
+			Invoker:       invocation.Invoker,
+			Kind:          string(invocation.Kind),
+			KindLabel:     commandLabel(invocation.Kind),
+			Allowed:       invocation.Allowed,
+			OccurredAt:    formatTime(invocation.OccurredAt),
 		})
 	}
 	return views
@@ -296,20 +300,23 @@ func (s *Server) render(writer http.ResponseWriter, name string, data PageData) 
 
 func toReviewView(record review.Record) ReviewView {
 	return ReviewView{
-		ID:           record.ID,
-		Repository:   record.Owner + "/" + record.Repository,
-		Number:       record.Number,
-		Trigger:      string(record.Trigger),
-		TriggerLabel: triggerLabel(record.Trigger),
-		Outcome:      string(record.Outcome),
-		OutcomeLabel: outcomeLabel(record.Outcome),
-		Provider:     record.Provider,
-		Model:        record.Model,
-		Inline:       record.InlineCount,
-		Fallback:     record.FallbackCount,
-		Duration:     formatDuration(record.Duration()),
-		StartedAt:    formatTime(record.StartedAt),
-		Detail:       record.Detail,
+		ID:            record.ID,
+		Repository:    record.Owner + "/" + record.Repository,
+		RepositoryURL: repositoryURL(record.Owner, record.Repository),
+		Number:        record.Number,
+		NumberLabel:   pullRequestLabel(record.Number),
+		NumberURL:     pullRequestURL(record.Owner, record.Repository, record.Number),
+		Trigger:       string(record.Trigger),
+		TriggerLabel:  triggerLabel(record.Trigger),
+		Outcome:       string(record.Outcome),
+		OutcomeLabel:  outcomeLabel(record.Outcome),
+		Provider:      record.Provider,
+		Model:         record.Model,
+		Inline:        record.InlineCount,
+		Fallback:      record.FallbackCount,
+		Duration:      formatDuration(record.Duration()),
+		StartedAt:     formatTime(record.StartedAt),
+		Detail:        record.Detail,
 	}
 }
 
@@ -338,5 +345,5 @@ func formatTime(value time.Time) string {
 	if value.IsZero() {
 		return "-"
 	}
-	return value.Local().Format("2006-01-02 15:04:05")
+	return value.In(displayLocation).Format("2006-01-02 15:04:05")
 }

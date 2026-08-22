@@ -35,8 +35,8 @@
   <tbody>
   {{range .Reviews}}
     <tr>
-      <td>{{.Repository}}</td>
-      <td>#{{.Number}}</td>
+      <td><a href="{{.RepositoryURL}}" target="_blank" rel="noreferrer">{{.Repository}}</a></td>
+      <td><a href="{{.NumberURL}}" target="_blank" rel="noreferrer">{{.NumberLabel}}</a></td>
       <td>{{.TriggerLabel}}</td>
       <td><span class="badge {{.Outcome}}">{{.OutcomeLabel}}</span></td>
       <td>{{if .Provider}}{{.Provider}}{{else}}-{{end}}</td>
