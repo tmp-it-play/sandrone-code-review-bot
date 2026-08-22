@@ -1,0 +1,41 @@
+package provider
+
+import "github.com/it-play/sandrone-code-review-bot/internal/core/llm"
+
+type Catalog struct {
+	descriptors map[string]Descriptor
+}
+
+func NewCatalog() Catalog {
+	return Catalog{descriptors: map[string]Descriptor{
+		"gemini": {
+			Name:       "gemini",
+			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
+		},
+		"githubmodels": {
+			Name:       "githubmodels",
+			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
+		},
+		"groq": {
+			Name:       "groq",
+			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
+		},
+		"openrouter": {
+			Name:       "openrouter",
+			Capability: llm.Capability{ToolCalling: false, JSONMode: false},
+			Headers: map[string]string{
+				"HTTP-Referer": "https://github.com/it-play/sandrone-code-review-bot",
+				"X-Title":      "sandrone-review-bot",
+			},
+		},
+		"nvidia": {
+			Name:       "nvidia",
+			Capability: llm.Capability{ToolCalling: false, JSONMode: false},
+		},
+	}}
+}
+
+func (c Catalog) Descriptor(name string) (Descriptor, bool) {
+	descriptor, ok := c.descriptors[name]
+	return descriptor, ok
+}

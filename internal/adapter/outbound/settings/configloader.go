@@ -1,0 +1,120 @@
+package settings
+
+import (
+	"context"
+	"log/slog"
+
+	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/setting"
+	"gopkg.in/yaml.v3"
+)
+
+var configCandidates = []string{
+	".reviewbot/config.yml",
+	".reviewbot/config.yaml",
+	".reviewbot.yml",
+	".reviewbot.yaml",
+}
+
+type ConfigLoader struct {
+	content outbound.RepositoryContent
+	logger  *slog.Logger
+}
+
+func NewConfigLoader(content outbound.RepositoryContent, logger *slog.Logger) *ConfigLoader {
+	return &ConfigLoader{content: content, logger: logger}
+}
+
+func (l *ConfigLoader) RepoConfig(ctx context.Context, target pullrequest.Target) (setting.RepoConfig, error) {
+	config := setting.DefaultRepoConfig()
+	for _, candidate := range configCandidates {
+		body, err := l.content.File(ctx, target, candidate, "")
+		if err != nil {
+			continue
+		}
+		var raw rawConfig
+		if err := yaml.Unmarshal([]byte(body), &raw); err != nil {
+			l.logger.Warn("설정 파일을 해석하지 못했다", "target", target.FullName(), "path", candidate, "error", err)
+			return config, nil
+		}
+		return merge(config, raw), nil
+	}
+	return config, nil
+}
+
+func merge(config setting.RepoConfig, raw rawConfig) setting.RepoConfig {
+	if raw.Language != nil {
+		config.Language = *raw.Language
+	}
+	if raw.Temperature != nil {
+		config.Temperature = *raw.Temperature
+	}
+	if raw.MaxOutputTokens != nil {
+		config.MaxOutputTokens = *raw.MaxOutputTokens
+	}
+	if raw.MaxPromptChars != nil {
+		config.MaxPromptChars = *raw.MaxPromptChars
+	}
+	if raw.MaxFiles != nil {
+		config.MaxFiles = *raw.MaxFiles
+	}
+	if raw.MaxFileChars != nil {
+		config.MaxFileChars = *raw.MaxFileChars
+	}
+	if raw.IncludeSources != nil {
+		config.IncludeSources = *raw.IncludeSources
+	}
+	if raw.MaxSourceChars != nil {
+		config.MaxSourceChars = *raw.MaxSourceChars
+	}
+	if raw.MaxExtraReads != nil {
+		config.MaxExtraReads = *raw.MaxExtraReads
+	}
+	if len(raw.Exclude) > 0 {
+		config.Exclude = append(config.Exclude, raw.Exclude...)
+	}
+	if len(raw.Include) > 0 {
+		config.Include = raw.Include
+	}
+	if raw.MinSeverity != nil {
+		if severity, ok := review.ParseSeverity(*raw.MinSeverity); ok {
+			config.MinSeverity = severity
+		}
+	}
+	if raw.MaxInlineComments != nil {
+		config.MaxInlineComments = *raw.MaxInlineComments
+	}
+	if raw.ThreadReply != nil {
+		config.ThreadReply = *raw.ThreadReply
+	}
+	if raw.Sandrone != nil {
+		config.Sandrone = mergeSandrone(config.Sandrone, *raw.Sandrone)
+	}
+	return config
+}
+
+func mergeSandrone(current setting.SandroneSetting, raw rawSandrone) setting.SandroneSetting {
+	if raw.AutoReview != nil {
+		current.AutoReview = *raw.AutoReview
+	}
+	if raw.AutoReviewOnPush != nil {
+		current.AutoReviewOnPush = *raw.AutoReviewOnPush
+	}
+	if raw.SummaryPlacement != nil {
+		if placement, ok := setting.ParseSummaryPlacement(*raw.SummaryPlacement); ok {
+			current.SummaryPlacement = placement
+		}
+	}
+	if len(raw.Providers) > 0 {
+		current.Providers = raw.Providers
+	}
+	if raw.MaxInstructionChars != nil {
+		current.MaxInstructionChars = *raw.MaxInstructionChars
+	}
+	if len(raw.InstructionFiles) > 0 {
+		current.InstructionFiles = raw.InstructionFiles
+	}
+	return current
+}
