@@ -12,6 +12,10 @@ concurrency:
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
   PACKAGE_NAME: sandrone-code-review-bot
+  CONTAINER_NAME: sandrone
+  DOCKER_NETWORK: readygsm-net
+  HOST_PORT: "10105"
+  BASE_PATH: /sandrone
 
 jobs:
   deploy:
@@ -102,15 +106,6 @@ jobs:
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
           DASHBOARD_SESSION_SECRET: ${{ secrets.DASHBOARD_SESSION_SECRET }}
           METRICS_TOKEN: ${{ secrets.SANDRONE_METRICS_TOKEN }}
-          PROVIDER_ORDER: ${{ vars.SANDRONE_PROVIDER_ORDER }}
-          BASE_PATH: ${{ vars.SANDRONE_BASE_PATH }}
-          BOT_NAME: ${{ vars.SANDRONE_BOT_NAME }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-          GROQ_MODEL: ${{ vars.GROQ_MODEL }}
-          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
-          NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL }}
-          DOCKER_NETWORK: ${{ vars.DEPLOY_DOCKER_NETWORK }}
-          HOST_PORT: ${{ vars.DEPLOY_HOST_PORT }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -122,23 +117,17 @@ jobs:
 
           : > deploy/sandrone.env
           write SANDRONE_HTTP_ADDR ":8080"
-          write SANDRONE_BOT_NAME "${BOT_NAME:-sandrone-code-review-bot}"
           write SANDRONE_LOG_LEVEL "info"
-          write SANDRONE_BASE_PATH "${BASE_PATH:-}"
+          write SANDRONE_BASE_PATH "$BASE_PATH"
           write GITHUB_APP_ID "$APP_ID"
           write GITHUB_WEBHOOK_SECRET "$WEBHOOK_SECRET"
           write MYSQL_DSN "$MYSQL_DSN"
           write REDIS_ADDR "$REDIS_ADDR"
           write REDIS_PASSWORD "$REDIS_PASSWORD"
-          write SANDRONE_PROVIDER_ORDER "${PROVIDER_ORDER:-gemini,groq,openrouter,nvidia}"
           write GEMINI_API_KEY "$GEMINI_API_KEY"
-          write GEMINI_MODEL "${GEMINI_MODEL:-}"
           write GROQ_API_KEY "$GROQ_API_KEY"
-          write GROQ_MODEL "${GROQ_MODEL:-}"
           write OPENROUTER_API_KEY "$OPENROUTER_API_KEY"
-          write OPENROUTER_MODEL "${OPENROUTER_MODEL:-}"
           write NVIDIA_API_KEY "$NVIDIA_API_KEY"
-          write NVIDIA_MODEL "${NVIDIA_MODEL:-}"
           write DASHBOARD_USERNAME "$DASHBOARD_USERNAME"
           write DASHBOARD_PASSWORD "$DASHBOARD_PASSWORD"
           write DASHBOARD_SESSION_SECRET "$DASHBOARD_SESSION_SECRET"
@@ -148,10 +137,10 @@ jobs:
           {
             printf 'IMAGE=%s\n' "${IMAGE_NAME}:${GITHUB_SHA}"
             printf 'REVISION=%s\n' "$GITHUB_SHA"
-            printf 'CONTAINER_NAME=%s\n' "sandrone"
-            printf 'DOCKER_NETWORK=%s\n' "${DOCKER_NETWORK:-readygsm-net}"
-            printf 'HOST_PORT=%s\n' "${HOST_PORT:-10105}"
-            printf 'BASE_PATH=%s\n' "${BASE_PATH:-}"
+            printf 'CONTAINER_NAME=%s\n' "$CONTAINER_NAME"
+            printf 'DOCKER_NETWORK=%s\n' "$DOCKER_NETWORK"
+            printf 'HOST_PORT=%s\n' "$HOST_PORT"
+            printf 'BASE_PATH=%s\n' "$BASE_PATH"
             printf 'GHCR_USER=%s\n' "$GITHUB_ACTOR"
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } > deploy/deploy.env
@@ -163,7 +152,7 @@ jobs:
         uses: 8G4B/GSM-SV-Deploy@v1.2.1
         with:
           host: ${{ secrets.DEPLOY_HOST }}
-          port: ${{ vars.DEPLOY_PORT || '22' }}
+          port: '22'
           user: ${{ secrets.DEPLOY_USER }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           source_path: deploy

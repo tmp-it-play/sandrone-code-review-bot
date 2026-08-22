@@ -60,7 +60,7 @@ docker compose up -d --build
 | `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY` | 최소 한 개 필요 |
 | `GHCR_CLEANUP_TOKEN` | `delete:packages` 권한 PAT — 배포 후 패키지 제거용 |
 
-모델과 포트는 레포지토리 variables(`GEMINI_MODEL`, `DEPLOY_HOST_PORT`, `SANDRONE_BASE_PATH` 등)로 바꿉니다.
+컨테이너 이름·포트·base path·도커 네트워크는 워크플로 상단 `env` 블록에, 모델과 프로바이더 순서는 `internal/bootstrap/config.go`의 기본값에 있습니다.
 
 ### 리버스 프록시
 
