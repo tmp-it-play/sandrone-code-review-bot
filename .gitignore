@@ -34,6 +34,5 @@ Thumbs.db
 .codex/command.log
 
 # Local deploy credentials
-.secret-password
 deploy/sandrone.env
 deploy/deploy.env
