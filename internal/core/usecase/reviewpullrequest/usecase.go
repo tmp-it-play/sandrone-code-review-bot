@@ -30,15 +30,6 @@ func New(deps Dependencies) *UseCase {
 
 func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 	startedAt := u.deps.Clock.Now()
-	config, err := u.deps.Settings.RepoConfig(ctx, task.Target)
-	if err != nil {
-		return u.fail(ctx, task, startedAt, "설정을 읽지 못했습니다", err)
-	}
-	if reason, skipped := skipReason(task, config); skipped {
-		u.save(ctx, task, startedAt, review.OutcomeSkipped, reason, llm.Response{}, 0, 0)
-		return nil
-	}
-
 	target := task.Target
 	request, err := u.deps.Source.PullRequest(ctx, target)
 	if err != nil {
@@ -46,6 +37,16 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 	}
 	if target.HeadSHA == "" {
 		target.HeadSHA = request.HeadSHA
+	}
+	target.BaseRef = request.BaseRef
+
+	config, err := u.deps.Settings.RepoConfig(ctx, target)
+	if err != nil {
+		return u.fail(ctx, task, startedAt, "설정을 읽지 못했습니다", err)
+	}
+	if reason, skipped := skipReason(task, config); skipped {
+		u.save(ctx, task, startedAt, review.OutcomeSkipped, reason, llm.Response{}, 0, 0)
+		return nil
 	}
 
 	files, incremental, err := u.collectFiles(ctx, target, request, task)

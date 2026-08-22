@@ -20,7 +20,17 @@ func New(deps Dependencies) *UseCase {
 }
 
 func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
-	config, err := u.deps.Settings.RepoConfig(ctx, task.Target)
+	target := task.Target
+	request, err := u.deps.Source.PullRequest(ctx, target)
+	if err != nil {
+		return u.fail(ctx, task, "Pull Request를 읽지 못했습니다", err)
+	}
+	if target.HeadSHA == "" {
+		target.HeadSHA = request.HeadSHA
+	}
+	target.BaseRef = request.BaseRef
+
+	config, err := u.deps.Settings.RepoConfig(ctx, target)
 	if err != nil {
 		return u.fail(ctx, task, "설정을 읽지 못했습니다", err)
 	}
@@ -30,15 +40,6 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 	conversation, err := u.deps.Threads.Thread(ctx, task.Target, task.CommentID)
 	if err != nil {
 		return u.fail(ctx, task, "리뷰 스레드를 읽지 못했습니다", err)
-	}
-
-	target := task.Target
-	request, err := u.deps.Source.PullRequest(ctx, target)
-	if err != nil {
-		return u.fail(ctx, task, "Pull Request를 읽지 못했습니다", err)
-	}
-	if target.HeadSHA == "" {
-		target.HeadSHA = request.HeadSHA
 	}
 
 	source, truncated := u.currentSource(ctx, task, conversation.Path, target.HeadSHA, config.MaxSourceChars)

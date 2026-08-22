@@ -38,7 +38,7 @@ func (c *InstructionCollector) Instructions(ctx context.Context, target pullrequ
 			collection.Omitted = append(collection.Omitted, path)
 			continue
 		}
-		body, err := c.content.File(ctx, target, path, "")
+		body, err := c.readFirst(ctx, target, path)
 		if err != nil {
 			continue
 		}
@@ -75,11 +75,7 @@ func (c *InstructionCollector) resolve(ctx context.Context, target pullrequest.T
 			continue
 		}
 		if !treeLoaded {
-			paths, err := c.content.Paths(ctx, target, "")
-			if err != nil {
-				c.logger.Warn("저장소 파일 목록을 읽지 못했습니다", "target", target.FullName(), "error", err)
-			}
-			tree = paths
+			tree = c.listFirst(ctx, target)
 			treeLoaded = true
 		}
 		matched := make([]string, 0, 8)
@@ -104,4 +100,27 @@ func fingerprint(body string) string {
 	normalized := strings.Join(strings.Fields(body), " ")
 	sum := sha256.Sum256([]byte(normalized))
 	return hex.EncodeToString(sum[:])
+}
+
+func (c *InstructionCollector) readFirst(ctx context.Context, target pullrequest.Target, path string) (string, error) {
+	var lastErr error
+	for _, ref := range target.ContentRefs() {
+		body, err := c.content.File(ctx, target, path, ref)
+		if err == nil {
+			return body, nil
+		}
+		lastErr = err
+	}
+	return "", lastErr
+}
+
+func (c *InstructionCollector) listFirst(ctx context.Context, target pullrequest.Target) []string {
+	for _, ref := range target.ContentRefs() {
+		paths, err := c.content.Paths(ctx, target, ref)
+		if err == nil {
+			return paths
+		}
+		c.logger.Warn("저장소 파일 목록을 읽지 못했습니다", "target", target.FullName(), "ref", refLabel(ref), "error", err)
+	}
+	return nil
 }

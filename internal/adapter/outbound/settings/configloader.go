@@ -29,17 +29,20 @@ func NewConfigLoader(content outbound.RepositoryContent, logger *slog.Logger) *C
 
 func (l *ConfigLoader) RepoConfig(ctx context.Context, target pullrequest.Target) (setting.RepoConfig, error) {
 	config := setting.DefaultRepoConfig()
-	for _, candidate := range configCandidates {
-		body, err := l.content.File(ctx, target, candidate, "")
-		if err != nil {
-			continue
+	for _, ref := range target.ContentRefs() {
+		for _, candidate := range configCandidates {
+			body, err := l.content.File(ctx, target, candidate, ref)
+			if err != nil {
+				continue
+			}
+			var raw rawConfig
+			if err := yaml.Unmarshal([]byte(body), &raw); err != nil {
+				l.logger.Warn("설정 파일을 해석하지 못했습니다", "target", target.FullName(), "path", candidate, "error", err)
+				return config, nil
+			}
+			l.logger.Info("저장소 설정을 읽었습니다", "target", target.FullName(), "path", candidate, "ref", refLabel(ref))
+			return merge(config, raw), nil
 		}
-		var raw rawConfig
-		if err := yaml.Unmarshal([]byte(body), &raw); err != nil {
-			l.logger.Warn("설정 파일을 해석하지 못했습니다", "target", target.FullName(), "path", candidate, "error", err)
-			return config, nil
-		}
-		return merge(config, raw), nil
 	}
 	return config, nil
 }
@@ -131,4 +134,11 @@ func mergeSandrone(current setting.SandroneSetting, raw rawSandrone) setting.San
 		current.InstructionFiles = raw.InstructionFiles
 	}
 	return current
+}
+
+func refLabel(ref string) string {
+	if ref == "" {
+		return "default"
+	}
+	return ref
 }

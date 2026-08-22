@@ -9,6 +9,7 @@ type Target struct {
 	Number         int
 	HeadSHA        string
 	BaseSHA        string
+	BaseRef        string
 }
 
 func (t Target) FullName() string {
@@ -21,4 +22,26 @@ func (t Target) Reference() string {
 
 func (t Target) IsComplete() bool {
 	return t.Owner != "" && t.Repository != "" && t.Number > 0
+}
+
+func (t Target) ContentRefs() []string {
+	refs := make([]string, 0, 3)
+	for _, candidate := range []string{t.HeadSHA, t.BaseRef} {
+		if candidate == "" {
+			continue
+		}
+		if !containsRef(refs, candidate) {
+			refs = append(refs, candidate)
+		}
+	}
+	return append(refs, "")
+}
+
+func containsRef(refs []string, candidate string) bool {
+	for _, ref := range refs {
+		if ref == candidate {
+			return true
+		}
+	}
+	return false
 }

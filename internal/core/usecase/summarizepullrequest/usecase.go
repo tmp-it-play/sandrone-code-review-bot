@@ -25,10 +25,6 @@ func New(deps Dependencies) *UseCase {
 
 func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 	startedAt := u.deps.Clock.Now()
-	config, err := u.deps.Settings.RepoConfig(ctx, task.Target)
-	if err != nil {
-		return u.fail(ctx, task, startedAt, "설정을 읽지 못했습니다", err)
-	}
 	target := task.Target
 	request, err := u.deps.Source.PullRequest(ctx, target)
 	if err != nil {
@@ -36,6 +32,12 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 	}
 	if target.HeadSHA == "" {
 		target.HeadSHA = request.HeadSHA
+	}
+	target.BaseRef = request.BaseRef
+
+	config, err := u.deps.Settings.RepoConfig(ctx, target)
+	if err != nil {
+		return u.fail(ctx, task, startedAt, "설정을 읽지 못했습니다", err)
 	}
 	files, err := u.deps.Source.ChangedFiles(ctx, target)
 	if err != nil {
