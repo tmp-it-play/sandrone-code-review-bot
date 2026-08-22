@@ -103,6 +103,7 @@ jobs:
           DASHBOARD_SESSION_SECRET: ${{ secrets.DASHBOARD_SESSION_SECRET }}
           METRICS_TOKEN: ${{ secrets.SANDRONE_METRICS_TOKEN }}
           PROVIDER_ORDER: ${{ vars.SANDRONE_PROVIDER_ORDER }}
+          BASE_PATH: ${{ vars.SANDRONE_BASE_PATH }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           GROQ_MODEL: ${{ vars.GROQ_MODEL }}
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
@@ -122,6 +123,7 @@ jobs:
           write SANDRONE_HTTP_ADDR ":8080"
           write SANDRONE_BOT_NAME "sandrone-review-bot"
           write SANDRONE_LOG_LEVEL "info"
+          write SANDRONE_BASE_PATH "${BASE_PATH:-}"
           write GITHUB_APP_ID "$APP_ID"
           write GITHUB_WEBHOOK_SECRET "$WEBHOOK_SECRET"
           write MYSQL_DSN "$MYSQL_DSN"

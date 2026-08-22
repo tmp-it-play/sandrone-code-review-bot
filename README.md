@@ -33,6 +33,8 @@ docker compose up -d --build
 - 지표: `GET /metrics`
 - 관리 콘솔: `GET /dashboard`
 
+리버스 프록시 뒤 하위 경로에 붙일 때는 `SANDRONE_BASE_PATH=/sandrone`처럼 지정합니다. 모든 경로와 화면 링크가 그 아래로 이동합니다.
+
 ## 배포
 
 `main`에 푸시하면 GitHub Actions가 `linux/arm64` 이미지를 빌드해 `ghcr.io`에 올리고, SSH로 서버에 배포한 뒤 ghcr 패키지를 지웁니다. 서버에는 실행 중인 컨테이너와 이미지만 남고 배포 스크립트는 스스로 정리합니다.
@@ -58,7 +60,17 @@ docker compose up -d --build
 | `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY` | 최소 한 개 필요 |
 | `GHCR_CLEANUP_TOKEN` | `delete:packages` 권한 PAT — 배포 후 패키지 제거용 |
 
-모델과 포트는 레포지토리 variables(`GEMINI_MODEL`, `DEPLOY_HOST_PORT` 등)로 바꿉니다.
+모델과 포트는 레포지토리 variables(`GEMINI_MODEL`, `DEPLOY_HOST_PORT`, `SANDRONE_BASE_PATH` 등)로 바꿉니다.
+
+### 리버스 프록시
+
+서버 nginx는 `kimtaeeun.site`의 `/sandrone/`을 컨테이너(`127.0.0.1:10105`)로 그대로 넘깁니다. 앱이 `SANDRONE_BASE_PATH` 아래에서 서비스하므로 프록시는 경로를 자르지 않습니다.
+
+| 경로 | 용도 |
+|---|---|
+| `https://kimtaeeun.site/sandrone/webhook` | GitHub App 웹훅 URL |
+| `https://kimtaeeun.site/sandrone/dashboard` | 관리 콘솔 |
+| `https://kimtaeeun.site/sandrone/healthz` | 상태 확인 |
 
 ## 저장소별 설정
 
