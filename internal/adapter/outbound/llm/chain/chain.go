@@ -85,6 +85,7 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 	if executor != nil && candidate.Capability().ToolCalling {
 		tools = executor.Definitions()
 	}
+	accumulated := llm.Usage{}
 	for round := 0; round < c.maxToolRounds; round++ {
 		attempt := request
 		attempt.Messages = messages
@@ -93,7 +94,9 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 		if err != nil {
 			return llm.Response{}, err
 		}
+		accumulated = accumulated.Add(response.Usage)
 		if len(tools) == 0 || !response.NeedsToolExecution() {
+			response.Usage = accumulated
 			return response, nil
 		}
 		messages = append(messages, llm.Message{
@@ -116,7 +119,12 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 	final := request
 	final.Messages = messages
 	final.Tools = nil
-	return candidate.Complete(ctx, final)
+	response, err := candidate.Complete(ctx, final)
+	if err != nil {
+		return llm.Response{}, err
+	}
+	response.Usage = accumulated.Add(response.Usage)
+	return response, nil
 }
 
 func (c *Chain) observe(ctx context.Context, candidate outbound.Provider, outcome string, status int) {

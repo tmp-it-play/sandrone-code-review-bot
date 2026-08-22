@@ -108,6 +108,11 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 		Provider:     c.name,
 		Model:        c.model,
 		FinishReason: choice.FinishReason,
+		Usage: llm.Usage{
+			PromptTokens:     decoded.Usage.PromptTokens,
+			CompletionTokens: decoded.Usage.CompletionTokens,
+			TotalTokens:      decoded.Usage.TotalTokens,
+		},
 	}, nil
 }
 

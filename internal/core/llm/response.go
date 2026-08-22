@@ -6,6 +6,7 @@ type Response struct {
 	Provider     string
 	Model        string
 	FinishReason string
+	Usage        Usage
 }
 
 func (r Response) NeedsToolExecution() bool {
