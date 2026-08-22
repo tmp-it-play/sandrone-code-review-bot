@@ -1,0 +1,13 @@
+.git
+.github
+.idea
+.claude
+.codex
+.agents
+.harness
+*.md
+*.xml
+Dockerfile
+docker-compose.yml
+.env
+.env.*

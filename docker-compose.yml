@@ -1,0 +1,20 @@
+services:
+  sandrone:
+    build: .
+    image: sandrone-code-review-bot:latest
+    container_name: sandrone
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8080:8080"
+    networks:
+      - sandrone
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  sandrone:
+    external: true
