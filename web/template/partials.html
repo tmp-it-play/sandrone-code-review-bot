@@ -1,0 +1,53 @@
+{{define "head"}}
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · sandrone</title>
+<link rel="stylesheet" href="/dashboard/static/style.css">
+</head>
+<body>
+{{end}}
+
+{{define "nav"}}
+<header class="topbar">
+  <a class="brand" href="/dashboard">sandrone</a>
+  <nav>
+    <a href="/dashboard" class="{{if eq .Active "overview"}}active{{end}}">개요</a>
+    <a href="/dashboard/reviews" class="{{if eq .Active "reviews"}}active{{end}}">리뷰 이력</a>
+    <a href="/dashboard/providers" class="{{if eq .Active "providers"}}active{{end}}">프로바이더</a>
+    <a href="/dashboard/queue" class="{{if eq .Active "queue"}}active{{end}}">큐</a>
+  </nav>
+  <form method="post" action="/dashboard/logout"><button type="submit">로그아웃</button></form>
+</header>
+{{end}}
+
+{{define "foot"}}
+</body>
+</html>
+{{end}}
+
+{{define "reviewtable"}}
+<table>
+  <thead><tr><th>저장소</th><th>PR</th><th>트리거</th><th>결과</th><th>프로바이더</th><th>인라인</th><th>폴백</th><th>소요</th><th>시각</th><th></th></tr></thead>
+  <tbody>
+  {{range .}}
+    <tr>
+      <td>{{.Repository}}</td>
+      <td>#{{.Number}}</td>
+      <td>{{.Trigger}}</td>
+      <td><span class="badge {{.Outcome}}">{{.Outcome}}</span></td>
+      <td>{{if .Provider}}{{.Provider}}{{else}}-{{end}}</td>
+      <td>{{.Inline}}</td>
+      <td>{{.Fallback}}</td>
+      <td>{{.Duration}}</td>
+      <td>{{.StartedAt}}</td>
+      <td><a href="/dashboard/reviews/{{.ID}}">상세</a></td>
+    </tr>
+  {{else}}
+    <tr><td colspan="10" class="empty">아직 기록이 없다.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}

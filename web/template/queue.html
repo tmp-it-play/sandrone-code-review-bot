@@ -1,0 +1,17 @@
+{{template "head" .}}
+{{template "nav" .}}
+<main>
+  <h1>큐</h1>
+  {{if .Queue.Available}}
+  <section class="cards">
+    <div class="card"><span class="label">대기</span><strong>{{.Queue.Pending}}</strong></div>
+    <div class="card"><span class="label">실행 중</span><strong>{{.Queue.Active}}</strong></div>
+    <div class="card"><span class="label">재시도 대기</span><strong>{{.Queue.Retry}}</strong></div>
+    <div class="card"><span class="label">보관</span><strong>{{.Queue.Archived}}</strong></div>
+    <div class="card"><span class="label">완료</span><strong>{{.Queue.Completed}}</strong></div>
+  </section>
+  {{else}}
+  <p class="empty">큐 상태를 읽을 수 없다.</p>
+  {{end}}
+</main>
+{{template "foot" .}}

@@ -1,0 +1,12 @@
+{{template "head" .}}
+<main class="login">
+  <h1>sandrone</h1>
+  <p class="sub">코드 리뷰 봇 관리 콘솔</p>
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  <form method="post" action="/dashboard/login">
+    <label>아이디<input type="text" name="username" autocomplete="username" required></label>
+    <label>비밀번호<input type="password" name="password" autocomplete="current-password" required></label>
+    <button type="submit">로그인</button>
+  </form>
+</main>
+{{template "foot" .}}

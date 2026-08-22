@@ -1,0 +1,35 @@
+{{template "head" .}}
+{{template "nav" .}}
+<main>
+  <h1>{{.Review.Repository}} #{{.Review.Number}}</h1>
+  <dl class="meta">
+    <div><dt>트리거</dt><dd>{{.Review.Trigger}}</dd></div>
+    <div><dt>결과</dt><dd><span class="badge {{.Review.Outcome}}">{{.Review.Outcome}}</span></dd></div>
+    <div><dt>프로바이더</dt><dd>{{if .Review.Provider}}{{.Review.Provider}} · {{.Review.Model}}{{else}}-{{end}}</dd></div>
+    <div><dt>인라인 / 폴백</dt><dd>{{.Review.Inline}} / {{.Review.Fallback}}</dd></div>
+    <div><dt>소요</dt><dd>{{.Review.Duration}}</dd></div>
+    <div><dt>시각</dt><dd>{{.Review.StartedAt}}</dd></div>
+  </dl>
+  {{if .Review.Detail}}<p class="error">{{.Review.Detail}}</p>{{end}}
+
+  <form method="post" action="/dashboard/reviews/{{.Review.ID}}/rerun">
+    <button type="submit">이 PR 다시 리뷰</button>
+  </form>
+
+  <h2>지적 {{len .Findings}}건</h2>
+  <table>
+    <thead><tr><th>파일</th><th>줄</th><th>심각도</th><th>제목</th><th>게시</th></tr></thead>
+    <tbody>
+    {{range .Findings}}
+      <tr>
+        <td><code>{{.Path}}</code></td><td>{{.Line}}</td>
+        <td><span class="badge {{.Severity}}">{{.Severity}}</span></td>
+        <td>{{.Title}}</td><td>{{.Placement}}</td>
+      </tr>
+    {{else}}
+      <tr><td colspan="5" class="empty">지적이 없다.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</main>
+{{template "foot" .}}

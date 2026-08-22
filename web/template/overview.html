@@ -1,0 +1,56 @@
+{{template "head" .}}
+{{template "nav" .}}
+<main>
+  <section class="cards">
+    <div class="card"><span class="label">설치된 저장소</span><strong>{{len .Repositories}}</strong></div>
+    <div class="card"><span class="label">대기 중 작업</span><strong>{{.Queue.Pending}}</strong></div>
+    <div class="card"><span class="label">실행 중 작업</span><strong>{{.Queue.Active}}</strong></div>
+    <div class="card"><span class="label">재시도 대기</span><strong>{{.Queue.Retry}}</strong></div>
+  </section>
+
+  <h2>최근 리뷰</h2>
+  {{template "reviewtable" .Reviews}}
+
+  <h2>프로바이더</h2>
+  <table>
+    <thead><tr><th>순위</th><th>이름</th><th>성공</th><th>실패</th><th>한도 차단</th><th>최근 사용</th><th>쿨다운</th></tr></thead>
+    <tbody>
+    {{range .Providers}}
+      <tr>
+        <td>{{.Order}}</td><td>{{.Name}}</td><td>{{.Succeeded}}</td><td>{{.Failed}}</td><td>{{.QuotaBlocked}}</td>
+        <td>{{if .LastUsedAt}}{{.LastUsedAt}}{{else}}-{{end}}</td>
+        <td>{{if .CooldownEnds}}<span class="badge failed">{{.CooldownEnds}}까지</span>{{else}}-{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+
+  <h2>최근 명령</h2>
+  <table>
+    <thead><tr><th>저장소</th><th>PR</th><th>호출자</th><th>명령</th><th>허용</th><th>시각</th></tr></thead>
+    <tbody>
+    {{range .Commands}}
+      <tr>
+        <td>{{.Repository}}</td><td>#{{.Number}}</td><td>{{.Invoker}}</td><td>{{.Kind}}</td>
+        <td>{{if .Allowed}}<span class="badge succeeded">허용</span>{{else}}<span class="badge failed">거절</span>{{end}}</td>
+        <td>{{.OccurredAt}}</td>
+      </tr>
+    {{else}}
+      <tr><td colspan="6" class="empty">아직 기록이 없다.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+
+  <h2>설치된 저장소</h2>
+  <table>
+    <thead><tr><th>저장소</th><th>설치 ID</th><th>공개 범위</th></tr></thead>
+    <tbody>
+    {{range .Repositories}}
+      <tr><td>{{.FullName}}</td><td>{{.InstallationID}}</td><td>{{if .Private}}private{{else}}public{{end}}</td></tr>
+    {{else}}
+      <tr><td colspan="3" class="empty">설치된 저장소가 없다.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</main>
+{{template "foot" .}}
