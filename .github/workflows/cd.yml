@@ -16,6 +16,8 @@ env:
   DOCKER_NETWORK: readygsm-net
   HOST_PORT: "10105"
   BASE_PATH: /sandrone
+  REDIS_ADDR: redis:6379
+  DASHBOARD_USERNAME: admin
 
 jobs:
   deploy:
@@ -96,13 +98,11 @@ jobs:
           APP_PRIVATE_KEY: ${{ secrets.SANDRONE_APP_PRIVATE_KEY }}
           WEBHOOK_SECRET: ${{ secrets.SANDRONE_WEBHOOK_SECRET }}
           MYSQL_DSN: ${{ secrets.SANDRONE_MYSQL_DSN }}
-          REDIS_ADDR: ${{ secrets.SANDRONE_REDIS_ADDR }}
           REDIS_PASSWORD: ${{ secrets.SANDRONE_REDIS_PASSWORD }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-          DASHBOARD_USERNAME: ${{ secrets.DASHBOARD_USERNAME }}
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
           DASHBOARD_SESSION_SECRET: ${{ secrets.DASHBOARD_SESSION_SECRET }}
           METRICS_TOKEN: ${{ secrets.SANDRONE_METRICS_TOKEN }}

@@ -47,7 +47,7 @@ func NewApplication(config Config) (*Application, error) {
 	metrics := observability.NewMetrics()
 	clock := system.NewClock()
 	masker := masking.NewSecretMasker()
-	name := botName()
+	name := botName
 
 	database, err := mysql.NewConnection(config.MySQLDSN)
 	if err != nil {
