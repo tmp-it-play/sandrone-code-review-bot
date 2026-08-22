@@ -15,16 +15,16 @@ env:
 
 jobs:
   deploy:
-    name: 이미지 배포
+    name: Build and deploy
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - name: 소스 체크아웃
+      - name: Checkout
         uses: actions/checkout@v5
 
-      - name: 필수 시크릿 확인
+      - name: Check required secrets
         id: preflight
         env:
           APP_ID: ${{ secrets.SANDRONE_APP_ID }}
@@ -46,26 +46,26 @@ jobs:
             fi
           done
           if [ -z "${GEMINI_API_KEY:-}${GROQ_API_KEY:-}${OPENROUTER_API_KEY:-}${NVIDIA_API_KEY:-}" ]; then
-            missing="$missing (LLM_API_KEY_중_최소_1개)"
+            missing="$missing (at-least-one-LLM-API-key)"
           fi
           if [ -n "$missing" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::시크릿이 없어 배포를 건너뛴다 —$missing"
+            echo "::warning::Skipping deploy, missing secrets:$missing"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: QEMU 준비
+      - name: Set up QEMU
         if: steps.preflight.outputs.ready == 'true'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
 
-      - name: Buildx 준비
+      - name: Set up Buildx
         if: steps.preflight.outputs.ready == 'true'
         uses: docker/setup-buildx-action@v3
 
-      - name: ghcr.io 로그인
+      - name: Log in to ghcr.io
         if: steps.preflight.outputs.ready == 'true'
         uses: docker/login-action@v3
         with:
@@ -73,7 +73,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 이미지 빌드와 푸시
+      - name: Build and push image
         if: steps.preflight.outputs.ready == 'true'
         uses: docker/build-push-action@v6
         with:
@@ -85,7 +85,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: 배포 환경 파일 생성
+      - name: Generate deploy env files
         if: steps.preflight.outputs.ready == 'true'
         env:
           APP_ID: ${{ secrets.SANDRONE_APP_ID }}
@@ -156,9 +156,9 @@ jobs:
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } > deploy/deploy.env
 
-          echo "환경 파일 $(wc -l < deploy/sandrone.env)줄을 만들었다"
+          echo "Wrote $(wc -l < deploy/sandrone.env) lines to deploy/sandrone.env"
 
-      - name: 서버로 배포
+      - name: Deploy to server
         if: steps.preflight.outputs.ready == 'true'
         uses: 8G4B/GSM-SV-Deploy@v1.2.1
         with:
@@ -170,11 +170,11 @@ jobs:
           target_path: /tmp/sandrone-deploy
           deployspec_path: deploy/deployspec.yml
 
-      - name: 로컬 환경 파일 삭제
+      - name: Remove local env files
         if: always()
         run: rm -f deploy/sandrone.env deploy/deploy.env
 
-      - name: ghcr 패키지 제거
+      - name: Delete ghcr package
         if: always() && steps.preflight.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ secrets.GHCR_CLEANUP_TOKEN }}
@@ -182,11 +182,11 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning::GHCR_CLEANUP_TOKEN이 없어 ghcr 패키지를 남겨둔다"
+            echo "::warning::GHCR_CLEANUP_TOKEN is not set, leaving the ghcr package in place"
             exit 0
           fi
           if gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}" --silent; then
-            echo "ghcr 패키지를 제거했다"
+            echo "Deleted the ghcr package"
           else
-            echo "::warning::ghcr 패키지를 제거하지 못했다"
+            echo "::warning::Failed to delete the ghcr package"
           fi

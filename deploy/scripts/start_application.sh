@@ -3,7 +3,7 @@
 
 if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
   docker rm -f "$CONTAINER_NAME" >/dev/null
-  echo "이전 컨테이너를 제거했다"
+  echo "Removed the previous container"
 fi
 
 docker run -d \
@@ -15,4 +15,4 @@ docker run -d \
   --label "org.opencontainers.image.revision=$REVISION" \
   "$IMAGE" >/dev/null
 
-echo "컨테이너를 시작했다: $CONTAINER_NAME (포트 $HOST_PORT)"
+echo "Started container $CONTAINER_NAME on port $HOST_PORT"
