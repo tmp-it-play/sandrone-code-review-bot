@@ -22,21 +22,21 @@ func New(deps Dependencies) *UseCase {
 func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 	config, err := u.deps.Settings.RepoConfig(ctx, task.Target)
 	if err != nil {
-		return u.fail(ctx, task, "설정을 읽지 못했다", err)
+		return u.fail(ctx, task, "설정을 읽지 못했습니다", err)
 	}
 	if !config.ThreadReply {
 		return nil
 	}
 	conversation, err := u.deps.Threads.Thread(ctx, task.Target, task.CommentID)
 	if err != nil {
-		return u.fail(ctx, task, "리뷰 스레드를 읽지 못했다", err)
+		return u.fail(ctx, task, "리뷰 스레드를 읽지 못했습니다", err)
 	}
 
 	target := task.Target
 	if target.HeadSHA == "" {
 		request, requestErr := u.deps.Source.PullRequest(ctx, target)
 		if requestErr != nil {
-			return u.fail(ctx, task, "Pull Request를 읽지 못했다", requestErr)
+			return u.fail(ctx, task, "Pull Request를 읽지 못했습니다", requestErr)
 		}
 		target.HeadSHA = request.HeadSHA
 	}
@@ -57,14 +57,20 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 		Providers:       config.Sandrone.Providers,
 	}, nil)
 	if err != nil {
-		return u.fail(ctx, task, "답글 모델을 호출하지 못했다", err)
+		return u.fail(ctx, task, "답글 모델을 호출하지 못했습니다", err)
 	}
 	body := strings.TrimSpace(response.Content)
 	if body == "" {
-		return u.fail(ctx, task, "모델이 답글을 만들지 못했다", fmt.Errorf("빈 응답"))
+		return u.fail(ctx, task, "모델이 답글을 만들지 못했습니다", fmt.Errorf("빈 응답"))
 	}
-	if err := u.deps.Threads.Reply(ctx, task.Target, task.CommentID, u.deps.Renderer.ReplyBody(body)); err != nil {
-		return u.fail(ctx, task, "답글을 남기지 못했다", err)
+	if err := u.deps.Threads.Reply(ctx, task.Target, task.CommentID, u.deps.Renderer.ReplyBody(body, review.Attribution{
+		Provider:         response.Provider,
+		Model:            response.Model,
+		PromptTokens:     response.Usage.PromptTokens,
+		CompletionTokens: response.Usage.CompletionTokens,
+		TotalTokens:      response.Usage.TotalTokens,
+	})); err != nil {
+		return u.fail(ctx, task, "답글을 남기지 못했습니다", err)
 	}
 	return nil
 }
@@ -75,7 +81,7 @@ func (u *UseCase) currentSource(ctx context.Context, task job.ReplyJob, path str
 	}
 	content, err := u.deps.Source.FileContent(ctx, task.Target, path, ref)
 	if err != nil {
-		u.deps.Logger.Warn("최신 파일 내용을 읽지 못했다", "target", task.Target.Reference(), "path", path, "error", err)
+		u.deps.Logger.Warn("최신 파일 내용을 읽지 못했습니다", "target", task.Target.Reference(), "path", path, "error", err)
 		return "", false
 	}
 	content = u.deps.Masker.Mask(content)
@@ -90,7 +96,7 @@ func (u *UseCase) fail(ctx context.Context, task job.ReplyJob, message string, c
 	if task.FinalAttempt {
 		notice := u.deps.Renderer.NoticeBody(review.Notice{Kind: review.NoticeFailed, Message: message})
 		if err := u.deps.Threads.Reply(ctx, task.Target, task.CommentID, notice); err != nil {
-			u.deps.Logger.Warn("실패 안내를 남기지 못했다", "target", task.Target.Reference(), "error", err)
+			u.deps.Logger.Warn("실패 안내를 남기지 못했습니다", "target", task.Target.Reference(), "error", err)
 		}
 	}
 	return fmt.Errorf("%s: %w", message, cause)

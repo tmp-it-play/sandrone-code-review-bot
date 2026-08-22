@@ -44,7 +44,7 @@ func (u *UseCase) allowed(ctx context.Context, request Request) (bool, error) {
 	}
 	permission, err := u.deps.Permissions.Permission(ctx, request.Target, request.Command.Invoker)
 	if err != nil {
-		return false, fmt.Errorf("권한을 확인하지 못했다: %w", err)
+		return false, fmt.Errorf("권한을 확인하지 못했습니다: %w", err)
 	}
 	return permission.CanInvoke(), nil
 }
@@ -84,14 +84,14 @@ func (u *UseCase) acknowledge(ctx context.Context, request Request) {
 		return
 	}
 	if err := u.deps.Reactions.AddReaction(ctx, request.Target, request.Command.CommentID, request.Command.InThread, "eyes"); err != nil {
-		u.deps.Logger.Warn("리액션을 남기지 못했다", "target", request.Target.Reference(), "error", err)
+		u.deps.Logger.Warn("리액션을 남기지 못했습니다", "target", request.Target.Reference(), "error", err)
 	}
 }
 
 func (u *UseCase) reject(ctx context.Context, request Request) {
 	notice := review.Notice{
 		Kind:    review.NoticeRejected,
-		Message: fmt.Sprintf("@%s 님은 이 저장소에 대한 쓰기 권한이 없어 명령을 실행할 수 없다.", request.Command.Invoker),
+		Message: fmt.Sprintf("@%s 님은 이 저장소에 대한 쓰기 권한이 없어 명령을 실행할 수 없습니다.", request.Command.Invoker),
 	}
 	body := u.deps.Renderer.NoticeBody(notice)
 	var err error
@@ -101,7 +101,7 @@ func (u *UseCase) reject(ctx context.Context, request Request) {
 		_, err = u.deps.Publisher.CreateComment(ctx, request.Target, body)
 	}
 	if err != nil {
-		u.deps.Logger.Warn("거절 안내를 남기지 못했다", "target", request.Target.Reference(), "error", err)
+		u.deps.Logger.Warn("거절 안내를 남기지 못했습니다", "target", request.Target.Reference(), "error", err)
 	}
 }
 
@@ -117,6 +117,6 @@ func (u *UseCase) record(ctx context.Context, request Request, allowed bool, det
 		OccurredAt: u.deps.Clock.Now(),
 	}
 	if err := u.deps.Commands.Record(ctx, invocation); err != nil {
-		u.deps.Logger.Warn("명령 기록을 저장하지 못했다", "target", request.Target.Reference(), "error", err)
+		u.deps.Logger.Warn("명령 기록을 저장하지 못했습니다", "target", request.Target.Reference(), "error", err)
 	}
 }

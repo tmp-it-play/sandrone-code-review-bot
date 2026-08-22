@@ -26,7 +26,7 @@ func (r Renderer) closingMarker() string {
 func (r Renderer) SummaryBody(view review.SummaryView) string {
 	var builder strings.Builder
 	builder.WriteString(r.Marker())
-	builder.WriteString("\n## 🔍 sandrone 리뷰 요약\n\n")
+	builder.WriteString("\n## 리뷰 요약\n\n")
 	if overview := strings.TrimSpace(view.Summary.Overview); overview != "" {
 		builder.WriteString(overview)
 		builder.WriteString("\n\n")
@@ -52,7 +52,11 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 	return builder.String()
 }
 
-func (r Renderer) InlineBody(finding review.Finding) string {
+func (r Renderer) InlineReviewBody(attribution review.Attribution) string {
+	return attributionLine(r.botName, review.Attribution{Model: attribution.Model})
+}
+
+func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribution) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("**%s**", finding.Severity.Label()))
 	if title := strings.TrimSpace(finding.Title); title != "" {
@@ -66,25 +70,17 @@ func (r Renderer) InlineBody(finding review.Finding) string {
 		builder.WriteString(suggestion)
 		builder.WriteString("\n```")
 	}
-	builder.WriteString("\n\n<sub>")
-	builder.WriteString(r.botName)
-	builder.WriteString("</sub>")
+	builder.WriteString("\n\n")
+	builder.WriteString(attributionLine(r.botName, review.Attribution{Model: attribution.Model}))
 	return builder.String()
 }
 
 func (r Renderer) NoticeBody(notice review.Notice) string {
-	icon := "ℹ️"
-	switch notice.Kind {
-	case review.NoticeRejected:
-		icon = "🚫"
-	case review.NoticeFailed, review.NoticeUnavailable:
-		icon = "⚠️"
-	}
-	return fmt.Sprintf("%s %s\n\n<sub>%s</sub>", icon, strings.TrimSpace(notice.Message), r.botName)
+	return fmt.Sprintf("%s\n\n<sub>%s</sub>", strings.TrimSpace(notice.Message), r.botName)
 }
 
-func (r Renderer) ReplyBody(text string) string {
-	return fmt.Sprintf("%s\n\n<sub>%s</sub>", strings.TrimSpace(text), r.botName)
+func (r Renderer) ReplyBody(text string, attribution review.Attribution) string {
+	return fmt.Sprintf("%s\n\n%s", strings.TrimSpace(text), attributionLine(r.botName, attribution))
 }
 
 func (r Renderer) statusLine(view review.SummaryView) string {
@@ -131,17 +127,10 @@ func (r Renderer) fallbackSection(findings []review.Finding) string {
 }
 
 func (r Renderer) footer(view review.SummaryView) string {
-	parts := []string{r.botName}
-	if view.Provider != "" {
-		parts = append(parts, view.Provider)
-	}
-	if view.Model != "" {
-		parts = append(parts, view.Model)
-	}
 	if view.Incremental {
-		parts = append(parts, "직전 리뷰 이후 변경분")
+		return attributionLine(r.botName, view.Attribution, "직전 리뷰 이후 변경분")
 	}
-	return fmt.Sprintf("<sub>%s</sub>", strings.Join(parts, " · "))
+	return attributionLine(r.botName, view.Attribution)
 }
 
 func escapeCell(text string) string {

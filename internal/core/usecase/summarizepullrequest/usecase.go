@@ -27,19 +27,19 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 	startedAt := u.deps.Clock.Now()
 	config, err := u.deps.Settings.RepoConfig(ctx, task.Target)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "설정을 읽지 못했다", err)
+		return u.fail(ctx, task, startedAt, "설정을 읽지 못했습니다", err)
 	}
 	target := task.Target
 	request, err := u.deps.Source.PullRequest(ctx, target)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "Pull Request를 읽지 못했다", err)
+		return u.fail(ctx, task, startedAt, "Pull Request를 읽지 못했습니다", err)
 	}
 	if target.HeadSHA == "" {
 		target.HeadSHA = request.HeadSHA
 	}
 	files, err := u.deps.Source.ChangedFiles(ctx, target)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "변경 파일을 읽지 못했다", err)
+		return u.fail(ctx, task, startedAt, "변경 파일을 읽지 못했습니다", err)
 	}
 	selected := selection.FileSelector{
 		Include:  config.Include,
@@ -47,7 +47,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		MaxFiles: config.MaxFiles,
 	}.Select(files)
 	if len(selected) == 0 {
-		u.notify(ctx, target, review.Notice{Kind: review.NoticeSkipped, Message: "요약할 변경이 없다."})
+		u.notify(ctx, target, review.Notice{Kind: review.NoticeSkipped, Message: "요약할 변경 사항이 없습니다."})
 		u.save(ctx, task, startedAt, review.OutcomeSkipped, "요약 대상 파일 없음", llm.Response{})
 		return nil
 	}
@@ -55,7 +55,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 
 	instructions, err := u.deps.Settings.Instructions(ctx, target, config)
 	if err != nil {
-		u.deps.Logger.Warn("지침 문서를 읽지 못했다", "target", target.Reference(), "error", err)
+		u.deps.Logger.Warn("지침 문서를 읽지 못했습니다", "target", target.Reference(), "error", err)
 	}
 
 	messages := prompt.SummaryPrompt{
@@ -76,24 +76,29 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		ForceJSON:       true,
 	}, nil)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "요약 모델을 호출하지 못했다", err)
+		return u.fail(ctx, task, startedAt, "요약 모델을 호출하지 못했습니다", err)
 	}
 	result, err := u.deps.Parser.Parse(response.Content)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "모델 응답을 해석하지 못했다", err)
+		return u.fail(ctx, task, startedAt, "모델 응답을 해석하지 못했습니다", err)
 	}
 	if result.Summary.IsEmpty() {
-		return u.fail(ctx, task, startedAt, "모델이 요약을 만들지 못했다", fmt.Errorf("빈 요약"))
+		return u.fail(ctx, task, startedAt, "모델이 요약을 만들지 못했습니다", fmt.Errorf("빈 요약"))
 	}
 
 	body := u.deps.Renderer.SummaryBody(review.SummaryView{
-		Summary:  result.Summary,
-		Provider: response.Provider,
-		Model:    response.Model,
-		Trigger:  task.Trigger,
+		Summary: result.Summary,
+		Attribution: review.Attribution{
+			Provider:         response.Provider,
+			Model:            response.Model,
+			PromptTokens:     response.Usage.PromptTokens,
+			CompletionTokens: response.Usage.CompletionTokens,
+			TotalTokens:      response.Usage.TotalTokens,
+		},
+		Trigger: task.Trigger,
 	})
 	if err := u.place(ctx, target, config.Sandrone.SummaryPlacement, body); err != nil {
-		return u.fail(ctx, task, startedAt, "요약을 게시하지 못했다", err)
+		return u.fail(ctx, task, startedAt, "요약을 게시하지 못했습니다", err)
 	}
 	u.save(ctx, task, startedAt, review.OutcomeSucceeded, "", response)
 	return nil
@@ -131,7 +136,7 @@ func (u *UseCase) trim(files []pullrequest.ChangedFile, config setting.RepoConfi
 
 func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, notice review.Notice) {
 	if _, err := u.deps.Publisher.CreateComment(ctx, target, u.deps.Renderer.NoticeBody(notice)); err != nil {
-		u.deps.Logger.Warn("안내 코멘트를 남기지 못했다", "target", target.Reference(), "error", err)
+		u.deps.Logger.Warn("안내 코멘트를 남기지 못했습니다", "target", target.Reference(), "error", err)
 	}
 }
 
@@ -159,6 +164,6 @@ func (u *UseCase) save(ctx context.Context, task job.SummaryJob, startedAt time.
 		FinishedAt: u.deps.Clock.Now(),
 	}
 	if _, err := u.deps.Reviews.Save(ctx, record); err != nil {
-		u.deps.Logger.Warn("요약 기록을 저장하지 못했다", "target", task.Target.Reference(), "error", err)
+		u.deps.Logger.Warn("요약 기록을 저장하지 못했습니다", "target", task.Target.Reference(), "error", err)
 	}
 }

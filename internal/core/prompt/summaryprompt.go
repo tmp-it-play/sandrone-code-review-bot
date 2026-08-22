@@ -27,6 +27,7 @@ func (p SummaryPrompt) system() string {
 	builder.WriteString("- diff에서 확인되지 않는 의도를 지어내지 않는다.\n")
 	builder.WriteString("- 문제 지적은 하지 않는다. 요약만 한다.\n")
 	builder.WriteString(fmt.Sprintf("- 모든 서술은 %s로 작성한다.\n\n", languageName(p.Context.Config.Language)))
+	builder.WriteString(toneGuide)
 	builder.WriteString(summarySchema)
 	return builder.String()
 }

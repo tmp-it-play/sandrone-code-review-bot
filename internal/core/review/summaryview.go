@@ -4,8 +4,7 @@ type SummaryView struct {
 	Summary     Summary
 	Fallback    []Finding
 	InlineCount int
-	Provider    string
-	Model       string
+	Attribution Attribution
 	Trigger     Trigger
 	Incremental bool
 	SkippedDup  int

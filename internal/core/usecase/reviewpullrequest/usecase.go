@@ -30,7 +30,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 	startedAt := u.deps.Clock.Now()
 	config, err := u.deps.Settings.RepoConfig(ctx, task.Target)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "설정을 읽지 못했다", err)
+		return u.fail(ctx, task, startedAt, "설정을 읽지 못했습니다", err)
 	}
 	if reason, skipped := skipReason(task, config); skipped {
 		u.save(ctx, task, startedAt, review.OutcomeSkipped, reason, llm.Response{}, 0, 0)
@@ -40,7 +40,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 	target := task.Target
 	request, err := u.deps.Source.PullRequest(ctx, target)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "Pull Request를 읽지 못했다", err)
+		return u.fail(ctx, task, startedAt, "Pull Request를 읽지 못했습니다", err)
 	}
 	if target.HeadSHA == "" {
 		target.HeadSHA = request.HeadSHA
@@ -48,7 +48,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 
 	files, incremental, err := u.collectFiles(ctx, target, request, task)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "변경 파일을 읽지 못했다", err)
+		return u.fail(ctx, task, startedAt, "변경 파일을 읽지 못했습니다", err)
 	}
 	selected := selection.FileSelector{
 		Include:  config.Include,
@@ -56,7 +56,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 		MaxFiles: config.MaxFiles,
 	}.Select(files)
 	if len(selected) == 0 {
-		u.notify(ctx, target, task, review.Notice{Kind: review.NoticeSkipped, Message: "리뷰할 변경이 없다."})
+		u.notify(ctx, target, task, review.Notice{Kind: review.NoticeSkipped, Message: "리뷰할 변경 사항이 없습니다."})
 		u.save(ctx, task, startedAt, review.OutcomeSkipped, "리뷰 대상 파일 없음", llm.Response{}, 0, 0)
 		u.rememberHead(ctx, target)
 		return nil
@@ -65,7 +65,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 
 	instructions, err := u.deps.Settings.Instructions(ctx, target, config)
 	if err != nil {
-		u.deps.Logger.Warn("지침 문서를 읽지 못했다", "target", target.Reference(), "error", err)
+		u.deps.Logger.Warn("지침 문서를 읽지 못했습니다", "target", target.Reference(), "error", err)
 	}
 
 	executor := u.executor(target, config)
@@ -90,42 +90,42 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 		ForceJSON:       true,
 	}, executor)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "리뷰 모델을 호출하지 못했다", err)
+		return u.fail(ctx, task, startedAt, "리뷰 모델을 호출하지 못했습니다", err)
 	}
 
 	result, err := u.deps.Parser.Parse(response.Content)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "모델 응답을 해석하지 못했다", err)
+		return u.fail(ctx, task, startedAt, "모델 응답을 해석하지 못했습니다", err)
 	}
 
 	findings := selection.SeverityFilter{Minimum: config.MinSeverity}.Apply(result.Findings)
 	known, err := u.deps.Findings.Fingerprints(ctx, target)
 	if err != nil {
-		u.deps.Logger.Warn("기존 지적을 읽지 못했다", "target", target.Reference(), "error", err)
+		u.deps.Logger.Warn("기존 지적을 읽지 못했습니다", "target", target.Reference(), "error", err)
 		known = map[string]struct{}{}
 	}
 	findings, duplicates := dedupe.DuplicateFilter{Known: known}.Apply(findings)
 	findings = mapping.PositionMapper{MaxInline: config.MaxInlineComments}.Map(findings, selected)
 
 	placed := review.Result{Summary: result.Summary, Findings: findings}
+	attribution := attributionOf(response)
 	view := review.SummaryView{
 		Summary:     placed.Summary,
 		Fallback:    placed.Fallback(),
 		InlineCount: len(placed.Inline()),
-		Provider:    response.Provider,
-		Model:       response.Model,
+		Attribution: attribution,
 		Trigger:     task.Trigger,
 		Incremental: incremental,
 		SkippedDup:  duplicates,
 	}
 
-	if err := u.publish(ctx, target, view, placed); err != nil {
-		return u.fail(ctx, task, startedAt, "리뷰를 게시하지 못했다", err)
+	if err := u.publish(ctx, target, view, placed, attribution); err != nil {
+		return u.fail(ctx, task, startedAt, "리뷰를 게시하지 못했습니다", err)
 	}
 
 	reviewID := u.save(ctx, task, startedAt, review.OutcomeSucceeded, "", response, len(placed.Inline()), len(placed.Fallback()))
 	if err := u.deps.Findings.SaveAll(ctx, reviewID, target, placed.Findings); err != nil {
-		u.deps.Logger.Warn("지적을 저장하지 못했다", "target", target.Reference(), "error", err)
+		u.deps.Logger.Warn("지적을 저장하지 못했습니다", "target", target.Reference(), "error", err)
 	}
 	u.rememberHead(ctx, target)
 	return nil
@@ -183,27 +183,35 @@ func (u *UseCase) executor(target pullrequest.Target, config setting.RepoConfig)
 	return u.deps.Tools.ForTarget(target, target.HeadSHA, config.MaxExtraReads)
 }
 
-func (u *UseCase) publish(ctx context.Context, target pullrequest.Target, view review.SummaryView, result review.Result) error {
-	body := u.deps.Renderer.SummaryBody(view)
+func (u *UseCase) publish(ctx context.Context, target pullrequest.Target, view review.SummaryView, result review.Result, attribution review.Attribution) error {
+	commentID, err := u.deps.Publisher.CreateComment(ctx, target, u.deps.Renderer.SummaryBody(view))
+	if err != nil {
+		return err
+	}
+
 	inline := result.Inline()
+	if len(inline) == 0 {
+		return nil
+	}
+
 	comments := make([]review.InlineComment, 0, len(inline))
 	for _, finding := range inline {
 		comments = append(comments, review.InlineComment{
 			Path: finding.File,
 			Line: finding.Line,
-			Body: u.deps.Renderer.InlineBody(finding),
+			Body: u.deps.Renderer.InlineBody(finding, attribution),
 		})
 	}
-	submitErr := u.deps.Publisher.SubmitReview(ctx, target, body, comments)
+	submitErr := u.deps.Publisher.SubmitReview(ctx, target, u.deps.Renderer.InlineReviewBody(attribution), comments)
 	if submitErr == nil {
 		return nil
 	}
-	u.deps.Logger.Warn("인라인 리뷰 제출에 실패해 요약으로 되돌린다", "target", target.Reference(), "error", submitErr)
+	u.deps.Logger.Warn("인라인 리뷰를 제출하지 못해 요약 코멘트에 합칩니다", "target", target.Reference(), "error", submitErr)
+
 	degraded := view
 	degraded.Fallback = append(append([]review.Finding{}, result.Fallback()...), inline...)
 	degraded.InlineCount = 0
-	_, err := u.deps.Publisher.CreateComment(ctx, target, u.deps.Renderer.SummaryBody(degraded))
-	return err
+	return u.deps.Publisher.UpdateComment(ctx, target, commentID, u.deps.Renderer.SummaryBody(degraded))
 }
 
 func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, task job.ReviewJob, notice review.Notice) {
@@ -211,7 +219,7 @@ func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, task jo
 		return
 	}
 	if _, err := u.deps.Publisher.CreateComment(ctx, target, u.deps.Renderer.NoticeBody(notice)); err != nil {
-		u.deps.Logger.Warn("안내 코멘트를 남기지 못했다", "target", target.Reference(), "error", err)
+		u.deps.Logger.Warn("안내 코멘트를 남기지 못했습니다", "target", target.Reference(), "error", err)
 	}
 }
 
@@ -242,7 +250,7 @@ func (u *UseCase) save(ctx context.Context, task job.ReviewJob, startedAt time.T
 	}
 	id, err := u.deps.Reviews.Save(ctx, record)
 	if err != nil {
-		u.deps.Logger.Warn("리뷰 기록을 저장하지 못했다", "target", task.Target.Reference(), "error", err)
+		u.deps.Logger.Warn("리뷰 기록을 저장하지 못했습니다", "target", task.Target.Reference(), "error", err)
 	}
 	return id
 }
@@ -252,7 +260,7 @@ func (u *UseCase) rememberHead(ctx context.Context, target pullrequest.Target) {
 		return
 	}
 	if err := u.deps.State.SetLastReviewedSHA(ctx, target, target.HeadSHA); err != nil {
-		u.deps.Logger.Warn("마지막 리뷰 커밋을 저장하지 못했다", "target", target.Reference(), "error", err)
+		u.deps.Logger.Warn("마지막 리뷰 커밋을 저장하지 못했습니다", "target", target.Reference(), "error", err)
 	}
 }
 
@@ -261,10 +269,20 @@ func skipReason(task job.ReviewJob, config setting.RepoConfig) (string, bool) {
 		return "", false
 	}
 	if !config.Sandrone.AutoReview {
-		return "sandrone.autoReview가 켜져 있지 않다", true
+		return "sandrone.autoReview가 켜져 있지 않습니다", true
 	}
 	if task.Trigger == review.TriggerPullRequestPushed && !config.Sandrone.AutoReviewOnPush {
-		return "sandrone.autoReviewOnPush가 꺼져 있다", true
+		return "sandrone.autoReviewOnPush가 꺼져 있습니다", true
 	}
 	return "", false
+}
+
+func attributionOf(response llm.Response) review.Attribution {
+	return review.Attribution{
+		Provider:         response.Provider,
+		Model:            response.Model,
+		PromptTokens:     response.Usage.PromptTokens,
+		CompletionTokens: response.Usage.CompletionTokens,
+		TotalTokens:      response.Usage.TotalTokens,
+	}
 }
