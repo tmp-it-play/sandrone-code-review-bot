@@ -72,6 +72,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		Messages:        messages,
 		Temperature:     config.Temperature,
 		MaxOutputTokens: config.MaxOutputTokens,
+		Providers:       config.Sandrone.Providers,
 		ForceJSON:       true,
 	}, nil)
 	if err != nil {

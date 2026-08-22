@@ -42,6 +42,9 @@ func New(providers []outbound.Provider, cooldown outbound.Cooldown, usageReposit
 func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outbound.ToolExecutor) (llm.Response, error) {
 	var lastErr error
 	for _, candidate := range c.providers {
+		if !allowed(candidate.Name(), request.Providers) {
+			continue
+		}
 		cooling, err := c.cooldown.Active(ctx, candidate.Name())
 		if err != nil {
 			c.logger.Warn("쿨다운 상태를 읽지 못했다", "provider", candidate.Name(), "error", err)
@@ -128,4 +131,16 @@ func (c *Chain) observe(ctx context.Context, candidate outbound.Provider, outcom
 	if err := c.usage.Record(ctx, event); err != nil {
 		c.logger.Warn("프로바이더 사용량을 기록하지 못했다", "provider", candidate.Name(), "error", err)
 	}
+}
+
+func allowed(name string, permitted []string) bool {
+	if len(permitted) == 0 {
+		return true
+	}
+	for _, candidate := range permitted {
+		if candidate == name {
+			return true
+		}
+	}
+	return false
 }

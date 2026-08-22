@@ -6,6 +6,7 @@ type Request struct {
 	MaxOutputTokens int
 	Tools           []Tool
 	ForceJSON       bool
+	Providers       []string
 }
 
 func (r Request) WithMessages(messages []Message) Request {

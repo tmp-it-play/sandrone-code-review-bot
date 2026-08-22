@@ -54,6 +54,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 		Messages:        messages,
 		Temperature:     config.Temperature,
 		MaxOutputTokens: config.MaxOutputTokens,
+		Providers:       config.Sandrone.Providers,
 	}, nil)
 	if err != nil {
 		return u.fail(ctx, task, "답글 모델을 호출하지 못했다", err)
