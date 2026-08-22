@@ -5,11 +5,13 @@ import (
 	"strings"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/setting"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/thread"
 )
 
 type ReplyPrompt struct {
+	PullRequest   pullrequest.PullRequest
 	Thread        thread.Thread
 	CurrentSource string
 	Truncated     bool
@@ -22,6 +24,27 @@ func (p ReplyPrompt) Messages() []llm.Message {
 		{Role: llm.RoleSystem, Content: p.system()},
 		{Role: llm.RoleUser, Content: p.user()},
 	}
+}
+
+func (p ReplyPrompt) renderPullRequest() string {
+	if strings.TrimSpace(p.PullRequest.Title) == "" {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("<pull_request>\n")
+	builder.WriteString(fmt.Sprintf("제목: %s\n", p.PullRequest.Title))
+	builder.WriteString(fmt.Sprintf("작성자: %s\n", p.PullRequest.Author))
+	builder.WriteString(fmt.Sprintf("대상 브랜치: %s\n", p.PullRequest.BaseRef))
+	if body, truncated := truncateBody(p.PullRequest.Body); body != "" {
+		builder.WriteString("본문:\n")
+		builder.WriteString(body)
+		if truncated {
+			builder.WriteString("\n[본문이 길어 이후 내용은 생략되었다]")
+		}
+		builder.WriteString("\n")
+	}
+	builder.WriteString("</pull_request>\n\n")
+	return builder.String()
 }
 
 func (p ReplyPrompt) system() string {
@@ -41,6 +64,7 @@ func (p ReplyPrompt) system() string {
 
 func (p ReplyPrompt) user() string {
 	var builder strings.Builder
+	builder.WriteString(p.renderPullRequest())
 	builder.WriteString("<thread>\n")
 	builder.WriteString(fmt.Sprintf("파일: %s (%d번째 줄)\n\n", p.Thread.Path, p.Thread.Line))
 	if hunk := strings.TrimSpace(p.Thread.DiffHunk); hunk != "" {

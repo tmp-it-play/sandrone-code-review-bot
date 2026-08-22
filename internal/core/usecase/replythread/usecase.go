@@ -33,16 +33,17 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 	}
 
 	target := task.Target
+	request, err := u.deps.Source.PullRequest(ctx, target)
+	if err != nil {
+		return u.fail(ctx, task, "Pull Request를 읽지 못했습니다", err)
+	}
 	if target.HeadSHA == "" {
-		request, requestErr := u.deps.Source.PullRequest(ctx, target)
-		if requestErr != nil {
-			return u.fail(ctx, task, "Pull Request를 읽지 못했습니다", requestErr)
-		}
 		target.HeadSHA = request.HeadSHA
 	}
 
 	source, truncated := u.currentSource(ctx, task, conversation.Path, target.HeadSHA, config.MaxSourceChars)
 	messages := prompt.ReplyPrompt{
+		PullRequest:   request,
 		Thread:        conversation,
 		CurrentSource: source,
 		Truncated:     truncated,

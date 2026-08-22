@@ -8,7 +8,7 @@ func languageName(code string) string {
 		return "한국어"
 	case "en", "en-us", "english":
 		return "영어"
-	case "ja", "ja-jp":
+	case "ja", "jp", "ja-jp", "jp-jp", "japanese":
 		return "일본어"
 	default:
 		return code

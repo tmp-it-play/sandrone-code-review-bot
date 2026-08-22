@@ -57,6 +57,8 @@ exclude:
   - "**/generated/**"
 
 sandrone:
+  language: ko
+  tone: professional
   autoReview: true
   autoReviewOnPush: false
   summaryPlacement: new-comment
@@ -67,7 +69,7 @@ sandrone:
 
 | 설정 | 기본값 | 설명 |
 |---|---:|---|
-| `language` | `ko` | 리뷰에 사용할 언어입니다. `ko`, `en`, `ja`를 사용할 수 있습니다. |
+| `language` | `ko` | 리뷰에 사용할 언어입니다. `ko`, `en`, `ja` 또는 `jp`를 사용할 수 있습니다. |
 | `tone` | `professional` | 리뷰, 요약, 스레드 답글에 적용할 문체입니다. |
 | `minSeverity` | `minor` | 게시할 최소 심각도입니다. `critical`, `major`, `minor`, `nit` 중 하나입니다. |
 | `maxInlineComments` | `25` | 한 번의 리뷰에서 남길 최대 인라인 코멘트 수입니다. |
@@ -75,7 +77,24 @@ sandrone:
 | `exclude` | 기본 제외 목록 | 리뷰에서 제외할 파일의 glob 패턴을 추가합니다. |
 | `threadReply` | `true` | 리뷰 스레드의 후속 답변을 켜거나 끕니다. |
 
+최상위 리뷰 설정은 이 파일을 함께 사용하는 앱의 공통값입니다. `sandrone:` 아래에 같은 설정을 작성하면 Sandrone에서만 그 값으로 덮어씁니다.
+
+```yaml
+language: jp
+tone: polite
+
+it-play:
+  language: en
+
+sandrone:
+  tone: sandrone
+```
+
+이 예시에서 Sandrone은 다른 앱의 `it-play:` 설정을 무시하고, 최상위의 일본어와 `sandrone:`의 산드로네 문체를 사용합니다. 설정 우선순위는 `sandrone:` 전용값, 최상위 공통값, Sandrone 기본값 순서입니다.
+
 ### Sandrone 설정
+
+`language`, `tone`, `minSeverity` 같은 리뷰 설정은 모두 `sandrone:` 아래에서 Sandrone 전용값으로 다시 지정할 수 있습니다.
 
 | 설정 | 기본값 | 설명 |
 |---|---:|---|

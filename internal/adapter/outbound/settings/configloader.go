@@ -45,6 +45,15 @@ func (l *ConfigLoader) RepoConfig(ctx context.Context, target pullrequest.Target
 }
 
 func merge(config setting.RepoConfig, raw rawConfig) setting.RepoConfig {
+	config = mergeReviewSetting(config, raw.Review)
+	if raw.Sandrone != nil {
+		config = mergeReviewSetting(config, raw.Sandrone.Review)
+		config.Sandrone = mergeSandrone(config.Sandrone, *raw.Sandrone)
+	}
+	return config
+}
+
+func mergeReviewSetting(config setting.RepoConfig, raw rawReviewSetting) setting.RepoConfig {
 	if raw.Language != nil {
 		config.Language = *raw.Language
 	}
@@ -77,11 +86,11 @@ func merge(config setting.RepoConfig, raw rawConfig) setting.RepoConfig {
 	if raw.MaxExtraReads != nil {
 		config.MaxExtraReads = *raw.MaxExtraReads
 	}
-	if len(raw.Exclude) > 0 {
-		config.Exclude = append(config.Exclude, raw.Exclude...)
+	if raw.Exclude != nil {
+		config.Exclude = append(setting.DefaultExcludes(), (*raw.Exclude)...)
 	}
-	if len(raw.Include) > 0 {
-		config.Include = raw.Include
+	if raw.Include != nil {
+		config.Include = append([]string(nil), (*raw.Include)...)
 	}
 	if raw.MinSeverity != nil {
 		if severity, ok := review.ParseSeverity(*raw.MinSeverity); ok {
@@ -93,9 +102,6 @@ func merge(config setting.RepoConfig, raw rawConfig) setting.RepoConfig {
 	}
 	if raw.ThreadReply != nil {
 		config.ThreadReply = *raw.ThreadReply
-	}
-	if raw.Sandrone != nil {
-		config.Sandrone = mergeSandrone(config.Sandrone, *raw.Sandrone)
 	}
 	return config
 }

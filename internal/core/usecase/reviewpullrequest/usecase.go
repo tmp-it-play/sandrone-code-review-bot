@@ -71,7 +71,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 	}
 
 	inventory := inventoryOf(loaded, chosen.Skipped)
-	reserved := instructions.TotalSize() + len(request.Body) + inventoryCost(inventory)
+	reserved := instructions.TotalSize() + prompt.BodyCost(request.Body) + inventoryCost(inventory)
 	plan := batching.Batcher{
 		MaxChars:   batchBudget(config.MaxPromptChars, u.deps.Completer.PromptBudget()),
 		MaxBatches: config.Sandrone.MaxReviewBatches,

@@ -37,9 +37,12 @@ func (c Context) renderPullRequest() string {
 	builder.WriteString(fmt.Sprintf("제목: %s\n", c.PullRequest.Title))
 	builder.WriteString(fmt.Sprintf("작성자: %s\n", c.PullRequest.Author))
 	builder.WriteString(fmt.Sprintf("대상 브랜치: %s\n", c.PullRequest.BaseRef))
-	if body := strings.TrimSpace(c.PullRequest.Body); body != "" {
+	if body, truncated := truncateBody(c.PullRequest.Body); body != "" {
 		builder.WriteString("본문:\n")
 		builder.WriteString(body)
+		if truncated {
+			builder.WriteString("\n[본문이 길어 이후 내용은 생략되었다]")
+		}
 		builder.WriteString("\n")
 	}
 	if c.Incremental {
