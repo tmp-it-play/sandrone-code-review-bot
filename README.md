@@ -20,18 +20,18 @@ Sandrone은 GitHub Pull Request의 변경 내용을 요약하고, 실제로 문�
 
 PR 코멘트에서 다음 명령을 사용할 수 있습니다.
 
-| 명령 | 동작 |
-|---|---|
-| `/pr-review` | 현재 변경 사항을 다시 리뷰합니다. |
-| `/pr-summary` | 문제 지적 없이 변경 내용만 요약합니다. |
-| `@sandrone-code-review-bot` | PR에서 새 리뷰를 요청합니다. |
+| 명령                        | 동작                                   |
+|-----------------------------|----------------------------------------|
+| `/pr-review`                | 현재 변경 사항을 다시 리뷰합니다.      |
+| `/pr-summary`               | 문제 지적 없이 변경 내용만 요약합니다. |
+| `@sandrone-code-review-bot` | PR에서 새 리뷰를 요청합니다.           |
 
 리뷰 스레드에서는 다음 명령으로 최신 코드를 확인한 답변을 받을 수 있습니다.
 
-| 명령 | 동작 |
-|---|---|
-| `/pr-review-reply` | 기존 지적이 해결되었는지 확인하고 답합니다. |
-| `@sandrone-code-review-bot` | 현재 리뷰 대화에 답합니다. |
+| 명령                        | 동작                                        |
+|-----------------------------|---------------------------------------------|
+| `/pr-review-reply`          | 기존 지적이 해결되었는지 확인하고 답합니다. |
+| `@sandrone-code-review-bot` | 현재 리뷰 대화에 답합니다.                  |
 
 명령 뒤에는 이번 요청에만 적용할 지시를 덧붙일 수 있습니다.
 
@@ -57,8 +57,6 @@ exclude:
   - "**/generated/**"
 
 sandrone:
-  language: ko
-  tone: professional
   autoReview: true
   autoReviewOnPush: false
   summaryPlacement: new-comment
@@ -67,52 +65,51 @@ sandrone:
 
 ### 리뷰 설정
 
-| 설정 | 기본값 | 설명 |
-|---|---:|---|
-| `language` | `ko` | 리뷰에 사용할 언어입니다. `ko`, `en`, `ja` 또는 `jp`를 사용할 수 있습니다. |
-| `tone` | `professional` | 리뷰, 요약, 스레드 답글에 적용할 문체입니다. |
-| `minSeverity` | `minor` | 게시할 최소 심각도입니다. `critical`, `major`, `minor`, `nit` 중 하나입니다. |
-| `maxInlineComments` | `25` | 한 번의 리뷰에서 남길 최대 인라인 코멘트 수입니다. |
-| `include` | 전체 | 리뷰할 파일의 glob 패턴입니다. |
-| `exclude` | 기본 제외 목록 | 리뷰에서 제외할 파일의 glob 패턴을 추가합니다. |
-| `threadReply` | `true` | 리뷰 스레드의 후속 답변을 켜거나 끕니다. |
+| 설정                |         기본값 | 설명                                                                         |
+|---------------------|---------------:|------------------------------------------------------------------------------|
+| `language`          |           `ko` | 리뷰에 사용할 언어입니다. `ko`, `en`, `ja`를 사용할 수 있습니다.             |
+| `tone`              | `professional` | 리뷰, 요약, 스레드 답글에 적용할 문체입니다.                                 |
+| `minSeverity`       |        `minor` | 게시할 최소 심각도입니다. `critical`, `major`, `minor`, `nit` 중 하나입니다. |
+| `maxInlineComments` |           `25` | 한 번의 리뷰에서 남길 최대 인라인 코멘트 수입니다.                           |
+| `include`           |           전체 | 리뷰할 파일의 glob 패턴입니다.                                               |
+| `exclude`           | 기본 제외 목록 | 리뷰에서 제외할 파일의 glob 패턴을 추가합니다.                               |
+| `threadReply`       |         `true` | 리뷰 스레드의 후속 답변을 켜거나 끕니다.                                     |
 
 최상위 리뷰 설정은 이 파일을 함께 사용하는 앱의 공통값입니다. `sandrone:` 아래에 같은 설정을 작성하면 Sandrone에서만 그 값으로 덮어씁니다.
 
 ```yaml
-language: jp
 tone: polite
 
 it-play:
-  language: en
+  tone: intelligent
 
 sandrone:
   tone: sandrone
 ```
 
-이 예시에서 Sandrone은 다른 앱의 `it-play:` 설정을 무시하고, 최상위의 일본어와 `sandrone:`의 산드로네 문체를 사용합니다. 설정 우선순위는 `sandrone:` 전용값, 최상위 공통값, Sandrone 기본값 순서입니다.
+이 예시에서 Sandrone은 다른 앱의 `it-play:` 설정을 무시하고 `sandrone:`의 산드로네 문체를 사용합니다. `sandrone:`에 `tone`이 없다면 최상위의 `polite`를 사용합니다. 설정 우선순위는 `sandrone:` 전용값, 최상위 공통값, Sandrone 기본값 순서입니다.
 
 ### Sandrone 설정
 
 `language`, `tone`, `minSeverity` 같은 리뷰 설정은 모두 `sandrone:` 아래에서 Sandrone 전용값으로 다시 지정할 수 있습니다.
 
-| 설정 | 기본값 | 설명 |
-|---|---:|---|
-| `sandrone.autoReview` | `true` | 새 PR의 자동 리뷰를 켜거나 끕니다. |
-| `sandrone.autoReviewOnPush` | `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다. |
+| 설정                        |        기본값 | 설명                                                                       |
+|-----------------------------|--------------:|----------------------------------------------------------------------------|
+| `sandrone.autoReview`       |        `true` | 새 PR의 자동 리뷰를 켜거나 끕니다.                                         |
+| `sandrone.autoReviewOnPush` |       `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다.                              |
 | `sandrone.summaryPlacement` | `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다. |
-| `sandrone.maxReviewBatches` | `4` | 큰 PR을 나누어 검토할 최대 횟수입니다. |
+| `sandrone.maxReviewBatches` |           `4` | 큰 PR을 나누어 검토할 최대 횟수입니다.                                     |
 
 ## 문체 프리셋
 
 `tone`에는 다음 값을 사용할 수 있습니다.
 
-| 값 | 설명 |
-|---|---|
-| `professional` | 차분하고 전문적인 존댓말입니다. 기본값입니다. |
-| `intelligent` | 결론과 논리 관계를 정밀하게 설명하는 분석적인 존댓말입니다. |
-| `polite` | 배려 깊고 부드럽게 제안하는 정중한 존댓말입니다. |
-| `sandrone` | 한국어판 산드로네에게서 영감을 받은 이성적이고 자신감 있으며 도도한 말투입니다. 한국어에서는 간결한 반말을 사용하되 모욕이나 과도한 역할극은 하지 않습니다. |
+| 값             | 설명                                                                                                                                                        |
+|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `professional` | 차분하고 전문적인 존댓말입니다. 기본값입니다.                                                                                                               |
+| `intelligent`  | 결론과 논리 관계를 정밀하게 설명하는 분석적인 존댓말입니다.                                                                                                 |
+| `polite`       | 배려 깊고 부드럽게 제안하는 정중한 존댓말입니다.                                                                                                            |
+| `sandrone`     | 한국어판 산드로네에게서 영감을 받은 이성적이고 자신감 있으며 도도한 말투입니다. 한국어에서는 간결한 반말을 사용하되 모욕이나 과도한 역할극은 하지 않습니다. |
 
 산드로네 문체는 다음처럼 직접 선택한 저장소에서만 사용됩니다.
 
