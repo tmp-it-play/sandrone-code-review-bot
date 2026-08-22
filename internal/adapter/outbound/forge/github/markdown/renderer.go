@@ -67,10 +67,23 @@ func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribut
 	}
 	builder.WriteString("\n\n")
 	builder.WriteString(strings.TrimSpace(finding.Body))
-	if suggestion := strings.TrimSpace(finding.Suggestion); suggestion != "" {
-		builder.WriteString("\n\n제안:\n\n```\n")
-		builder.WriteString(suggestion)
-		builder.WriteString("\n```")
+	if suggestion := normalizeSuggestion(finding.Suggestion); strings.TrimSpace(suggestion) != "" {
+		fence := fenceFor(suggestion)
+		if finding.SuggestionApplies() {
+			builder.WriteString("\n\n")
+			builder.WriteString(fence)
+			builder.WriteString("suggestion\n")
+			builder.WriteString(suggestion)
+			builder.WriteString("\n")
+			builder.WriteString(fence)
+		} else {
+			builder.WriteString("\n\n제안:\n\n")
+			builder.WriteString(fence)
+			builder.WriteString("\n")
+			builder.WriteString(suggestion)
+			builder.WriteString("\n")
+			builder.WriteString(fence)
+		}
 	}
 	if footer := attributionLine(review.Attribution{Model: attribution.Model, Label: attribution.Label}); footer != "" {
 		builder.WriteString("\n\n")
@@ -143,10 +156,14 @@ func (r Renderer) fallbackSection(findings []review.Finding) string {
 		}
 		builder.WriteString("\n\n")
 		builder.WriteString(strings.TrimSpace(finding.Body))
-		if suggestion := strings.TrimSpace(finding.Suggestion); suggestion != "" {
-			builder.WriteString("\n\n```\n")
+		if suggestion := normalizeSuggestion(finding.Suggestion); strings.TrimSpace(suggestion) != "" {
+			fence := fenceFor(suggestion)
+			builder.WriteString("\n\n")
+			builder.WriteString(fence)
+			builder.WriteString("\n")
 			builder.WriteString(suggestion)
-			builder.WriteString("\n```")
+			builder.WriteString("\n")
+			builder.WriteString(fence)
 		}
 		builder.WriteString("\n\n---\n\n")
 	}

@@ -11,6 +11,7 @@ type Finding struct {
 	Body       string
 	Suggestion string
 	Placement  Placement
+	Snapped    bool
 }
 
 func (f Finding) IsValid() bool {
@@ -37,7 +38,12 @@ func (f Finding) WithPlacement(placement Placement) Finding {
 }
 
 func (f Finding) WithLine(line int) Finding {
+	f.Snapped = f.Line != line
 	f.Line = line
 	f.EndLine = 0
 	return f
+}
+
+func (f Finding) SuggestionApplies() bool {
+	return f.Placement == PlacementInline && !f.Snapped && strings.TrimSpace(f.Suggestion) != ""
 }

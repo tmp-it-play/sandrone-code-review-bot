@@ -41,6 +41,7 @@ func (p ReviewPrompt) system() string {
 	builder.WriteString("- major: 특정 조건에서 잘못 동작하거나 명백한 버그\n")
 	builder.WriteString("- minor: 동작은 하지만 개선이 필요함\n")
 	builder.WriteString("- nit: 사소한 정리 제안\n\n")
+	builder.WriteString(suggestionGuide)
 	builder.WriteString(reviewSchema)
 	return builder.String()
 }
