@@ -45,7 +45,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 		return u.fail(ctx, task, startedAt, "설정을 읽지 못했습니다", err)
 	}
 	if reason, skipped := skipReason(task, config); skipped {
-		u.save(ctx, task, startedAt, review.OutcomeSkipped, reason, llm.Response{}, 0, 0)
+		u.deps.Logger.Info("설정에 따라 자동 리뷰를 건너뜁니다", "target", target.Reference(), "reason", reason)
 		return nil
 	}
 
