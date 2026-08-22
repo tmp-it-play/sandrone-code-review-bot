@@ -55,7 +55,7 @@ func LoadConfig() (Config, error) {
 
 	appID, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("GITHUB_APP_ID")), 10, 64)
 	if err != nil {
-		return Config{}, errors.New("GITHUB_APP_ID가 없거나 숫자가 아니다")
+		return Config{}, errors.New("GITHUB_APP_ID가 없거나 숫자가 아닙니다")
 	}
 	config.AppID = appID
 
@@ -81,7 +81,7 @@ func LoadConfig() (Config, error) {
 	config.Providers = providerConfigs()
 	config.ProviderOrder = providerOrder(config.Providers)
 	if len(config.ProviderOrder) == 0 {
-		return Config{}, errors.New("사용 가능한 LLM 프로바이더가 하나도 설정되지 않았다")
+		return Config{}, errors.New("사용 가능한 LLM 프로바이더가 하나도 설정되지 않았습니다")
 	}
 	return config, nil
 }

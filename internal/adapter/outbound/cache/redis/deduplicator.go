@@ -19,7 +19,7 @@ func NewDeduplicator(client *redis.Client) *Deduplicator {
 func (d *Deduplicator) FirstSeen(ctx context.Context, key string, retention time.Duration) (bool, error) {
 	stored, err := d.client.SetNX(ctx, "sandrone:delivery:"+key, "1", retention).Result()
 	if err != nil {
-		return false, fmt.Errorf("중복 여부를 확인하지 못했다: %w", err)
+		return false, fmt.Errorf("중복 여부를 확인하지 못했습니다: %w", err)
 	}
 	return stored, nil
 }

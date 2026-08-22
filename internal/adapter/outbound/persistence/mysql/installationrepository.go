@@ -26,7 +26,7 @@ func (r *InstallationRepository) Upsert(ctx context.Context, entry installation.
 		DoUpdates: clause.AssignmentColumns([]string{"account", "account_type", "selection", "updated_at"}),
 	}).Create(&record).Error
 	if err != nil {
-		return fmt.Errorf("설치 정보를 저장하지 못했다: %w", err)
+		return fmt.Errorf("설치 정보를 저장하지 못했습니다: %w", err)
 	}
 	return nil
 }
@@ -38,7 +38,7 @@ func (r *InstallationRepository) UpsertRepository(ctx context.Context, entry ins
 		DoUpdates: clause.AssignmentColumns([]string{"installation_id", "private", "updated_at"}),
 	}).Create(&record).Error
 	if err != nil {
-		return fmt.Errorf("저장소 정보를 저장하지 못했다: %w", err)
+		return fmt.Errorf("저장소 정보를 저장하지 못했습니다: %w", err)
 	}
 	return nil
 }
@@ -46,7 +46,7 @@ func (r *InstallationRepository) UpsertRepository(ctx context.Context, entry ins
 func (r *InstallationRepository) Repositories(ctx context.Context) ([]installation.Repository, error) {
 	var entries []model.Repository
 	if err := r.database.WithContext(ctx).Order("owner ASC, name ASC").Find(&entries).Error; err != nil {
-		return nil, fmt.Errorf("저장소 목록을 읽지 못했다: %w", err)
+		return nil, fmt.Errorf("저장소 목록을 읽지 못했습니다: %w", err)
 	}
 	repositories := make([]installation.Repository, 0, len(entries))
 	for _, entry := range entries {

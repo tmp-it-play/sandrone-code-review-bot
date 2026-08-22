@@ -73,7 +73,7 @@ func (r *EventRouter) pullRequest(ctx context.Context, payload *gh.PullRequestEv
 		return action
 	}
 	if err := r.queue.EnqueueReview(ctx, task); err != nil {
-		r.logger.Error("리뷰 작업을 큐에 넣지 못했다", "target", target.Reference(), "error", err)
+		r.logger.Error("리뷰 작업을 큐에 넣지 못했습니다", "target", target.Reference(), "error", err)
 	}
 	return action
 }
@@ -98,7 +98,7 @@ func (r *EventRouter) issueComment(ctx context.Context, payload *gh.IssueComment
 		Command:           parsed,
 		PullRequestAuthor: payload.GetIssue().GetUser().GetLogin(),
 	}); err != nil {
-		r.logger.Error("명령을 처리하지 못했다", "target", target.Reference(), "error", err)
+		r.logger.Error("명령을 처리하지 못했습니다", "target", target.Reference(), "error", err)
 	}
 	return action
 }
@@ -124,7 +124,7 @@ func (r *EventRouter) reviewComment(ctx context.Context, payload *gh.PullRequest
 		Command:           parsed,
 		PullRequestAuthor: payload.GetPullRequest().GetUser().GetLogin(),
 	}); err != nil {
-		r.logger.Error("스레드 명령을 처리하지 못했다", "target", target.Reference(), "error", err)
+		r.logger.Error("스레드 명령을 처리하지 못했습니다", "target", target.Reference(), "error", err)
 	}
 	return action
 }
@@ -139,7 +139,7 @@ func (r *EventRouter) installation(ctx context.Context, payload *gh.Installation
 		InstalledAt: payload.GetInstallation().GetCreatedAt().Time,
 	}
 	if err := r.installations.Upsert(ctx, entry); err != nil {
-		r.logger.Error("설치 정보를 저장하지 못했다", "installation", entry.ID, "error", err)
+		r.logger.Error("설치 정보를 저장하지 못했습니다", "installation", entry.ID, "error", err)
 	}
 	for _, repository := range payload.Repositories {
 		r.saveRepository(ctx, entry.ID, repository)
@@ -171,7 +171,7 @@ func (r *EventRouter) saveRepository(ctx context.Context, installationID int64, 
 		Private:        repository.GetPrivate(),
 	}
 	if err := r.installations.UpsertRepository(ctx, entry); err != nil {
-		r.logger.Error("저장소 정보를 저장하지 못했다", "repository", entry.FullName(), "error", err)
+		r.logger.Error("저장소 정보를 저장하지 못했습니다", "repository", entry.FullName(), "error", err)
 	}
 }
 

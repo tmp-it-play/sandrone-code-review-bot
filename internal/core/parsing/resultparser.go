@@ -8,7 +8,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 )
 
-var ErrNoPayload = errors.New("모델 응답에서 JSON을 찾지 못했다")
+var ErrNoPayload = errors.New("모델 응답에서 JSON을 찾지 못했습니다")
 
 type ResultParser struct{}
 

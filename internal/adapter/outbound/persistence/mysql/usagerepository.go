@@ -27,7 +27,7 @@ func (r *UsageRepository) Record(ctx context.Context, event usage.Event) error {
 		OccurredAt: event.OccurredAt,
 	}
 	if err := r.database.WithContext(ctx).Create(&entry).Error; err != nil {
-		return fmt.Errorf("사용량을 저장하지 못했다: %w", err)
+		return fmt.Errorf("사용량을 저장하지 못했습니다: %w", err)
 	}
 	return nil
 }
@@ -45,7 +45,7 @@ func (r *UsageRepository) Snapshot(ctx context.Context) ([]usage.Snapshot, error
 		Group("provider, outcome").
 		Scan(&rows).Error
 	if err != nil {
-		return nil, fmt.Errorf("사용량 집계를 읽지 못했다: %w", err)
+		return nil, fmt.Errorf("사용량 집계를 읽지 못했습니다: %w", err)
 	}
 	byProvider := map[string]*usage.Snapshot{}
 	for _, row := range rows {

@@ -23,7 +23,7 @@ func (s *PullRequestSource) PullRequest(ctx context.Context, target pullrequest.
 	}
 	found, _, err := client.PullRequests.Get(ctx, target.Owner, target.Repository, target.Number)
 	if err != nil {
-		return pullrequest.PullRequest{}, fmt.Errorf("PR %s를 읽지 못했다: %w", target.Reference(), err)
+		return pullrequest.PullRequest{}, fmt.Errorf("PR %s를 읽지 못했습니다: %w", target.Reference(), err)
 	}
 	return pullrequest.PullRequest{
 		Number:  found.GetNumber(),
@@ -49,7 +49,7 @@ func (s *PullRequestSource) ChangedFiles(ctx context.Context, target pullrequest
 	for {
 		files, response, listErr := client.PullRequests.ListFiles(ctx, target.Owner, target.Repository, target.Number, options)
 		if listErr != nil {
-			return nil, fmt.Errorf("PR 변경 파일을 읽지 못했다: %w", listErr)
+			return nil, fmt.Errorf("PR 변경 파일을 읽지 못했습니다: %w", listErr)
 		}
 		for _, file := range files {
 			collected = append(collected, toChangedFile(file))
@@ -72,7 +72,7 @@ func (s *PullRequestSource) ChangedFilesBetween(ctx context.Context, target pull
 	for {
 		comparison, response, compareErr := client.Repositories.CompareCommits(ctx, target.Owner, target.Repository, baseSHA, headSHA, options)
 		if compareErr != nil {
-			return nil, fmt.Errorf("커밋 비교에 실패했다: %w", compareErr)
+			return nil, fmt.Errorf("커밋 비교에 실패했습니다: %w", compareErr)
 		}
 		for _, file := range comparison.Files {
 			collected = append(collected, toChangedFile(file))
@@ -92,10 +92,10 @@ func (s *PullRequestSource) FileContent(ctx context.Context, target pullrequest.
 	}
 	file, _, _, err := client.Repositories.GetContents(ctx, target.Owner, target.Repository, path, &gh.RepositoryContentGetOptions{Ref: ref})
 	if err != nil {
-		return "", fmt.Errorf("%s 파일을 읽지 못했다: %w", path, err)
+		return "", fmt.Errorf("%s 파일을 읽지 못했습니다: %w", path, err)
 	}
 	if file == nil {
-		return "", fmt.Errorf("%s는 파일이 아니다", path)
+		return "", fmt.Errorf("%s는 파일이 아닙니다", path)
 	}
 	return file.GetContent()
 }

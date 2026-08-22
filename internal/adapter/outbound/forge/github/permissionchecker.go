@@ -26,7 +26,7 @@ func (c *PermissionChecker) Permission(ctx context.Context, target pullrequest.T
 		if response != nil && response.StatusCode == 404 {
 			return access.PermissionNone, nil
 		}
-		return access.PermissionNone, fmt.Errorf("권한을 조회하지 못했다: %w", err)
+		return access.PermissionNone, fmt.Errorf("권한을 조회하지 못했습니다: %w", err)
 	}
 	return access.ParsePermission(level.GetPermission()), nil
 }

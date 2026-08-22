@@ -24,7 +24,7 @@ func NewSummaryHandler(usecase *summarizepullrequest.UseCase, metrics *observabi
 func (h *SummaryHandler) ProcessTask(ctx context.Context, task *asynq.Task) error {
 	var payload job.SummaryJob
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-		return fmt.Errorf("작업을 해석하지 못했다: %w", asynq.SkipRetry)
+		return fmt.Errorf("작업을 해석하지 못했습니다: %w", asynq.SkipRetry)
 	}
 	payload.FinalAttempt = isFinalAttempt(ctx)
 	startedAt := time.Now()

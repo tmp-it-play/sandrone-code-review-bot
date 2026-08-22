@@ -77,7 +77,7 @@ func (c *InstructionCollector) resolve(ctx context.Context, target pullrequest.T
 		if !treeLoaded {
 			paths, err := c.content.Paths(ctx, target, "")
 			if err != nil {
-				c.logger.Warn("저장소 파일 목록을 읽지 못했다", "target", target.FullName(), "error", err)
+				c.logger.Warn("저장소 파일 목록을 읽지 못했습니다", "target", target.FullName(), "error", err)
 			}
 			tree = paths
 			treeLoaded = true

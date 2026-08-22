@@ -21,7 +21,7 @@ func NewCommandRepository(database *gorm.DB) *CommandRepository {
 func (r *CommandRepository) Record(ctx context.Context, invocation command.Invocation) error {
 	entry := mapper.ToCommandModel(invocation)
 	if err := r.database.WithContext(ctx).Create(&entry).Error; err != nil {
-		return fmt.Errorf("명령 기록을 저장하지 못했다: %w", err)
+		return fmt.Errorf("명령 기록을 저장하지 못했습니다: %w", err)
 	}
 	return nil
 }
@@ -32,7 +32,7 @@ func (r *CommandRepository) Recent(ctx context.Context, limit int) ([]command.In
 	}
 	var entries []model.CommandInvocation
 	if err := r.database.WithContext(ctx).Order("id DESC").Limit(limit).Find(&entries).Error; err != nil {
-		return nil, fmt.Errorf("명령 기록을 읽지 못했다: %w", err)
+		return nil, fmt.Errorf("명령 기록을 읽지 못했습니다: %w", err)
 	}
 	invocations := make([]command.Invocation, 0, len(entries))
 	for _, entry := range entries {

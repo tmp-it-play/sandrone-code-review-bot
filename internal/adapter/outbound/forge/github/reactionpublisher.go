@@ -26,7 +26,7 @@ func (p *ReactionPublisher) AddReaction(ctx context.Context, target pullrequest.
 		_, _, err = client.Reactions.CreateIssueCommentReaction(ctx, target.Owner, target.Repository, commentID, reaction)
 	}
 	if err != nil {
-		return fmt.Errorf("리액션을 남기지 못했다: %w", err)
+		return fmt.Errorf("리액션을 남기지 못했습니다: %w", err)
 	}
 	return nil
 }

@@ -28,7 +28,7 @@ func (r *FindingRepository) SaveAll(ctx context.Context, reviewID uint64, target
 		entries = append(entries, mapper.ToFindingModel(reviewID, target, finding))
 	}
 	if err := r.database.WithContext(ctx).CreateInBatches(&entries, 50).Error; err != nil {
-		return fmt.Errorf("지적을 저장하지 못했다: %w", err)
+		return fmt.Errorf("지적을 저장하지 못했습니다: %w", err)
 	}
 	return nil
 }
@@ -40,7 +40,7 @@ func (r *FindingRepository) Fingerprints(ctx context.Context, target pullrequest
 		Where("owner = ? AND repository = ? AND number = ?", target.Owner, target.Repository, target.Number).
 		Pluck("fingerprint", &fingerprints).Error
 	if err != nil {
-		return nil, fmt.Errorf("기존 지적을 읽지 못했다: %w", err)
+		return nil, fmt.Errorf("기존 지적을 읽지 못했습니다: %w", err)
 	}
 	known := make(map[string]struct{}, len(fingerprints))
 	for _, fingerprint := range fingerprints {
@@ -52,7 +52,7 @@ func (r *FindingRepository) Fingerprints(ctx context.Context, target pullrequest
 func (r *FindingRepository) ByReview(ctx context.Context, reviewID uint64) ([]review.Finding, error) {
 	var entries []model.Finding
 	if err := r.database.WithContext(ctx).Where("review_id = ?", reviewID).Order("id ASC").Find(&entries).Error; err != nil {
-		return nil, fmt.Errorf("리뷰의 지적을 읽지 못했다: %w", err)
+		return nil, fmt.Errorf("리뷰의 지적을 읽지 못했습니다: %w", err)
 	}
 	findings := make([]review.Finding, 0, len(entries))
 	for _, entry := range entries {

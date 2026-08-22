@@ -24,7 +24,7 @@ func NewReplyHandler(usecase *replythread.UseCase, metrics *observability.Metric
 func (h *ReplyHandler) ProcessTask(ctx context.Context, task *asynq.Task) error {
 	var payload job.ReplyJob
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
-		return fmt.Errorf("작업을 해석하지 못했다: %w", asynq.SkipRetry)
+		return fmt.Errorf("작업을 해석하지 못했습니다: %w", asynq.SkipRetry)
 	}
 	payload.FinalAttempt = isFinalAttempt(ctx)
 	startedAt := time.Now()

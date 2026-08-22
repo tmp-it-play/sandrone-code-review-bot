@@ -36,7 +36,7 @@ func (l *ConfigLoader) RepoConfig(ctx context.Context, target pullrequest.Target
 		}
 		var raw rawConfig
 		if err := yaml.Unmarshal([]byte(body), &raw); err != nil {
-			l.logger.Warn("설정 파일을 해석하지 못했다", "target", target.FullName(), "path", candidate, "error", err)
+			l.logger.Warn("설정 파일을 해석하지 못했습니다", "target", target.FullName(), "path", candidate, "error", err)
 			return config, nil
 		}
 		return merge(config, raw), nil

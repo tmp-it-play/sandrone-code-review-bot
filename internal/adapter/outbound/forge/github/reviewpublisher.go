@@ -46,7 +46,7 @@ func (p *ReviewPublisher) SubmitReview(ctx context.Context, target pullrequest.T
 		request.CommitID = gh.Ptr(target.HeadSHA)
 	}
 	if _, _, err := client.PullRequests.CreateReview(ctx, target.Owner, target.Repository, target.Number, request); err != nil {
-		return fmt.Errorf("리뷰를 제출하지 못했다: %w", err)
+		return fmt.Errorf("리뷰를 제출하지 못했습니다: %w", err)
 	}
 	return nil
 }
@@ -58,7 +58,7 @@ func (p *ReviewPublisher) CreateComment(ctx context.Context, target pullrequest.
 	}
 	comment, _, err := client.Issues.CreateComment(ctx, target.Owner, target.Repository, target.Number, &gh.IssueComment{Body: gh.Ptr(body)})
 	if err != nil {
-		return 0, fmt.Errorf("코멘트를 남기지 못했다: %w", err)
+		return 0, fmt.Errorf("코멘트를 남기지 못했습니다: %w", err)
 	}
 	return comment.GetID(), nil
 }
@@ -69,7 +69,7 @@ func (p *ReviewPublisher) UpdateComment(ctx context.Context, target pullrequest.
 		return err
 	}
 	if _, _, err := client.Issues.EditComment(ctx, target.Owner, target.Repository, commentID, &gh.IssueComment{Body: gh.Ptr(body)}); err != nil {
-		return fmt.Errorf("코멘트를 수정하지 못했다: %w", err)
+		return fmt.Errorf("코멘트를 수정하지 못했습니다: %w", err)
 	}
 	return nil
 }
@@ -84,7 +84,7 @@ func (p *ReviewPublisher) FindComment(ctx context.Context, target pullrequest.Ta
 	for {
 		comments, response, listErr := client.Issues.ListComments(ctx, target.Owner, target.Repository, target.Number, options)
 		if listErr != nil {
-			return 0, false, fmt.Errorf("코멘트 목록을 읽지 못했다: %w", listErr)
+			return 0, false, fmt.Errorf("코멘트 목록을 읽지 못했습니다: %w", listErr)
 		}
 		for _, comment := range comments {
 			if strings.Contains(comment.GetBody(), marker) {
@@ -106,11 +106,11 @@ func (p *ReviewPublisher) UpdatePullRequestBody(ctx context.Context, target pull
 	}
 	current, _, err := client.PullRequests.Get(ctx, target.Owner, target.Repository, target.Number)
 	if err != nil {
-		return fmt.Errorf("PR 본문을 읽지 못했다: %w", err)
+		return fmt.Errorf("PR 본문을 읽지 못했습니다: %w", err)
 	}
 	updated := replaceSection(current.GetBody(), marker, section)
 	if _, _, err := client.PullRequests.Edit(ctx, target.Owner, target.Repository, target.Number, &gh.PullRequest{Body: gh.Ptr(updated)}); err != nil {
-		return fmt.Errorf("PR 본문을 수정하지 못했다: %w", err)
+		return fmt.Errorf("PR 본문을 수정하지 못했습니다: %w", err)
 	}
 	return nil
 }

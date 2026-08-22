@@ -208,11 +208,11 @@ func NewApplication(config Config) (*Application, error) {
 
 func (a *Application) Run(ctx context.Context) error {
 	if err := a.asynqServer.Start(a.asynqMux); err != nil {
-		return fmt.Errorf("워커를 시작하지 못했다: %w", err)
+		return fmt.Errorf("워커를 시작하지 못했습니다: %w", err)
 	}
 	errs := make(chan error, 1)
 	go func() {
-		a.logger.Info("HTTP 서버를 시작한다", "address", a.httpServer.Addr)
+		a.logger.Info("HTTP 서버를 시작합니다", "address", a.httpServer.Addr)
 		if err := a.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs <- err
 			return
@@ -234,19 +234,19 @@ func (a *Application) shutdown() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := a.httpServer.Shutdown(shutdownCtx); err != nil {
-		a.logger.Warn("HTTP 서버를 정상 종료하지 못했다", "error", err)
+		a.logger.Warn("HTTP 서버를 정상 종료하지 못했습니다", "error", err)
 	}
 	a.asynqServer.Shutdown()
 	if err := a.queueClient.Close(); err != nil {
-		a.logger.Warn("큐 클라이언트를 닫지 못했다", "error", err)
+		a.logger.Warn("큐 클라이언트를 닫지 못했습니다", "error", err)
 	}
 	if err := a.inspector.Close(); err != nil {
-		a.logger.Warn("큐 인스펙터를 닫지 못했다", "error", err)
+		a.logger.Warn("큐 인스펙터를 닫지 못했습니다", "error", err)
 	}
 	if err := a.cache.Close(); err != nil {
-		a.logger.Warn("Redis 연결을 닫지 못했다", "error", err)
+		a.logger.Warn("Redis 연결을 닫지 못했습니다", "error", err)
 	}
-	a.logger.Info("종료했다")
+	a.logger.Info("종료했습니다")
 }
 
 func retryDelay(attempt int) time.Duration {

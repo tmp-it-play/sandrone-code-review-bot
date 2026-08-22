@@ -21,7 +21,7 @@ type TokenSource struct {
 func NewTokenSource(appID int64, privateKeyPEM []byte) (*TokenSource, error) {
 	key, err := jwt.ParseRSAPrivateKeyFromPEM(privateKeyPEM)
 	if err != nil {
-		return nil, fmt.Errorf("App 개인키를 읽지 못했다: %w", err)
+		return nil, fmt.Errorf("App 개인키를 읽지 못했습니다: %w", err)
 	}
 	return &TokenSource{appID: appID, privateKey: key, tokens: map[int64]cachedToken{}}, nil
 }
@@ -40,11 +40,11 @@ func (s *TokenSource) InstallationToken(ctx context.Context, installationID int6
 	}
 	client, err := gh.NewClient(gh.WithAuthToken(appJWT))
 	if err != nil {
-		return "", fmt.Errorf("GitHub 클라이언트를 만들지 못했다: %w", err)
+		return "", fmt.Errorf("GitHub 클라이언트를 만들지 못했습니다: %w", err)
 	}
 	token, _, err := client.Apps.CreateInstallationToken(ctx, installationID, nil)
 	if err != nil {
-		return "", fmt.Errorf("설치 토큰을 발급하지 못했다: %w", err)
+		return "", fmt.Errorf("설치 토큰을 발급하지 못했습니다: %w", err)
 	}
 
 	s.mutex.Lock()
@@ -62,7 +62,7 @@ func (s *TokenSource) appJWT() (string, error) {
 	}
 	signed, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(s.privateKey)
 	if err != nil {
-		return "", fmt.Errorf("App JWT를 만들지 못했다: %w", err)
+		return "", fmt.Errorf("App JWT를 만들지 못했습니다: %w", err)
 	}
 	return signed, nil
 }

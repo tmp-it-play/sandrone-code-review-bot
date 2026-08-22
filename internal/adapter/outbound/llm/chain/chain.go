@@ -13,7 +13,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usage"
 )
 
-var ErrNoProviderAvailable = errors.New("사용 가능한 LLM 프로바이더가 없다")
+var ErrNoProviderAvailable = errors.New("사용 가능한 LLM 프로바이더가 없습니다")
 
 type Chain struct {
 	providers     []outbound.Provider
@@ -47,7 +47,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		}
 		cooling, err := c.cooldown.Active(ctx, candidate.Name())
 		if err != nil {
-			c.logger.Warn("쿨다운 상태를 읽지 못했다", "provider", candidate.Name(), "error", err)
+			c.logger.Warn("쿨다운 상태를 읽지 못했습니다", "provider", candidate.Name(), "error", err)
 		}
 		if cooling {
 			continue
@@ -66,7 +66,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			status = failure.Status
 			if failure.Kind.TriggersCooldown() {
 				if markErr := c.cooldown.Mark(ctx, candidate.Name(), c.cooldownFor); markErr != nil {
-					c.logger.Warn("쿨다운을 기록하지 못했다", "provider", candidate.Name(), "error", markErr)
+					c.logger.Warn("쿨다운을 기록하지 못했습니다", "provider", candidate.Name(), "error", markErr)
 				}
 			}
 		}
@@ -76,7 +76,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 	if lastErr == nil {
 		return llm.Response{}, ErrNoProviderAvailable
 	}
-	return llm.Response{}, fmt.Errorf("모든 프로바이더가 실패했다: %w", lastErr)
+	return llm.Response{}, fmt.Errorf("모든 프로바이더가 실패했습니다: %w", lastErr)
 }
 
 func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, request llm.Request, executor outbound.ToolExecutor) (llm.Response, error) {
@@ -107,7 +107,7 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 		for _, call := range response.ToolCalls {
 			result, execErr := executor.Execute(ctx, call)
 			if execErr != nil {
-				result = "도구 실행에 실패했다."
+				result = "도구 실행에 실패했습니다."
 			}
 			messages = append(messages, llm.Message{
 				Role:       llm.RoleTool,
@@ -137,7 +137,7 @@ func (c *Chain) observe(ctx context.Context, candidate outbound.Provider, outcom
 		OccurredAt: c.clock.Now(),
 	}
 	if err := c.usage.Record(ctx, event); err != nil {
-		c.logger.Warn("프로바이더 사용량을 기록하지 못했다", "provider", candidate.Name(), "error", err)
+		c.logger.Warn("프로바이더 사용량을 기록하지 못했습니다", "provider", candidate.Name(), "error", err)
 	}
 }
 

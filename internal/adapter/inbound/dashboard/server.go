@@ -23,7 +23,7 @@ func NewServer(deps Dependencies) (*Server, error) {
 	pattern := filepath.Join(deps.TemplateDir, "*.html")
 	templates, err := template.ParseGlob(pattern)
 	if err != nil {
-		return nil, fmt.Errorf("대시보드 템플릿을 읽지 못했다: %w", err)
+		return nil, fmt.Errorf("대시보드 템플릿을 읽지 못했습니다: %w", err)
 	}
 	return &Server{deps: deps, templates: templates}, nil
 }
@@ -86,7 +86,7 @@ func (s *Server) overview(writer http.ResponseWriter, request *http.Request) {
 	data := PageData{Title: "개요", Active: "overview"}
 	repositories, err := s.deps.Installations.Repositories(ctx)
 	if err != nil {
-		s.deps.Logger.Warn("저장소 목록을 읽지 못했다", "error", err)
+		s.deps.Logger.Warn("저장소 목록을 읽지 못했습니다", "error", err)
 	}
 	for _, repository := range repositories {
 		data.Repositories = append(data.Repositories, RepositoryView{
@@ -121,7 +121,7 @@ func (s *Server) reviewDetail(writer http.ResponseWriter, request *http.Request)
 	}
 	findings, err := s.deps.Findings.ByReview(request.Context(), id)
 	if err != nil {
-		s.deps.Logger.Warn("리뷰 지적을 읽지 못했다", "review", id, "error", err)
+		s.deps.Logger.Warn("리뷰 지적을 읽지 못했습니다", "review", id, "error", err)
 	}
 	data := PageData{Title: "리뷰 상세", Active: "reviews", Review: toReviewView(record)}
 	for _, finding := range findings {
@@ -198,7 +198,7 @@ func (s *Server) installationFor(ctx context.Context, owner string, repository s
 func (s *Server) recentReviews(ctx context.Context, limit int) []ReviewView {
 	records, err := s.deps.Reviews.Recent(ctx, limit)
 	if err != nil {
-		s.deps.Logger.Warn("리뷰 이력을 읽지 못했다", "error", err)
+		s.deps.Logger.Warn("리뷰 이력을 읽지 못했습니다", "error", err)
 		return nil
 	}
 	views := make([]ReviewView, 0, len(records))
@@ -211,7 +211,7 @@ func (s *Server) recentReviews(ctx context.Context, limit int) []ReviewView {
 func (s *Server) recentCommands(ctx context.Context, limit int) []CommandView {
 	invocations, err := s.deps.Commands.Recent(ctx, limit)
 	if err != nil {
-		s.deps.Logger.Warn("명령 이력을 읽지 못했다", "error", err)
+		s.deps.Logger.Warn("명령 이력을 읽지 못했습니다", "error", err)
 		return nil
 	}
 	views := make([]CommandView, 0, len(invocations))
@@ -231,7 +231,7 @@ func (s *Server) recentCommands(ctx context.Context, limit int) []CommandView {
 func (s *Server) providerViews(ctx context.Context) []ProviderView {
 	snapshots, err := s.deps.Usage.Snapshot(ctx)
 	if err != nil {
-		s.deps.Logger.Warn("프로바이더 사용량을 읽지 못했다", "error", err)
+		s.deps.Logger.Warn("프로바이더 사용량을 읽지 못했습니다", "error", err)
 	}
 	byName := map[string]ProviderView{}
 	for _, snapshot := range snapshots {
@@ -264,7 +264,7 @@ func (s *Server) queueView() QueueView {
 	}
 	queues, err := s.deps.Inspector.Queues()
 	if err != nil {
-		s.deps.Logger.Warn("큐 목록을 읽지 못했다", "error", err)
+		s.deps.Logger.Warn("큐 목록을 읽지 못했습니다", "error", err)
 		return QueueView{}
 	}
 	view := QueueView{Available: true}
@@ -286,7 +286,7 @@ func (s *Server) render(writer http.ResponseWriter, name string, data PageData) 
 	data.Base = s.deps.BasePath
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(writer, name, data); err != nil {
-		s.deps.Logger.Error("템플릿을 렌더링하지 못했다", "template", name, "error", err)
+		s.deps.Logger.Error("템플릿을 렌더링하지 못했습니다", "template", name, "error", err)
 	}
 }
 

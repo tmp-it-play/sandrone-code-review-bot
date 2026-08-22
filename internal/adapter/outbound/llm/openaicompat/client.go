@@ -99,7 +99,7 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureInvalid, Status: httpResponse.StatusCode, Cause: err}
 	}
 	if len(decoded.Choices) == 0 {
-		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureInvalid, Status: httpResponse.StatusCode, Cause: fmt.Errorf("응답에 선택지가 없다")}
+		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureInvalid, Status: httpResponse.StatusCode, Cause: fmt.Errorf("응답에 선택지가 없습니다")}
 	}
 	choice := decoded.Choices[0]
 	return llm.Response{

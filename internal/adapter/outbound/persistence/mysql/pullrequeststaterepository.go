@@ -28,7 +28,7 @@ func (r *PullRequestStateRepository) LastReviewedSHA(ctx context.Context, target
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("마지막 리뷰 커밋을 읽지 못했다: %w", err)
+		return "", fmt.Errorf("마지막 리뷰 커밋을 읽지 못했습니다: %w", err)
 	}
 	return entry.LastReviewedSHA, nil
 }
@@ -45,7 +45,7 @@ func (r *PullRequestStateRepository) SetLastReviewedSHA(ctx context.Context, tar
 		DoUpdates: clause.AssignmentColumns([]string{"last_reviewed_sha", "updated_at"}),
 	}).Create(&entry).Error
 	if err != nil {
-		return fmt.Errorf("마지막 리뷰 커밋을 저장하지 못했다: %w", err)
+		return fmt.Errorf("마지막 리뷰 커밋을 저장하지 못했습니다: %w", err)
 	}
 	return nil
 }

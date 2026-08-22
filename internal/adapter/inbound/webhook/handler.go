@@ -31,13 +31,13 @@ func NewHandler(secret string, router *EventRouter, deduplicator outbound.Dedupl
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
-		http.Error(writer, "POST만 허용한다", http.StatusMethodNotAllowed)
+		http.Error(writer, "POST만 허용합니다", http.StatusMethodNotAllowed)
 		return
 	}
 	payload, err := gh.ValidatePayload(request, h.secret)
 	if err != nil {
-		h.logger.Warn("웹훅 서명 검증에 실패했다", "error", err)
-		http.Error(writer, "서명이 올바르지 않다", http.StatusUnauthorized)
+		h.logger.Warn("웹훅 서명 검증에 실패했습니다", "error", err)
+		http.Error(writer, "서명이 올바르지 않습니다", http.StatusUnauthorized)
 		return
 	}
 	eventType := gh.WebHookType(request)
@@ -45,7 +45,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if deliveryID != "" {
 		first, dedupeErr := h.deduplicator.FirstSeen(request.Context(), deliveryID, h.retention.Duration())
 		if dedupeErr != nil {
-			h.logger.Warn("중복 확인에 실패했다", "delivery", deliveryID, "error", dedupeErr)
+			h.logger.Warn("중복 확인에 실패했습니다", "delivery", deliveryID, "error", dedupeErr)
 		} else if !first {
 			writer.WriteHeader(http.StatusOK)
 			return
@@ -53,7 +53,7 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	event, err := gh.ParseWebHook(eventType, payload)
 	if err != nil {
-		h.logger.Warn("웹훅 본문을 해석하지 못했다", "event", eventType, "error", err)
+		h.logger.Warn("웹훅 본문을 해석하지 못했습니다", "event", eventType, "error", err)
 		writer.WriteHeader(http.StatusAccepted)
 		return
 	}

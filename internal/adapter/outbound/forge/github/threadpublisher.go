@@ -25,7 +25,7 @@ func (p *ThreadPublisher) Thread(ctx context.Context, target pullrequest.Target,
 	}
 	anchor, _, err := client.PullRequests.GetComment(ctx, target.Owner, target.Repository, commentID)
 	if err != nil {
-		return thread.Thread{}, fmt.Errorf("리뷰 코멘트를 읽지 못했다: %w", err)
+		return thread.Thread{}, fmt.Errorf("리뷰 코멘트를 읽지 못했습니다: %w", err)
 	}
 	rootID := anchor.GetID()
 	if anchor.GetInReplyTo() != 0 {
@@ -78,7 +78,7 @@ func (p *ThreadPublisher) Reply(ctx context.Context, target pullrequest.Target, 
 		return err
 	}
 	if _, _, err := client.PullRequests.CreateCommentInReplyTo(ctx, target.Owner, target.Repository, target.Number, body, commentID); err != nil {
-		return fmt.Errorf("스레드에 답글을 남기지 못했다: %w", err)
+		return fmt.Errorf("스레드에 답글을 남기지 못했습니다: %w", err)
 	}
 	return nil
 }
@@ -89,7 +89,7 @@ func (p *ThreadPublisher) listComments(ctx context.Context, client *gh.Client, t
 	for {
 		comments, response, err := client.PullRequests.ListComments(ctx, target.Owner, target.Repository, target.Number, options)
 		if err != nil {
-			return nil, fmt.Errorf("리뷰 코멘트 목록을 읽지 못했다: %w", err)
+			return nil, fmt.Errorf("리뷰 코멘트 목록을 읽지 못했습니다: %w", err)
 		}
 		collected = append(collected, comments...)
 		if response == nil || response.NextPage == 0 {

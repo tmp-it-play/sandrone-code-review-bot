@@ -16,11 +16,11 @@ func NewConnection(dsn string) (*gorm.DB, error) {
 		SkipDefaultTransaction: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("MySQL에 연결하지 못했다: %w", err)
+		return nil, fmt.Errorf("MySQL에 연결하지 못했습니다: %w", err)
 	}
 	pool, err := database.DB()
 	if err != nil {
-		return nil, fmt.Errorf("커넥션 풀을 얻지 못했다: %w", err)
+		return nil, fmt.Errorf("커넥션 풀을 얻지 못했습니다: %w", err)
 	}
 	pool.SetMaxOpenConns(20)
 	pool.SetMaxIdleConns(10)
@@ -39,7 +39,7 @@ func Migrate(database *gorm.DB) error {
 		&model.CommandInvocation{},
 	)
 	if err != nil {
-		return fmt.Errorf("스키마를 반영하지 못했다: %w", err)
+		return fmt.Errorf("스키마를 반영하지 못했습니다: %w", err)
 	}
 	return nil
 }

@@ -37,8 +37,8 @@ func DefaultRepoConfig() RepoConfig {
 		MaxInlineComments: 25,
 		ThreadReply:       true,
 		Sandrone: SandroneSetting{
-			AutoReview:          false,
-			AutoReviewOnPush:    true,
+			AutoReview:          true,
+			AutoReviewOnPush:    false,
 			SummaryPlacement:    SummaryPlacementNewComment,
 			Providers:           nil,
 			MaxInstructionChars: 20000,
