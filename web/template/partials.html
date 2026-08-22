@@ -5,6 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · sandrone</title>
+<link rel="icon" type="image/svg+xml" href="{{.Base}}/dashboard/static/favicon.svg">
 <link rel="stylesheet" href="{{.Base}}/dashboard/static/style.css">
 </head>
 <body>
@@ -36,8 +37,8 @@
     <tr>
       <td>{{.Repository}}</td>
       <td>#{{.Number}}</td>
-      <td>{{.Trigger}}</td>
-      <td><span class="badge {{.Outcome}}">{{.Outcome}}</span></td>
+      <td>{{.TriggerLabel}}</td>
+      <td><span class="badge {{.Outcome}}">{{.OutcomeLabel}}</span></td>
       <td>{{if .Provider}}{{.Provider}}{{else}}-{{end}}</td>
       <td>{{.Inline}}</td>
       <td>{{.Fallback}}</td>

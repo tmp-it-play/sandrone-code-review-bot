@@ -5,6 +5,7 @@ type CommandView struct {
 	Number     int
 	Invoker    string
 	Kind       string
+	KindLabel  string
 	Allowed    bool
 	OccurredAt string
 }

@@ -66,7 +66,7 @@ td code { font-size: 13px; }
 
 .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
 .badge.succeeded { color: var(--ok); border-color: var(--ok); }
-.badge.failed, .badge.critical, .badge.major { color: var(--bad); border-color: var(--bad); }
+.badge.failed, .badge.unavailable, .badge.critical, .badge.major { color: var(--bad); border-color: var(--bad); }
 .badge.skipped, .badge.minor, .badge.nit { color: var(--warn); border-color: var(--warn); }
 
 .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 18px 0; }

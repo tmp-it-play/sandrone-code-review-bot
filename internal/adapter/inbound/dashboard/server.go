@@ -90,9 +90,10 @@ func (s *Server) overview(writer http.ResponseWriter, request *http.Request) {
 	}
 	for _, repository := range repositories {
 		data.Repositories = append(data.Repositories, RepositoryView{
-			FullName:       repository.FullName(),
-			InstallationID: repository.InstallationID,
-			Private:        repository.Private,
+			FullName:        repository.FullName(),
+			InstallationID:  repository.InstallationID,
+			Private:         repository.Private,
+			VisibilityLabel: visibilityLabel(repository.Private),
 		})
 	}
 	data.Reviews = s.recentReviews(ctx, 10)
@@ -126,12 +127,14 @@ func (s *Server) reviewDetail(writer http.ResponseWriter, request *http.Request)
 	data := PageData{Title: "리뷰 상세", Active: "reviews", Review: toReviewView(record)}
 	for _, finding := range findings {
 		data.Findings = append(data.Findings, FindingView{
-			Path:      finding.File,
-			Line:      finding.Line,
-			Severity:  string(finding.Severity),
-			Title:     finding.Title,
-			Body:      finding.Body,
-			Placement: string(finding.Placement),
+			Path:           finding.File,
+			Line:           finding.Line,
+			Severity:       string(finding.Severity),
+			SeverityLabel:  finding.Severity.Label(),
+			Title:          finding.Title,
+			Body:           finding.Body,
+			Placement:      string(finding.Placement),
+			PlacementLabel: placementLabel(finding.Placement),
 		})
 	}
 	s.render(writer, "review.html", data)
@@ -221,6 +224,7 @@ func (s *Server) recentCommands(ctx context.Context, limit int) []CommandView {
 			Number:     invocation.Number,
 			Invoker:    invocation.Invoker,
 			Kind:       string(invocation.Kind),
+			KindLabel:  commandLabel(invocation.Kind),
 			Allowed:    invocation.Allowed,
 			OccurredAt: formatTime(invocation.OccurredAt),
 		})
@@ -292,19 +296,42 @@ func (s *Server) render(writer http.ResponseWriter, name string, data PageData) 
 
 func toReviewView(record review.Record) ReviewView {
 	return ReviewView{
-		ID:         record.ID,
-		Repository: record.Owner + "/" + record.Repository,
-		Number:     record.Number,
-		Trigger:    string(record.Trigger),
-		Outcome:    string(record.Outcome),
-		Provider:   record.Provider,
-		Model:      record.Model,
-		Inline:     record.InlineCount,
-		Fallback:   record.FallbackCount,
-		Duration:   record.Duration().Round(time.Second).String(),
-		StartedAt:  formatTime(record.StartedAt),
-		Detail:     record.Detail,
+		ID:           record.ID,
+		Repository:   record.Owner + "/" + record.Repository,
+		Number:       record.Number,
+		Trigger:      string(record.Trigger),
+		TriggerLabel: triggerLabel(record.Trigger),
+		Outcome:      string(record.Outcome),
+		OutcomeLabel: outcomeLabel(record.Outcome),
+		Provider:     record.Provider,
+		Model:        record.Model,
+		Inline:       record.InlineCount,
+		Fallback:     record.FallbackCount,
+		Duration:     formatDuration(record.Duration()),
+		StartedAt:    formatTime(record.StartedAt),
+		Detail:       record.Detail,
 	}
+}
+
+func visibilityLabel(private bool) string {
+	if private {
+		return "비공개"
+	}
+	return "공개"
+}
+
+func formatDuration(value time.Duration) string {
+	if value <= 0 {
+		return "-"
+	}
+	if value < time.Second {
+		return "1초 미만"
+	}
+	seconds := int(value.Round(time.Second).Seconds())
+	if seconds < 60 {
+		return fmt.Sprintf("%d초", seconds)
+	}
+	return fmt.Sprintf("%d분 %d초", seconds/60, seconds%60)
 }
 
 func formatTime(value time.Time) string {
