@@ -159,6 +159,7 @@ func NewApplication(config Config) (*Application, error) {
 		Cooldown:      cooldown,
 		Queue:         queueClient,
 		Inspector:     inspector,
+		BasePath:      config.BasePath,
 		Credentials:   dashboard.Credentials{Username: config.DashboardUsername, Password: config.DashboardPassword},
 		Sessions:      dashboard.NewSessionStore(config.DashboardSecret, 12*time.Hour),
 		ProviderOrder: config.ProviderOrder,
@@ -175,9 +176,11 @@ func NewApplication(config Config) (*Application, error) {
 	mux.Handle("/healthz", httpapi.NewHealthHandler(database, cache))
 	mux.Handle("/metrics", httpapi.NewMetricsHandler(metrics, config.MetricsToken))
 	mux.HandleFunc("GET /{$}", func(writer http.ResponseWriter, request *http.Request) {
-		http.Redirect(writer, request, "/dashboard", http.StatusSeeOther)
+		http.Redirect(writer, request, config.BasePath+"/dashboard", http.StatusSeeOther)
 	})
 	dashboardServer.Register(mux)
+
+	handler := mount(config.BasePath, mux)
 
 	asynqMux := asynq.NewServeMux()
 	asynqMux.Handle(queueadapter.TaskReview, worker.NewReviewHandler(reviewUseCase, metrics))
@@ -194,7 +197,7 @@ func NewApplication(config Config) (*Application, error) {
 
 	return &Application{
 		logger:      logger,
-		httpServer:  &http.Server{Addr: config.HTTPAddress, Handler: mux, ReadHeaderTimeout: 10 * time.Second},
+		httpServer:  &http.Server{Addr: config.HTTPAddress, Handler: handler, ReadHeaderTimeout: 10 * time.Second},
 		asynqServer: asynqServer,
 		asynqMux:    asynqMux,
 		queueClient: queueClient,

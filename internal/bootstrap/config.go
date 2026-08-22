@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	HTTPAddress       string
+	BasePath          string
 	AppID             int64
 	PrivateKey        []byte
 	WebhookSecret     string
@@ -34,6 +35,7 @@ type Config struct {
 func LoadConfig() (Config, error) {
 	config := Config{
 		HTTPAddress:       env("SANDRONE_HTTP_ADDR", ":8080"),
+		BasePath:          normalizeBasePath(os.Getenv("SANDRONE_BASE_PATH")),
 		WebhookSecret:     os.Getenv("GITHUB_WEBHOOK_SECRET"),
 		MySQLDSN:          os.Getenv("MYSQL_DSN"),
 		RedisAddress:      env("REDIS_ADDR", "127.0.0.1:6379"),
@@ -151,4 +153,12 @@ func duration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return value
+}
+
+func normalizeBasePath(raw string) string {
+	trimmed := strings.Trim(strings.TrimSpace(raw), "/")
+	if trimmed == "" {
+		return ""
+	}
+	return "/" + trimmed
 }

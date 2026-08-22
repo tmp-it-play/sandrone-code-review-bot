@@ -19,6 +19,7 @@ type Dependencies struct {
 	Credentials   Credentials
 	Sessions      *SessionStore
 	ProviderOrder []string
+	BasePath      string
 	TemplateDir   string
 	StaticDir     string
 	Logger        *slog.Logger

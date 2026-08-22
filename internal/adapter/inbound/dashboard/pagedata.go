@@ -1,6 +1,7 @@
 package dashboard
 
 type PageData struct {
+	Base         string
 	Title        string
 	Active       string
 	Error        string

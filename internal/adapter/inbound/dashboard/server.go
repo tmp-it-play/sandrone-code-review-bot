@@ -45,7 +45,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if !s.deps.Sessions.Valid(request) {
-			http.Redirect(writer, request, "/dashboard/login", http.StatusSeeOther)
+			http.Redirect(writer, request, s.deps.BasePath+"/dashboard/login", http.StatusSeeOther)
 			return
 		}
 		next.ServeHTTP(writer, request)
@@ -54,7 +54,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 
 func (s *Server) loginForm(writer http.ResponseWriter, request *http.Request) {
 	if s.deps.Sessions.Valid(request) {
-		http.Redirect(writer, request, "/dashboard", http.StatusSeeOther)
+		http.Redirect(writer, request, s.deps.BasePath+"/dashboard", http.StatusSeeOther)
 		return
 	}
 	s.render(writer, "login.html", PageData{Title: "로그인"})
@@ -73,12 +73,12 @@ func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	s.deps.Sessions.Issue(writer, username)
-	http.Redirect(writer, request, "/dashboard", http.StatusSeeOther)
+	http.Redirect(writer, request, s.deps.BasePath+"/dashboard", http.StatusSeeOther)
 }
 
 func (s *Server) logout(writer http.ResponseWriter, request *http.Request) {
 	s.deps.Sessions.Clear(writer)
-	http.Redirect(writer, request, "/dashboard/login", http.StatusSeeOther)
+	http.Redirect(writer, request, s.deps.BasePath+"/dashboard/login", http.StatusSeeOther)
 }
 
 func (s *Server) overview(writer http.ResponseWriter, request *http.Request) {
@@ -168,7 +168,7 @@ func (s *Server) rerun(writer http.ResponseWriter, request *http.Request) {
 		http.Error(writer, "재실행을 요청하지 못했다", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(writer, request, "/dashboard/reviews", http.StatusSeeOther)
+	http.Redirect(writer, request, s.deps.BasePath+"/dashboard/reviews", http.StatusSeeOther)
 }
 
 func (s *Server) providers(writer http.ResponseWriter, request *http.Request) {
@@ -283,6 +283,7 @@ func (s *Server) queueView() QueueView {
 }
 
 func (s *Server) render(writer http.ResponseWriter, name string, data PageData) {
+	data.Base = s.deps.BasePath
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(writer, name, data); err != nil {
 		s.deps.Logger.Error("템플릿을 렌더링하지 못했다", "template", name, "error", err)
