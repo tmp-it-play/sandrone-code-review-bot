@@ -12,17 +12,13 @@ func NewCatalog() Catalog {
 			Name:       "gemini",
 			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
 		},
-		"githubmodels": {
-			Name:       "githubmodels",
-			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
-		},
 		"groq": {
 			Name:       "groq",
 			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
 		},
 		"openrouter": {
 			Name:       "openrouter",
-			Capability: llm.Capability{ToolCalling: false, JSONMode: false},
+			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
 			Headers: map[string]string{
 				"HTTP-Referer": "https://github.com/it-play/sandrone-code-review-bot",
 				"X-Title":      "sandrone-review-bot",
@@ -30,7 +26,7 @@ func NewCatalog() Catalog {
 		},
 		"nvidia": {
 			Name:       "nvidia",
-			Capability: llm.Capability{ToolCalling: false, JSONMode: false},
+			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
 		},
 	}}
 }
