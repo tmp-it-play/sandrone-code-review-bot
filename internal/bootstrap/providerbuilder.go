@@ -18,12 +18,18 @@ func buildProviders(config Config) []outbound.Provider {
 		if !known {
 			continue
 		}
+		requestProfile := provider.RequestProfileFor(name, entry.Model)
+		capability := descriptor.Capability
+		if requestProfile.Capability != nil {
+			capability = *requestProfile.Capability
+		}
 		providers = append(providers, openaicompat.NewClient(
 			name,
 			entry.Model,
 			entry.BaseURL,
 			entry.APIKey,
-			descriptor.Capability,
+			capability,
+			requestProfile,
 			descriptor.MaxPromptChars,
 			descriptor.Headers,
 			config.RequestTimeout,

@@ -6,5 +6,6 @@ type SandroneSetting struct {
 	SummaryPlacement    SummaryPlacement
 	Providers           []string
 	MaxInstructionChars int
+	MaxReviewBatches    int
 	InstructionFiles    []string
 }

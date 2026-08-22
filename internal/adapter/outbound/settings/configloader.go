@@ -113,6 +113,9 @@ func mergeSandrone(current setting.SandroneSetting, raw rawSandrone) setting.San
 	if raw.MaxInstructionChars != nil {
 		current.MaxInstructionChars = *raw.MaxInstructionChars
 	}
+	if raw.MaxReviewBatches != nil {
+		current.MaxReviewBatches = *raw.MaxReviewBatches
+	}
 	if len(raw.InstructionFiles) > 0 {
 		current.InstructionFiles = raw.InstructionFiles
 	}

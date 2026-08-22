@@ -1,0 +1,57 @@
+package provider
+
+import (
+	"strings"
+
+	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
+)
+
+func RequestProfileFor(providerName string, model string) RequestProfile {
+	normalizedProvider := strings.ToLower(strings.TrimSpace(providerName))
+	normalizedModel := strings.ToLower(strings.TrimSpace(model))
+	baseModel, _, _ := strings.Cut(normalizedModel, ":")
+
+	switch normalizedProvider + "/" + baseModel {
+	case "gemini/gemini-3.7-flash":
+		return RequestProfile{
+			ReasoningEffort:  "medium",
+			OutputTokenLimit: 65536,
+		}
+	case "groq/openai/gpt-oss-120b":
+		return RequestProfile{
+			Temperature:            float64Value(1),
+			TopP:                   float64Value(1),
+			ReasoningEffort:        "medium",
+			ParallelToolCalls:      boolValue(false),
+			OutputTokenLimit:       65536,
+			UseMaxCompletionTokens: true,
+		}
+	case "openrouter/z-ai/glm-5.2":
+		return RequestProfile{
+			Temperature:           float64Value(1),
+			TopP:                  float64Value(0.95),
+			NestedReasoningEffort: "high",
+			ExcludeReasoning:      true,
+			OutputTokenLimit:      131072,
+		}
+	case "nvidia/google/gemma-4-31b-it":
+		capability := llm.Capability{}
+		return RequestProfile{
+			Capability:       &capability,
+			Temperature:      float64Value(1),
+			TopP:             float64Value(0.95),
+			ThinkingEnabled:  boolValue(false),
+			OutputTokenLimit: 32768,
+		}
+	default:
+		return RequestProfile{UseRequestTemperature: true}
+	}
+}
+
+func float64Value(value float64) *float64 {
+	return &value
+}
+
+func boolValue(value bool) *bool {
+	return &value
+}

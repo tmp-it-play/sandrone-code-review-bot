@@ -102,7 +102,7 @@ func providerConfigs() map[string]ProviderConfig {
 		{Name: "gemini", APIKey: os.Getenv("GEMINI_API_KEY"), Model: env("GEMINI_MODEL", "gemini-3.7-flash"), BaseURL: env("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")},
 		{Name: "groq", APIKey: os.Getenv("GROQ_API_KEY"), Model: env("GROQ_MODEL", "openai/gpt-oss-120b"), BaseURL: env("GROQ_BASE_URL", "https://api.groq.com/openai/v1")},
 		{Name: "openrouter", APIKey: os.Getenv("OPENROUTER_API_KEY"), Model: env("OPENROUTER_MODEL", "z-ai/glm-5.2:free"), BaseURL: env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")},
-		{Name: "nvidia", APIKey: os.Getenv("NVIDIA_API_KEY"), Model: env("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b"), BaseURL: env("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")},
+		{Name: "nvidia", APIKey: os.Getenv("NVIDIA_API_KEY"), Model: env("NVIDIA_MODEL", "google/gemma-4-31b-it"), BaseURL: env("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")},
 	}
 	configured := map[string]ProviderConfig{}
 	for _, candidate := range defaults {

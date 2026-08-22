@@ -42,6 +42,7 @@ func DefaultRepoConfig() RepoConfig {
 			SummaryPlacement:    SummaryPlacementNewComment,
 			Providers:           nil,
 			MaxInstructionChars: 20000,
+			MaxReviewBatches:    4,
 			InstructionFiles:    DefaultInstructionFiles(),
 		},
 	}

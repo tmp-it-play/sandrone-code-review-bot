@@ -39,6 +39,20 @@ func New(providers []outbound.Provider, cooldown outbound.Cooldown, usageReposit
 	}
 }
 
+func (c *Chain) PromptBudget() int {
+	budget := 0
+	for _, candidate := range c.providers {
+		limit := candidate.PromptLimit()
+		if limit <= 0 {
+			continue
+		}
+		if budget == 0 || limit < budget {
+			budget = limit
+		}
+	}
+	return budget
+}
+
 func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outbound.ToolExecutor) (llm.Response, error) {
 	var lastErr error
 	for _, candidate := range c.providers {

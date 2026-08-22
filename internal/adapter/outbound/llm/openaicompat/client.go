@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/llm/provider"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 )
 
@@ -19,18 +20,20 @@ type Client struct {
 	baseURL        string
 	apiKey         string
 	capability     llm.Capability
+	requestProfile provider.RequestProfile
 	maxPromptChars int
 	extraHeaders   map[string]string
 	httpClient     *http.Client
 }
 
-func NewClient(name string, model string, baseURL string, apiKey string, capability llm.Capability, maxPromptChars int, extraHeaders map[string]string, timeout time.Duration) *Client {
+func NewClient(name string, model string, baseURL string, apiKey string, capability llm.Capability, requestProfile provider.RequestProfile, maxPromptChars int, extraHeaders map[string]string, timeout time.Duration) *Client {
 	return &Client{
 		name:           name,
 		model:          model,
 		baseURL:        strings.TrimRight(baseURL, "/"),
 		apiKey:         apiKey,
 		capability:     capability,
+		requestProfile: requestProfile,
 		maxPromptChars: maxPromptChars,
 		extraHeaders:   extraHeaders,
 		httpClient:     &http.Client{Timeout: timeout},
@@ -54,17 +57,15 @@ func (c *Client) PromptLimit() int {
 }
 
 func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Response, error) {
-	payload := chatRequest{
-		Model:       c.model,
-		Messages:    toChatMessages(request.Messages),
-		Temperature: request.Temperature,
-		MaxTokens:   request.MaxOutputTokens,
-	}
+	payload := c.chatRequest(request)
 	if request.ForceJSON && c.capability.JSONMode && len(request.Tools) == 0 {
 		payload.ResponseFormat = &responseFormat{Type: "json_object"}
 	}
 	if c.capability.ToolCalling {
 		payload.Tools = toChatTools(request.Tools)
+		if len(payload.Tools) > 0 {
+			payload.ParallelToolCalls = c.requestProfile.ParallelToolCalls
+		}
 	}
 
 	body, err := json.Marshal(payload)
@@ -120,6 +121,36 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 			TotalTokens:      decoded.Usage.TotalTokens,
 		},
 	}, nil
+}
+
+func (c *Client) chatRequest(request llm.Request) chatRequest {
+	payload := chatRequest{
+		Model:           c.model,
+		Messages:        toChatMessages(request.Messages),
+		Temperature:     c.requestProfile.Temperature,
+		TopP:            c.requestProfile.TopP,
+		ReasoningEffort: c.requestProfile.ReasoningEffort,
+	}
+	if c.requestProfile.UseRequestTemperature && request.Temperature != 0 {
+		temperature := request.Temperature
+		payload.Temperature = &temperature
+	}
+	maxOutputTokens := request.MaxOutputTokens
+	if limit := c.requestProfile.OutputTokenLimit; limit > 0 && maxOutputTokens > limit {
+		maxOutputTokens = limit
+	}
+	if c.requestProfile.UseMaxCompletionTokens {
+		payload.MaxCompletionTokens = maxOutputTokens
+	} else {
+		payload.MaxTokens = maxOutputTokens
+	}
+	if effort := c.requestProfile.NestedReasoningEffort; effort != "" {
+		payload.Reasoning = &reasoningConfig{Effort: effort, Exclude: c.requestProfile.ExcludeReasoning}
+	}
+	if enabled := c.requestProfile.ThinkingEnabled; enabled != nil {
+		payload.ChatTemplateKwargs = &chatTemplateKwargs{EnableThinking: *enabled}
+	}
+	return payload
 }
 
 func toChatMessages(messages []llm.Message) []chatMessage {

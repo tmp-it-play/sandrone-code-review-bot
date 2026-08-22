@@ -41,17 +41,17 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 	if err != nil {
 		return u.fail(ctx, task, startedAt, "변경 파일을 읽지 못했습니다", err)
 	}
-	selected := selection.FileSelector{
+	chosen := selection.FileSelector{
 		Include:  config.Include,
 		Exclude:  config.Exclude,
 		MaxFiles: config.MaxFiles,
 	}.Select(files)
-	if len(selected) == 0 {
+	if chosen.IsEmpty() {
 		u.notify(ctx, target, review.Notice{Kind: review.NoticeSkipped, Message: "요약할 변경 사항이 없습니다."})
 		u.save(ctx, task, startedAt, review.OutcomeSkipped, "요약 대상 파일 없음", llm.Response{})
 		return nil
 	}
-	selected = u.trim(selected, config)
+	selected := u.trim(chosen.Files, config)
 
 	instructions, err := u.deps.Settings.Instructions(ctx, target, config)
 	if err != nil {

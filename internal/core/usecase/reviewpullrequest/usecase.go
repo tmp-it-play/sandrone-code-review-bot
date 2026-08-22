@@ -3,9 +3,11 @@ package reviewpullrequest
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/it-play/sandrone-code-review-bot/internal/core/batching"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/dedupe"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
@@ -50,64 +52,98 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 	if err != nil {
 		return u.fail(ctx, task, startedAt, "변경 파일을 읽지 못했습니다", err)
 	}
-	selected := selection.FileSelector{
+	chosen := selection.FileSelector{
 		Include:  config.Include,
 		Exclude:  config.Exclude,
 		MaxFiles: config.MaxFiles,
 	}.Select(files)
-	if len(selected) == 0 {
+	if chosen.IsEmpty() {
 		u.notify(ctx, target, task, review.Notice{Kind: review.NoticeSkipped, Message: "리뷰할 변경 사항이 없습니다."})
 		u.save(ctx, task, startedAt, review.OutcomeSkipped, "리뷰 대상 파일 없음", llm.Response{}, 0, 0)
 		u.rememberHead(ctx, target)
 		return nil
 	}
-	selected = u.loadSources(ctx, target, selected, config)
+	loaded := u.loadSources(ctx, target, chosen.Files, config)
 
 	instructions, err := u.deps.Settings.Instructions(ctx, target, config)
 	if err != nil {
 		u.deps.Logger.Warn("지침 문서를 읽지 못했습니다", "target", target.Reference(), "error", err)
 	}
 
+	inventory := inventoryOf(loaded, chosen.Skipped)
+	reserved := instructions.TotalSize() + len(request.Body) + inventoryCost(inventory)
+	plan := batching.Batcher{
+		MaxChars:   batchBudget(config.MaxPromptChars, u.deps.Completer.PromptBudget()),
+		MaxBatches: config.Sandrone.MaxReviewBatches,
+	}.Split(loaded, reserved)
+
 	executor := u.executor(target, config)
-	promptContext := prompt.Context{
-		PullRequest:  request,
-		Files:        selected,
-		Instructions: instructions,
-		Config:       config,
-		Incremental:  incremental,
-	}
-	messages := prompt.ReviewPrompt{
-		Context:      promptContext,
-		Extra:        task.Instruction,
-		ToolsAllowed: executor != nil,
-	}.Messages()
+	gathered := review.Result{}
+	usage := llm.Usage{}
+	response := llm.Response{}
+	reviewed := make([]pullrequest.ChangedFile, 0, len(loaded))
+	failed := make([]pullrequest.ChangedFile, 0)
 
-	response, err := u.deps.Completer.Complete(ctx, llm.Request{
-		Messages:        messages,
-		Temperature:     config.Temperature,
-		MaxOutputTokens: config.MaxOutputTokens,
-		Providers:       config.Sandrone.Providers,
-		ForceJSON:       true,
-	}, executor)
-	if err != nil {
-		return u.fail(ctx, task, startedAt, "리뷰 모델을 호출하지 못했습니다", err)
+	for index, batch := range plan.Batches {
+		messages := prompt.ReviewPrompt{
+			Context: prompt.Context{
+				PullRequest:  request,
+				Files:        batch,
+				Inventory:    inventory,
+				Instructions: instructions,
+				Config:       config,
+				Incremental:  incremental,
+			},
+			Extra:        task.Instruction,
+			ToolsAllowed: executor != nil,
+		}.Messages()
+
+		batchResponse, batchErr := u.deps.Completer.Complete(ctx, llm.Request{
+			Messages:        messages,
+			Temperature:     config.Temperature,
+			MaxOutputTokens: config.MaxOutputTokens,
+			Providers:       config.Sandrone.Providers,
+			ForceJSON:       true,
+		}, executor)
+		if batchErr != nil {
+			if index == 0 {
+				return u.fail(ctx, task, startedAt, "리뷰 모델을 호출하지 못했습니다", batchErr)
+			}
+			u.deps.Logger.Warn("일부 배치를 리뷰하지 못했습니다", "target", target.Reference(), "batch", index+1, "error", batchErr)
+			failed = append(failed, batch...)
+			continue
+		}
+		usage = usage.Add(batchResponse.Usage)
+		response = batchResponse
+
+		batchResult, parseErr := u.deps.Parser.Parse(batchResponse.Content)
+		if parseErr != nil {
+			if index == 0 {
+				return u.fail(ctx, task, startedAt, "모델 응답을 해석하지 못했습니다", parseErr)
+			}
+			u.deps.Logger.Warn("일부 배치의 응답을 해석하지 못했습니다", "target", target.Reference(), "batch", index+1, "error", parseErr)
+			failed = append(failed, batch...)
+			continue
+		}
+		if index == 0 {
+			gathered.Summary.Overview = batchResult.Summary.Overview
+		}
+		gathered.Summary.Files = append(gathered.Summary.Files, batchResult.Summary.Files...)
+		gathered.Findings = append(gathered.Findings, batchResult.Findings...)
+		reviewed = append(reviewed, batch...)
 	}
 
-	result, err := u.deps.Parser.Parse(response.Content)
-	if err != nil {
-		return u.fail(ctx, task, startedAt, "모델 응답을 해석하지 못했습니다", err)
-	}
-
-	findings := selection.SeverityFilter{Minimum: config.MinSeverity}.Apply(result.Findings)
+	findings := selection.SeverityFilter{Minimum: config.MinSeverity}.Apply(gathered.Findings)
 	known, err := u.deps.Findings.Fingerprints(ctx, target)
 	if err != nil {
 		u.deps.Logger.Warn("기존 지적을 읽지 못했습니다", "target", target.Reference(), "error", err)
 		known = map[string]struct{}{}
 	}
 	findings, duplicates := dedupe.DuplicateFilter{Known: known}.Apply(findings)
-	findings = mapping.PositionMapper{MaxInline: config.MaxInlineComments}.Map(findings, selected)
+	findings = mapping.PositionMapper{MaxInline: config.MaxInlineComments}.Map(findings, reviewed)
 
-	placed := review.Result{Summary: result.Summary, Findings: findings}
+	placed := review.Result{Summary: gathered.Summary, Findings: findings}
+	response.Usage = usage
 	attribution := attributionOf(response)
 	view := review.SummaryView{
 		Summary:     placed.Summary,
@@ -117,6 +153,8 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 		Trigger:     task.Trigger,
 		Incremental: incremental,
 		SkippedDup:  duplicates,
+		Unreviewed:  unreviewedOf(chosen.Skipped, plan.Overflow, failed),
+		BatchCount:  len(plan.Batches),
 	}
 
 	if err := u.publish(ctx, target, view, placed, attribution); err != nil {
@@ -304,4 +342,54 @@ func attributionOf(response llm.Response) review.Attribution {
 		CompletionTokens: response.Usage.CompletionTokens,
 		TotalTokens:      response.Usage.TotalTokens,
 	}
+}
+
+func inventoryOf(reviewed []pullrequest.ChangedFile, skipped []pullrequest.ChangedFile) []pullrequest.ChangedFile {
+	inventory := make([]pullrequest.ChangedFile, 0, len(reviewed)+len(skipped))
+	for _, file := range reviewed {
+		inventory = append(inventory, pullrequest.ChangedFile{Path: file.Path, Additions: file.Additions, Deletions: file.Deletions})
+	}
+	inventory = append(inventory, skipped...)
+	return inventory
+}
+
+func inventoryCost(inventory []pullrequest.ChangedFile) int {
+	cost := 0
+	for _, file := range inventory {
+		cost += len(file.Path) + 24
+	}
+	return cost
+}
+
+func unreviewedOf(overCount []pullrequest.ChangedFile, overflow []pullrequest.ChangedFile, failed []pullrequest.ChangedFile) []review.UnreviewedFile {
+	groups := []struct {
+		files  []pullrequest.ChangedFile
+		reason string
+	}{
+		{overCount, "리뷰 대상 파일 수 상한 초과"},
+		{overflow, "분량 상한 초과"},
+		{failed, "모델 호출 실패"},
+	}
+	unreviewed := make([]review.UnreviewedFile, 0)
+	for _, group := range groups {
+		for _, file := range group.files {
+			unreviewed = append(unreviewed, review.UnreviewedFile{
+				Path:      file.Path,
+				Additions: file.Additions,
+				Deletions: file.Deletions,
+				Reason:    group.reason,
+			})
+		}
+	}
+	sort.SliceStable(unreviewed, func(left, right int) bool {
+		return unreviewed[left].Path < unreviewed[right].Path
+	})
+	return unreviewed
+}
+
+func batchBudget(configured int, providerBudget int) int {
+	if providerBudget > 0 && (configured <= 0 || providerBudget < configured) {
+		return providerBudget
+	}
+	return configured
 }

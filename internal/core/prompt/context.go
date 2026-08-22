@@ -15,11 +15,13 @@ type Context struct {
 	Instructions instruction.Collection
 	Config       setting.RepoConfig
 	Incremental  bool
+	Inventory    []pullrequest.ChangedFile
 }
 
 func (c Context) Render() string {
 	var builder strings.Builder
 	builder.WriteString(c.renderPullRequest())
+	builder.WriteString(c.renderInventory())
 	builder.WriteString(c.renderInstructions())
 	builder.WriteString(c.renderFiles())
 	rendered := builder.String()
@@ -44,6 +46,20 @@ func (c Context) renderPullRequest() string {
 		builder.WriteString("범위: 직전 리뷰 이후 추가된 커밋의 변경분만\n")
 	}
 	builder.WriteString("</pull_request>\n\n")
+	return builder.String()
+}
+
+func (c Context) renderInventory() string {
+	if len(c.Inventory) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("<all_changed_files>\n")
+	builder.WriteString("이 PR이 건드린 파일 전체다. 이 중 아래 <changed_files>에 실린 파일만 이번 요청에서 검토한다.\n")
+	for _, file := range c.Inventory {
+		builder.WriteString(fmt.Sprintf("- %s (+%d/-%d)\n", file.Path, file.Additions, file.Deletions))
+	}
+	builder.WriteString("</all_changed_files>\n\n")
 	return builder.String()
 }
 

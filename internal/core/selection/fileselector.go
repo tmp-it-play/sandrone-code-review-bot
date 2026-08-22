@@ -14,7 +14,7 @@ type FileSelector struct {
 	MaxFiles int
 }
 
-func (s FileSelector) Select(files []pullrequest.ChangedFile) []pullrequest.ChangedFile {
+func (s FileSelector) Select(files []pullrequest.ChangedFile) Selection {
 	kept := make([]pullrequest.ChangedFile, 0, len(files))
 	for _, file := range files {
 		if file.IsRemoved() {
@@ -31,13 +31,20 @@ func (s FileSelector) Select(files []pullrequest.ChangedFile) []pullrequest.Chan
 	sort.SliceStable(kept, func(left, right int) bool {
 		return kept[left].ChangeSize() > kept[right].ChangeSize()
 	})
+	var skipped []pullrequest.ChangedFile
 	if s.MaxFiles > 0 && len(kept) > s.MaxFiles {
+		skipped = append(skipped, kept[s.MaxFiles:]...)
 		kept = kept[:s.MaxFiles]
 	}
-	sort.SliceStable(kept, func(left, right int) bool {
-		return kept[left].Path < kept[right].Path
+	sortByPath(kept)
+	sortByPath(skipped)
+	return Selection{Files: kept, Skipped: skipped}
+}
+
+func sortByPath(files []pullrequest.ChangedFile) {
+	sort.SliceStable(files, func(left, right int) bool {
+		return files[left].Path < files[right].Path
 	})
-	return kept
 }
 
 func (s FileSelector) allowed(path string) bool {

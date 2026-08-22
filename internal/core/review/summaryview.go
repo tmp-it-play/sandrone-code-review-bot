@@ -8,4 +8,6 @@ type SummaryView struct {
 	Trigger     Trigger
 	Incremental bool
 	SkippedDup  int
+	Unreviewed  []UnreviewedFile
+	BatchCount  int
 }

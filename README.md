@@ -8,6 +8,7 @@ GitHub Pull Request를 자동으로 리뷰하는 봇입니다. Go로 작성했�
 - 이후 푸시는 자동으로 다시 리뷰하지 않습니다 (`sandrone.autoReviewOnPush: true`로 켤 수 있습니다)
 - `/pr-review`, `/pr-summary`, 리뷰 스레드에서 `/pr-review-reply` — `@sandrone-code-review-bot` 멘션으로도 호출합니다
 - 여러 무료 LLM 프로바이더를 우선순위대로 시도하고, 한도에 걸리면 다음으로 넘어갑니다
+- 큰 PR은 파일 단위로 나눠 여러 번 검토하고, 그래도 담지 못한 파일은 요약 아래 토글에 표로 밝힙니다
 - 인라인 코멘트를 달지 못한 지적은 요약 코멘트 아래 토글로 합쳐 보여줍니다
 - 모든 코멘트 맨 아래에 사용한 프로바이더·모델과 토큰 사용량을 작게 표기합니다
 
@@ -64,6 +65,19 @@ docker compose up -d --build
 
 컨테이너 이름·포트·base path·도커 네트워크는 워크플로 상단 `env` 블록에, 모델과 프로바이더 순서는 `internal/bootstrap/config.go`의 기본값에 있습니다.
 
+### LLM 기본 모델
+
+기본 모델에는 각 서비스와 모델이 지원하는 요청 옵션을 자동으로 적용합니다.
+
+| 프로바이더 | 기본 모델 | 적용 옵션 |
+|---|---|---|
+| Gemini | `gemini-3.7-flash` | 샘플링 옵션 생략, `reasoning_effort=medium` |
+| Groq | `openai/gpt-oss-120b` | `temperature=1`, `top_p=1`, `reasoning_effort=medium`, 병렬 도구 호출 끄기, `max_completion_tokens` 사용 |
+| OpenRouter | `z-ai/glm-5.2:free` | `temperature=1`, `top_p=0.95`, `reasoning.effort=high`, 응답에서 추론 내용 제외 |
+| NVIDIA | `google/gemma-4-31b-it` | `temperature=1`, `top_p=0.95`, 사고 내용 출력 끄기, 최대 출력 32,768 토큰 |
+
+환경 변수로 다른 모델을 지정하면 알려지지 않은 모델에는 저장소의 `temperature` 설정만 적용하고, 나머지는 해당 API의 기본 동작을 사용합니다. NVIDIA Gemma 4 호스팅 엔드포인트에는 도구 호출과 JSON 응답 형식 옵션을 보내지 않고 프롬프트 형식으로 처리합니다.
+
 ### 리버스 프록시
 
 서버 nginx는 `kimtaeeun.site`의 `/sandrone/`을 컨테이너(`127.0.0.1:10105`)로 그대로 넘깁니다. 앱이 `SANDRONE_BASE_PATH` 아래에서 서비스하므로 프록시는 경로를 자르지 않습니다.
@@ -87,6 +101,7 @@ sandrone:
   autoReview: false        # 자동 리뷰 끄기 (기본값 true)
   autoReviewOnPush: true   # 푸시마다 증분 재리뷰 (기본값 false)
   summaryPlacement: new-comment
+  maxReviewBatches: 4        # 큰 PR을 몇 번까지 나눠 검토할지 (기본값 4)
   providers: [gemini, groq]
 ```
 

@@ -46,6 +46,10 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 		builder.WriteString(r.fallbackSection(view.Fallback))
 		builder.WriteString("\n")
 	}
+	if len(view.Unreviewed) > 0 {
+		builder.WriteString(r.unreviewedSection(view.Unreviewed))
+		builder.WriteString("\n")
+	}
 	builder.WriteString(r.footer(view))
 	builder.WriteString("\n")
 	builder.WriteString(r.closingMarker())
@@ -121,6 +125,9 @@ func (r Renderer) statusLine(view review.SummaryView) string {
 	if view.SkippedDup > 0 {
 		parts = append(parts, fmt.Sprintf("이전 리뷰와 겹쳐 생략 %d건", view.SkippedDup))
 	}
+	if view.BatchCount > 1 {
+		parts = append(parts, fmt.Sprintf("%d회에 나눠 검토", view.BatchCount))
+	}
 	if len(parts) == 0 {
 		return ""
 	}
@@ -150,6 +157,18 @@ func (r Renderer) fallbackSection(findings []review.Finding) string {
 		builder.WriteString("\n\n---\n\n")
 	}
 	builder.WriteString("</details>\n")
+	return builder.String()
+}
+
+func (r Renderer) unreviewedSection(files []review.UnreviewedFile) string {
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("<details>\n<summary>이번 리뷰에서 다루지 못한 파일 %d개</summary>\n\n", len(files)))
+	builder.WriteString("아래 파일은 분량 제한으로 이번 리뷰에 담지 못했습니다. 확인이 필요하시면 범위를 좁혀 다시 요청해 주세요.\n\n")
+	builder.WriteString("| 파일 | 변경 | 사유 |\n| --- | --- | --- |\n")
+	for _, file := range files {
+		builder.WriteString(fmt.Sprintf("| `%s` | +%d / -%d | %s |\n", file.Path, file.Additions, file.Deletions, file.Reason))
+	}
+	builder.WriteString("\n</details>\n")
 	return builder.String()
 }
 
