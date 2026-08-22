@@ -62,14 +62,14 @@ func (s *Server) loginForm(writer http.ResponseWriter, request *http.Request) {
 
 func (s *Server) login(writer http.ResponseWriter, request *http.Request) {
 	if err := request.ParseForm(); err != nil {
-		s.render(writer, "login.html", PageData{Title: "로그인", Error: "입력을 읽지 못했다."})
+		s.render(writer, "login.html", PageData{Title: "로그인", Error: "입력을 읽지 못했습니다."})
 		return
 	}
 	username := request.PostFormValue("username")
 	password := request.PostFormValue("password")
 	if !s.deps.Credentials.Matches(username, password) {
 		writer.WriteHeader(http.StatusUnauthorized)
-		s.render(writer, "login.html", PageData{Title: "로그인", Error: "아이디 또는 비밀번호가 올바르지 않다."})
+		s.render(writer, "login.html", PageData{Title: "로그인", Error: "아이디 또는 비밀번호가 올바르지 않습니다."})
 		return
 	}
 	s.deps.Sessions.Issue(writer, username)
@@ -156,7 +156,7 @@ func (s *Server) rerun(writer http.ResponseWriter, request *http.Request) {
 	}
 	installationID, found := s.installationFor(request.Context(), record.Owner, record.Repository)
 	if !found {
-		http.Error(writer, "설치 정보를 찾지 못했다", http.StatusBadRequest)
+		http.Error(writer, "설치 정보를 찾지 못했습니다", http.StatusBadRequest)
 		return
 	}
 	target.InstallationID = installationID
@@ -165,7 +165,7 @@ func (s *Server) rerun(writer http.ResponseWriter, request *http.Request) {
 		Trigger: review.TriggerDashboardRerun,
 	})
 	if err != nil {
-		http.Error(writer, "재실행을 요청하지 못했다", http.StatusInternalServerError)
+		http.Error(writer, "재실행을 요청하지 못했습니다", http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(writer, request, s.deps.BasePath+"/dashboard/reviews", http.StatusSeeOther)

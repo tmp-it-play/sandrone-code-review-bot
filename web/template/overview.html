@@ -36,7 +36,7 @@
         <td>{{.OccurredAt}}</td>
       </tr>
     {{else}}
-      <tr><td colspan="6" class="empty">아직 기록이 없다.</td></tr>
+      <tr><td colspan="6" class="empty">아직 명령 기록이 없습니다.</td></tr>
     {{end}}
     </tbody>
   </table>
@@ -48,7 +48,7 @@
     {{range .Repositories}}
       <tr><td>{{.FullName}}</td><td>{{.InstallationID}}</td><td>{{if .Private}}private{{else}}public{{end}}</td></tr>
     {{else}}
-      <tr><td colspan="3" class="empty">설치된 저장소가 없다.</td></tr>
+      <tr><td colspan="3" class="empty">설치된 저장소가 없습니다.</td></tr>
     {{end}}
     </tbody>
   </table>
