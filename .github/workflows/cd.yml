@@ -151,6 +151,7 @@ jobs:
             printf 'CONTAINER_NAME=%s\n' "sandrone"
             printf 'DOCKER_NETWORK=%s\n' "${DOCKER_NETWORK:-readygsm-net}"
             printf 'HOST_PORT=%s\n' "${HOST_PORT:-10105}"
+            printf 'BASE_PATH=%s\n' "${BASE_PATH:-}"
             printf 'GHCR_USER=%s\n' "$GITHUB_ACTOR"
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } > deploy/deploy.env

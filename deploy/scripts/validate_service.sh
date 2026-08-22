@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
+HEALTH_URL="http://127.0.0.1:8080${BASE_PATH:-}/healthz"
+
 healthy=0
 for attempt in $(seq 1 30); do
-  if docker exec "$CONTAINER_NAME" wget -qO- http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+  if docker exec "$CONTAINER_NAME" wget -qO- "$HEALTH_URL" >/dev/null 2>&1; then
     healthy=1
-    echo "헬스체크 통과 (${attempt}회차)"
+    echo "헬스체크 통과: $HEALTH_URL (${attempt}회차)"
     break
   fi
   sleep 2
 done
 
 if [ "$healthy" -ne 1 ]; then
-  echo "헬스체크에 실패했다. 최근 로그:" >&2
+  echo "헬스체크에 실패했다: $HEALTH_URL" >&2
+  echo "최근 로그:" >&2
   docker logs --tail 60 "$CONTAINER_NAME" >&2 || true
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   docker image rm -f "$IMAGE" >/dev/null 2>&1 || true
