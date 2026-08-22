@@ -78,7 +78,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 	if err != nil {
 		return u.fail(ctx, task, startedAt, "요약 모델을 호출하지 못했습니다", err)
 	}
-	result, err := u.deps.Parser.Parse(response.Content)
+	result, _, err := u.deps.Parser.Parse(response.Content)
 	if err != nil {
 		return u.fail(ctx, task, startedAt, "모델 응답을 해석하지 못했습니다", err)
 	}

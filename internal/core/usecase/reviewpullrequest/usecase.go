@@ -116,7 +116,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 		usage = usage.Add(batchResponse.Usage)
 		response = batchResponse
 
-		batchResult, parseErr := u.deps.Parser.Parse(batchResponse.Content)
+		batchResult, report, parseErr := u.deps.Parser.Parse(batchResponse.Content)
 		if parseErr != nil {
 			if index == 0 {
 				return u.fail(ctx, task, startedAt, "모델 응답을 해석하지 못했습니다", parseErr)
@@ -124,6 +124,18 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 			u.deps.Logger.Warn("일부 배치의 응답을 해석하지 못했습니다", "target", target.Reference(), "batch", index+1, "error", parseErr)
 			failed = append(failed, batch...)
 			continue
+		}
+		u.deps.Logger.Info("배치 리뷰 결과",
+			"target", target.Reference(),
+			"batch", index+1,
+			"provider", batchResponse.Provider,
+			"files", len(batch),
+			"raw_findings", report.RawFindings,
+			"dropped", report.Dropped,
+			"has_summary", report.HasSummary,
+			"content_length", len(batchResponse.Content))
+		if report.Dropped > 0 {
+			u.deps.Logger.Warn("형식이 맞지 않아 버린 지적이 있습니다", "target", target.Reference(), "dropped", report.Dropped)
 		}
 		if index == 0 {
 			gathered.Summary.Overview = batchResult.Summary.Overview
@@ -139,8 +151,16 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 		u.deps.Logger.Warn("기존 지적을 읽지 못했습니다", "target", target.Reference(), "error", err)
 		known = map[string]struct{}{}
 	}
+	afterSeverity := len(findings)
 	findings, duplicates := dedupe.DuplicateFilter{Known: known}.Apply(findings)
 	findings = mapping.PositionMapper{MaxInline: config.MaxInlineComments}.Map(findings, reviewed)
+	u.deps.Logger.Info("지적 집계",
+		"target", target.Reference(),
+		"collected", len(gathered.Findings),
+		"after_severity", afterSeverity,
+		"duplicates", duplicates,
+		"final", len(findings),
+		"min_severity", string(config.MinSeverity))
 
 	placed := review.Result{Summary: gathered.Summary, Findings: findings}
 	response.Usage = usage

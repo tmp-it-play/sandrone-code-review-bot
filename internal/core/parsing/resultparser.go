@@ -12,16 +12,22 @@ var ErrNoPayload = errors.New("모델 응답에서 JSON을 찾지 못했습니�
 
 type ResultParser struct{}
 
-func (p ResultParser) Parse(raw string) (review.Result, error) {
+func (p ResultParser) Parse(raw string) (review.Result, Report, error) {
 	payload, ok := extractObject(raw)
 	if !ok {
-		return review.Result{}, ErrNoPayload
+		return review.Result{}, Report{}, ErrNoPayload
 	}
 	var decoded resultPayload
 	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
-		return review.Result{}, err
+		return review.Result{}, Report{}, err
 	}
-	return decoded.toDomain(), nil
+	result, dropped := decoded.toDomain()
+	report := Report{
+		RawFindings: len(decoded.Findings),
+		Dropped:     dropped,
+		HasSummary:  !result.Summary.IsEmpty(),
+	}
+	return result, report, nil
 }
 
 func extractObject(raw string) (string, bool) {

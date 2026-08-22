@@ -20,7 +20,7 @@ const reviewSchema = `출력은 아래 JSON 하나만 낸다. 코드 블록 표�
   ]
 }
 
-지적할 것이 없으면 findings를 빈 배열로 둔다.`
+변경을 끝까지 살펴본 뒤에도 남길 것이 정말 없을 때만 findings를 빈 배열로 둔다.`
 
 const summarySchema = `출력은 아래 JSON 하나만 낸다. 코드 블록 표시나 설명을 덧붙이지 않는다.
 

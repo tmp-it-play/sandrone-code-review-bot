@@ -25,8 +25,9 @@ type resultPayload struct {
 	} `json:"findings"`
 }
 
-func (p resultPayload) toDomain() review.Result {
+func (p resultPayload) toDomain() (review.Result, int) {
 	result := review.Result{}
+	dropped := 0
 	result.Summary.Overview = strings.TrimSpace(p.Summary.Overview)
 	for _, file := range p.Summary.Files {
 		path := strings.TrimSpace(file.Path)
@@ -50,9 +51,10 @@ func (p resultPayload) toDomain() review.Result {
 			Suggestion: strings.TrimSpace(entry.Suggestion),
 		}
 		if !finding.IsValid() {
+			dropped++
 			continue
 		}
 		result.Findings = append(result.Findings, finding)
 	}
-	return result
+	return result, dropped
 }

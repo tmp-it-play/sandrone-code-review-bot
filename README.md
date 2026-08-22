@@ -1,109 +1,108 @@
-# sandrone-code-review-bot
+# Sandrone
 
-GitHub Pull Request를 자동으로 리뷰하는 봇입니다. Go로 작성했고 컨테이너 하나로 동작합니다.
+Sandrone은 GitHub Pull Request의 변경 내용을 요약하고, 실제로 문제가 되는 코드를 찾아 리뷰하는 AI 코드 리뷰 봇입니다.
 
-## 기능
+## 주요 기능
 
-- PR이 열리면 요약을 일반 코멘트로 남기고 이어서 인라인 코멘트를 답니다
-- 이후 푸시는 자동으로 다시 리뷰하지 않습니다 (`sandrone.autoReviewOnPush: true`로 켤 수 있습니다)
-- `/pr-review`, `/pr-summary`, 리뷰 스레드에서 `/pr-review-reply` — `@sandrone-code-review-bot` 멘션으로도 호출합니다
-- 여러 무료 LLM 프로바이더를 우선순위대로 시도하고, 한도에 걸리면 다음으로 넘어갑니다
-- 큰 PR은 파일 단위로 나눠 여러 번 검토하고, 그래도 담지 못한 파일은 요약 아래 토글에 표로 밝힙니다
-- 인라인 코멘트를 달지 못한 지적은 요약 코멘트 아래 토글로 합쳐 보여줍니다
-- 모든 코멘트 맨 아래에 사용한 프로바이더·모델과 토큰 사용량을 작게 표기합니다
+- PR이 열리면 변경 내용을 요약하고 파일별 핵심 변경 사항을 정리합니다.
+- 문제가 있는 코드에는 원인과 영향을 설명하는 인라인 코멘트를 남깁니다.
+- 저장소의 `AGENTS.md`, `CLAUDE.md`, 기여 가이드 등을 읽고 프로젝트 규칙을 리뷰에 반영합니다.
+- 큰 PR도 여러 묶음으로 나누어 검토하고, 검토하지 못한 파일이 있으면 알려 줍니다.
+- 이미 지적한 문제는 다시 게시하지 않습니다.
+- 명령이나 봇 멘션으로 리뷰, 요약, 후속 답변을 요청할 수 있습니다.
+- 저장소마다 리뷰 언어, 문체, 심각도, 대상 파일을 설정할 수 있습니다.
 
-## 요구사항
+## 사용법
 
-- Go 1.26+
-- MySQL, Redis
-- GitHub App (Pull requests RW, Contents R, Metadata R, Issues RW / 이벤트: pull_request, issue_comment, pull_request_review_comment, installation)
+새 PR이 열리거나 Draft PR이 리뷰 준비 상태로 바뀌면 자동 리뷰가 실행됩니다. 기본 설정에서는 이후 커밋이 추가되어도 자동으로 다시 리뷰하지 않습니다.
 
-## 실행
+### 명령
 
-```bash
-cp .env.example .env
-go run ./cmd/sandrone
+PR 코멘트에서 다음 명령을 사용할 수 있습니다.
+
+| 명령 | 동작 |
+|---|---|
+| `/pr-review` | 현재 변경 사항을 다시 리뷰합니다. |
+| `/pr-summary` | 문제 지적 없이 변경 내용만 요약합니다. |
+| `@sandrone-code-review-bot` | PR에서 새 리뷰를 요청합니다. |
+
+리뷰 스레드에서는 다음 명령으로 최신 코드를 확인한 답변을 받을 수 있습니다.
+
+| 명령 | 동작 |
+|---|---|
+| `/pr-review-reply` | 기존 지적이 해결되었는지 확인하고 답합니다. |
+| `@sandrone-code-review-bot` | 현재 리뷰 대화에 답합니다. |
+
+명령 뒤에는 이번 요청에만 적용할 지시를 덧붙일 수 있습니다.
+
+```text
+/pr-review 인증과 권한 검사만 집중해서 봐줘
 ```
 
-Docker로 띄울 때:
+PR 작성자는 자신의 PR에서 명령을 실행할 수 있습니다. 그 외 사용자는 저장소의 Write, Maintain 또는 Admin 권한이 필요합니다.
 
-```bash
-docker compose up -d --build
-```
+## 저장소 설정
 
-- 웹훅 수신: `POST /webhook`
-- 상태 확인: `GET /healthz`
-- 지표: `GET /metrics`
-- 관리 콘솔: `GET /dashboard`
-
-리버스 프록시 뒤 하위 경로에 붙일 때는 `SANDRONE_BASE_PATH=/sandrone`처럼 지정합니다. 모든 경로와 화면 링크가 그 아래로 이동합니다.
-
-## 배포
-
-`main`에 푸시하면 GitHub Actions가 `linux/arm64` 이미지를 빌드해 `ghcr.io`에 올리고, SSH로 서버에 배포한 뒤 ghcr 패키지를 지웁니다. 서버에는 실행 중인 컨테이너와 이미지만 남고 배포 스크립트는 스스로 정리합니다.
-
-배포 흐름은 `deploy/deployspec.yml`에 정의되어 있습니다.
-
-| 단계 | 하는 일 |
-|---|---|
-| AfterInstall | ghcr 로그인 → 이미지 pull → 로그아웃 |
-| ApplicationStart | 이전 컨테이너 제거 → 새 컨테이너 실행 |
-| ValidateService | `/healthz` 확인 → 실패 시 롤백 정리 → 배포 파일 삭제 |
-
-### 필요한 시크릿
-
-| 이름 | 설명 |
-|---|---|
-| `SANDRONE_APP_ID` | GitHub App ID |
-| `SANDRONE_APP_PRIVATE_KEY` | GitHub App 개인키 PEM 전문 |
-| `SANDRONE_WEBHOOK_SECRET` | 웹훅 시크릿 |
-| `SANDRONE_MYSQL_DSN`, `SANDRONE_REDIS_ADDR`, `SANDRONE_REDIS_PASSWORD` | 저장소 연결 정보 |
-| `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PASSWORD` | 배포 대상 SSH 접속 정보 |
-| `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `DASHBOARD_SESSION_SECRET` | 관리 콘솔 로그인 |
-| `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY` | 최소 한 개 필요 |
-| `GHCR_CLEANUP_TOKEN` | `delete:packages` 권한 PAT — 배포 후 패키지 제거용 |
-
-컨테이너 이름·포트·base path·도커 네트워크는 워크플로 상단 `env` 블록에, 모델·엔드포인트·프로바이더 순서는 `internal/adapter/outbound/llm/provider/catalog.go`에 있습니다. 환경변수로는 API 키만 받습니다.
-
-### LLM 기본 모델
-
-기본 모델에는 각 서비스와 모델이 지원하는 요청 옵션을 자동으로 적용합니다.
-
-| 프로바이더 | 기본 모델 | 적용 옵션 |
-|---|---|---|
-| Gemini | `gemini-3.7-flash` | 샘플링 옵션 생략, `reasoning_effort=medium` |
-| Groq | `openai/gpt-oss-120b` | `temperature=1`, `top_p=1`, `reasoning_effort=medium`, 병렬 도구 호출 끄기, `max_completion_tokens` 사용 |
-| OpenRouter | `z-ai/glm-5.2:free` | `temperature=1`, `top_p=0.95`, `reasoning.effort=high`, 응답에서 추론 내용 제외 |
-| NVIDIA | `google/gemma-4-31b-it` | `temperature=1`, `top_p=0.95`, 사고 내용 출력 끄기, 최대 출력 32,768 토큰 |
-
-환경 변수로 다른 모델을 지정하면 알려지지 않은 모델에는 저장소의 `temperature` 설정만 적용하고, 나머지는 해당 API의 기본 동작을 사용합니다. NVIDIA Gemma 4 호스팅 엔드포인트에는 도구 호출과 JSON 응답 형식 옵션을 보내지 않고 프롬프트 형식으로 처리합니다.
-
-### 리버스 프록시
-
-서버 nginx는 `kimtaeeun.site`의 `/sandrone/`을 컨테이너(`127.0.0.1:10105`)로 그대로 넘깁니다. 앱이 `SANDRONE_BASE_PATH` 아래에서 서비스하므로 프록시는 경로를 자르지 않습니다.
-
-| 경로 | 용도 |
-|---|---|
-| `https://kimtaeeun.site/sandrone/webhook` | GitHub App 웹훅 URL |
-| `https://kimtaeeun.site/sandrone/dashboard` | 관리 콘솔 |
-| `https://kimtaeeun.site/sandrone/healthz` | 상태 확인 |
-
-## 저장소별 설정
-
-대상 저장소의 `.reviewbot/config.yml`을 읽습니다. 같은 조직의 `Code-Review-Bot`과 같은 파일을 공유하며, `model`·`baseUrl`·`triggerPrefix`·최상위 `autoReview`는 무시하고 `sandrone:` 블록의 값을 따릅니다.
+저장소의 `.reviewbot/config.yml`에서 리뷰 동작을 설정합니다.
 
 ```yaml
 language: ko
+tone: professional
 minSeverity: minor
 maxInlineComments: 25
 
+include:
+  - "**/*.go"
+exclude:
+  - "**/generated/**"
+
 sandrone:
-  autoReview: false        # 자동 리뷰 끄기 (기본값 true)
-  autoReviewOnPush: true   # 푸시마다 증분 재리뷰 (기본값 false)
+  autoReview: true
+  autoReviewOnPush: false
   summaryPlacement: new-comment
-  maxReviewBatches: 4        # 큰 PR을 몇 번까지 나눠 검토할지 (기본값 4)
-  providers: [gemini, groq]
+  maxReviewBatches: 4
 ```
+
+### 리뷰 설정
+
+| 설정 | 기본값 | 설명 |
+|---|---:|---|
+| `language` | `ko` | 리뷰에 사용할 언어입니다. `ko`, `en`, `ja`를 사용할 수 있습니다. |
+| `tone` | `professional` | 리뷰, 요약, 스레드 답글에 적용할 문체입니다. |
+| `minSeverity` | `minor` | 게시할 최소 심각도입니다. `critical`, `major`, `minor`, `nit` 중 하나입니다. |
+| `maxInlineComments` | `25` | 한 번의 리뷰에서 남길 최대 인라인 코멘트 수입니다. |
+| `include` | 전체 | 리뷰할 파일의 glob 패턴입니다. |
+| `exclude` | 기본 제외 목록 | 리뷰에서 제외할 파일의 glob 패턴을 추가합니다. |
+| `threadReply` | `true` | 리뷰 스레드의 후속 답변을 켜거나 끕니다. |
+
+### Sandrone 설정
+
+| 설정 | 기본값 | 설명 |
+|---|---:|---|
+| `sandrone.autoReview` | `true` | 새 PR의 자동 리뷰를 켜거나 끕니다. |
+| `sandrone.autoReviewOnPush` | `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다. |
+| `sandrone.summaryPlacement` | `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다. |
+| `sandrone.maxReviewBatches` | `4` | 큰 PR을 나누어 검토할 최대 횟수입니다. |
+
+## 문체 프리셋
+
+`tone`에는 다음 값을 사용할 수 있습니다.
+
+| 값 | 설명 |
+|---|---|
+| `professional` | 차분하고 전문적인 존댓말입니다. 기본값입니다. |
+| `intelligent` | 결론과 논리 관계를 정밀하게 설명하는 분석적인 존댓말입니다. |
+| `polite` | 배려 깊고 부드럽게 제안하는 정중한 존댓말입니다. |
+| `sandrone` | 한국어판 산드로네에게서 영감을 받은 이성적이고 자신감 있으며 도도한 말투입니다. 한국어에서는 간결한 반말을 사용하되 모욕이나 과도한 역할극은 하지 않습니다. |
+
+산드로네 문체는 다음처럼 직접 선택한 저장소에서만 사용됩니다.
+
+```yaml
+language: ko
+tone: sandrone
+```
+
+`sandrone`은 기본값이 아니며, 설정이 없으면 `professional` 문체를 사용합니다.
 
 ## 라이선스
 

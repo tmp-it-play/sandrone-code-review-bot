@@ -7,6 +7,8 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 )
 
+const fileTableToggleThreshold = 8
+
 type Renderer struct {
 	botName string
 }
@@ -32,15 +34,11 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 		builder.WriteString("\n\n")
 	}
 	if len(view.Summary.Files) > 0 {
-		builder.WriteString("| 파일 | 변경 내용 |\n| --- | --- |\n")
-		for _, note := range view.Summary.Files {
-			builder.WriteString(fmt.Sprintf("| `%s` | %s |\n", note.Path, escapeCell(note.Note)))
-		}
+		builder.WriteString(r.fileTable(view.Summary.Files))
 		builder.WriteString("\n")
 	}
-	if line := r.statusLine(view); line != "" {
-		builder.WriteString(line)
-		builder.WriteString("\n\n")
+	if view.InlineCount == 0 && len(view.Fallback) == 0 {
+		builder.WriteString("이번 변경에서 따로 남길 지적은 없습니다.\n\n")
 	}
 	if len(view.Fallback) > 0 {
 		builder.WriteString(r.fallbackSection(view.Fallback))
@@ -114,21 +112,20 @@ func (r Renderer) ReplyBody(text string, attribution review.Attribution) string 
 	return fmt.Sprintf("%s\n\n%s", body, footer)
 }
 
-func (r Renderer) statusLine(view review.SummaryView) string {
-	parts := make([]string, 0, 3)
-	if view.InlineCount > 0 {
-		parts = append(parts, fmt.Sprintf("인라인 지적 %d건", view.InlineCount))
+func (r Renderer) fileTable(notes []review.FileNote) string {
+	var builder strings.Builder
+	collapse := len(notes) > fileTableToggleThreshold
+	if collapse {
+		builder.WriteString(fmt.Sprintf("<details>\n<summary>파일별 변경 내용 %d개</summary>\n\n", len(notes)))
 	}
-	if len(view.Fallback) > 0 {
-		parts = append(parts, fmt.Sprintf("인라인으로 달지 못한 지적 %d건", len(view.Fallback)))
+	builder.WriteString("| 파일 | 변경 내용 |\n| --- | --- |\n")
+	for _, note := range notes {
+		builder.WriteString(fmt.Sprintf("| `%s` | %s |\n", note.Path, escapeCell(note.Note)))
 	}
-	if view.SkippedDup > 0 {
-		parts = append(parts, fmt.Sprintf("이전 리뷰와 겹쳐 생략 %d건", view.SkippedDup))
+	if collapse {
+		builder.WriteString("\n</details>\n")
 	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.Join(parts, " · ")
+	return builder.String()
 }
 
 func (r Renderer) fallbackSection(findings []review.Finding) string {
