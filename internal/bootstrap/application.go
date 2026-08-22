@@ -32,6 +32,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const botName = "sandrone-code-review-bot"
+
 type Application struct {
 	logger      *slog.Logger
 	httpServer  *http.Server
@@ -47,7 +49,6 @@ func NewApplication(config Config) (*Application, error) {
 	metrics := observability.NewMetrics()
 	clock := system.NewClock()
 	masker := masking.NewSecretMasker()
-	name := botName
 
 	database, err := mysql.NewConnection(config.MySQLDSN)
 	if err != nil {
@@ -78,7 +79,7 @@ func NewApplication(config Config) (*Application, error) {
 	reactions := githubadapter.NewReactionPublisher(clients)
 	permissions := githubadapter.NewPermissionChecker(clients)
 	tools := githubadapter.NewToolExecutorFactory(contents, masker, 16000)
-	renderer := markdown.NewRenderer(name)
+	renderer := markdown.NewRenderer(botName)
 
 	settingSource := settings.NewSettingSource(
 		settings.NewConfigLoader(contents, logger),
@@ -147,7 +148,7 @@ func NewApplication(config Config) (*Application, error) {
 		Logger:      logger,
 	})
 
-	router := webhook.NewEventRouter(queueClient, commandUseCase, inboundcommand.NewParser(name), installations, logger)
+	router := webhook.NewEventRouter(queueClient, commandUseCase, inboundcommand.NewParser(botName), installations, logger)
 	webhookHandler := webhook.NewHandler(config.WebhookSecret, router, deduplicator, metrics, logger, webhook.Retention(config.DeliveryRetention))
 
 	dashboardServer, err := dashboard.NewServer(dashboard.Dependencies{
