@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const defaultBotName = "sandrone-review-bot"
+const defaultBotName = "sandrone-code-review-bot"
 
 func botName() string {
 	if value := strings.TrimSpace(os.Getenv("SANDRONE_BOT_NAME")); value != "" {

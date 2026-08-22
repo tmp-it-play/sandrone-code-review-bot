@@ -5,7 +5,7 @@ GitHub Pull Request를 자동으로 리뷰하는 봇입니다. Go로 작성했�
 ## 기능
 
 - PR이 열리면 요약과 인라인 코멘트를 자동으로 남깁니다 (`sandrone.autoReview: true`인 저장소에서)
-- `/pr-review`, `/pr-summary`, 리뷰 스레드에서 `/pr-review-reply` — `@sandrone-review-bot` 멘션으로도 호출합니다
+- `/pr-review`, `/pr-summary`, 리뷰 스레드에서 `/pr-review-reply` — `@sandrone-code-review-bot` 멘션으로도 호출합니다
 - 여러 무료 LLM 프로바이더를 우선순위대로 시도하고, 한도에 걸리면 다음으로 넘어갑니다
 - 인라인 코멘트를 달지 못한 지적은 요약 아래 토글로 모아 보여줍니다
 

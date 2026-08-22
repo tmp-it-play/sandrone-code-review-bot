@@ -21,7 +21,7 @@ func NewCatalog() Catalog {
 			Capability: llm.Capability{ToolCalling: true, JSONMode: true},
 			Headers: map[string]string{
 				"HTTP-Referer": "https://github.com/it-play/sandrone-code-review-bot",
-				"X-Title":      "sandrone-review-bot",
+				"X-Title":      "sandrone-code-review-bot",
 			},
 		},
 		"nvidia": {
