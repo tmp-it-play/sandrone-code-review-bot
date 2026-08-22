@@ -66,6 +66,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 	if err := u.deps.Threads.Reply(ctx, task.Target, task.CommentID, u.deps.Renderer.ReplyBody(body, review.Attribution{
 		Provider:         response.Provider,
 		Model:            response.Model,
+		Label:            response.ModelLabel,
 		PromptTokens:     response.Usage.PromptTokens,
 		CompletionTokens: response.Usage.CompletionTokens,
 		TotalTokens:      response.Usage.TotalTokens,

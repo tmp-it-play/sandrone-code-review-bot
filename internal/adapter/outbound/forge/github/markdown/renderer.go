@@ -57,7 +57,7 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 }
 
 func (r Renderer) InlineReviewBody(attribution review.Attribution) string {
-	return attributionLine(review.Attribution{Model: attribution.Model})
+	return attributionLine(review.Attribution{Model: attribution.Model, Label: attribution.Label})
 }
 
 func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribution) string {
@@ -74,7 +74,7 @@ func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribut
 		builder.WriteString(suggestion)
 		builder.WriteString("\n```")
 	}
-	if footer := attributionLine(review.Attribution{Model: attribution.Model}); footer != "" {
+	if footer := attributionLine(review.Attribution{Model: attribution.Model, Label: attribution.Label}); footer != "" {
 		builder.WriteString("\n\n")
 		builder.WriteString(footer)
 	}
@@ -124,9 +124,6 @@ func (r Renderer) statusLine(view review.SummaryView) string {
 	}
 	if view.SkippedDup > 0 {
 		parts = append(parts, fmt.Sprintf("이전 리뷰와 겹쳐 생략 %d건", view.SkippedDup))
-	}
-	if view.BatchCount > 1 {
-		parts = append(parts, fmt.Sprintf("%d회에 나눠 검토", view.BatchCount))
 	}
 	if len(parts) == 0 {
 		return ""

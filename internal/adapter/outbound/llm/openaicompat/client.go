@@ -17,6 +17,7 @@ import (
 type Client struct {
 	name           string
 	model          string
+	displayName    string
 	baseURL        string
 	apiKey         string
 	capability     llm.Capability
@@ -26,10 +27,11 @@ type Client struct {
 	httpClient     *http.Client
 }
 
-func NewClient(name string, model string, baseURL string, apiKey string, capability llm.Capability, requestProfile provider.RequestProfile, maxPromptChars int, extraHeaders map[string]string, timeout time.Duration) *Client {
+func NewClient(name string, model string, displayName string, baseURL string, apiKey string, capability llm.Capability, requestProfile provider.RequestProfile, maxPromptChars int, extraHeaders map[string]string, timeout time.Duration) *Client {
 	return &Client{
 		name:           name,
 		model:          model,
+		displayName:    displayName,
 		baseURL:        strings.TrimRight(baseURL, "/"),
 		apiKey:         apiKey,
 		capability:     capability,
@@ -114,6 +116,7 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 		ToolCalls:    fromChatToolCalls(choice.Message.ToolCalls),
 		Provider:     c.name,
 		Model:        c.model,
+		ModelLabel:   c.displayName,
 		FinishReason: choice.FinishReason,
 		Usage: llm.Usage{
 			PromptTokens:     decoded.Usage.PromptTokens,

@@ -91,6 +91,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		Attribution: review.Attribution{
 			Provider:         response.Provider,
 			Model:            response.Model,
+			Label:            response.ModelLabel,
 			PromptTokens:     response.Usage.PromptTokens,
 			CompletionTokens: response.Usage.CompletionTokens,
 			TotalTokens:      response.Usage.TotalTokens,

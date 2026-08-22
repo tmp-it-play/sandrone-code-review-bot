@@ -26,6 +26,7 @@ func buildProviders(config Config) []outbound.Provider {
 		providers = append(providers, openaicompat.NewClient(
 			descriptor.Name,
 			descriptor.Model,
+			descriptor.DisplayName,
 			descriptor.BaseURL,
 			entry.APIKey,
 			capability,

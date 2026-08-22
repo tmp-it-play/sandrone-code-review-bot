@@ -10,8 +10,8 @@ import (
 
 func attributionLine(attribution review.Attribution, extra ...string) string {
 	parts := make([]string, 0, 3)
-	if attribution.Model != "" {
-		parts = append(parts, attribution.Model)
+	if display := attribution.Display(); display != "" {
+		parts = append(parts, display)
 	}
 	if attribution.HasUsage() {
 		parts = append(parts, usageText(attribution))

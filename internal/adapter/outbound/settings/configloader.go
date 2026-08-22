@@ -48,6 +48,11 @@ func merge(config setting.RepoConfig, raw rawConfig) setting.RepoConfig {
 	if raw.Language != nil {
 		config.Language = *raw.Language
 	}
+	if raw.Tone != nil {
+		if tone, ok := setting.ParseTone(*raw.Tone); ok {
+			config.Tone = tone
+		}
+	}
 	if raw.Temperature != nil {
 		config.Temperature = *raw.Temperature
 	}

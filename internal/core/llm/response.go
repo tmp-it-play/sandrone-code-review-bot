@@ -5,6 +5,7 @@ type Response struct {
 	ToolCalls    []ToolCall
 	Provider     string
 	Model        string
+	ModelLabel   string
 	FinishReason string
 	Usage        Usage
 }

@@ -2,6 +2,7 @@ package settings
 
 type rawConfig struct {
 	Language          *string      `yaml:"language"`
+	Tone              *string      `yaml:"tone"`
 	Temperature       *float64     `yaml:"temperature"`
 	MaxOutputTokens   *int         `yaml:"maxOutputTokens"`
 	MaxPromptChars    *int         `yaml:"maxPromptChars"`

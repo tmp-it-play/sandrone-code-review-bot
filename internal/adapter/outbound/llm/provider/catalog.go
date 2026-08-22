@@ -14,6 +14,7 @@ func NewCatalog() Catalog {
 			"gemini": {
 				Name:           "gemini",
 				Model:          "gemini-3.7-flash",
+				DisplayName:    "Gemini 3.7 Flash",
 				BaseURL:        "https://generativelanguage.googleapis.com/v1beta/openai",
 				Capability:     llm.Capability{ToolCalling: true, JSONMode: true},
 				MaxPromptChars: 600000,
@@ -21,6 +22,7 @@ func NewCatalog() Catalog {
 			"groq": {
 				Name:           "groq",
 				Model:          "openai/gpt-oss-120b",
+				DisplayName:    "GPT-OSS 120B",
 				BaseURL:        "https://api.groq.com/openai/v1",
 				Capability:     llm.Capability{ToolCalling: true, JSONMode: true},
 				MaxPromptChars: 60000,
@@ -28,6 +30,7 @@ func NewCatalog() Catalog {
 			"openrouter": {
 				Name:           "openrouter",
 				Model:          "z-ai/glm-5.2:free",
+				DisplayName:    "GLM 5.2",
 				BaseURL:        "https://openrouter.ai/api/v1",
 				Capability:     llm.Capability{ToolCalling: true, JSONMode: true},
 				MaxPromptChars: 180000,
@@ -39,6 +42,7 @@ func NewCatalog() Catalog {
 			"nvidia": {
 				Name:           "nvidia",
 				Model:          "google/gemma-4-31b-it",
+				DisplayName:    "Gemma 4 31B",
 				BaseURL:        "https://integrate.api.nvidia.com/v1",
 				Capability:     llm.Capability{ToolCalling: true, JSONMode: true},
 				MaxPromptChars: 180000,

@@ -30,7 +30,7 @@ func (p ReviewPrompt) system() string {
 	builder.WriteString("- 저장소 규칙 문서가 주어지면 그 규칙을 우선한다.\n")
 	builder.WriteString("- diff에 없는 줄은 지적하지 않는다.\n")
 	builder.WriteString(fmt.Sprintf("- 모든 서술은 %s로 작성한다.\n\n", languageName(p.Context.Config.Language)))
-	builder.WriteString(toneGuide)
+	builder.WriteString(toneGuide(p.Context.Config.Tone))
 	if p.ToolsAllowed {
 		builder.WriteString("판단에 주변 코드가 더 필요하면 read_file 도구로 파일을 읽을 수 있다.\n\n")
 	}

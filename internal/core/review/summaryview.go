@@ -9,5 +9,4 @@ type SummaryView struct {
 	Incremental bool
 	SkippedDup  int
 	Unreviewed  []UnreviewedFile
-	BatchCount  int
 }

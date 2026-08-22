@@ -154,7 +154,6 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 		Incremental: incremental,
 		SkippedDup:  duplicates,
 		Unreviewed:  unreviewedOf(chosen.Skipped, plan.Overflow, failed),
-		BatchCount:  len(plan.Batches),
 	}
 
 	if err := u.publish(ctx, target, view, placed, attribution); err != nil {
@@ -338,6 +337,7 @@ func attributionOf(response llm.Response) review.Attribution {
 	return review.Attribution{
 		Provider:         response.Provider,
 		Model:            response.Model,
+		Label:            response.ModelLabel,
 		PromptTokens:     response.Usage.PromptTokens,
 		CompletionTokens: response.Usage.CompletionTokens,
 		TotalTokens:      response.Usage.TotalTokens,
