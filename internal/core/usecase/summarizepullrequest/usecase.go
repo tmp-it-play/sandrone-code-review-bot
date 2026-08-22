@@ -98,7 +98,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 			CompletionTokens: response.Usage.CompletionTokens,
 			TotalTokens:      response.Usage.TotalTokens,
 		},
-		Style:   review.Style{Emoji: config.Emoji},
+		Style:   review.Style{Emoji: config.Emoji, Tone: string(config.Tone)},
 		Trigger: task.Trigger,
 	})
 	if err := u.place(ctx, target, config.Sandrone.SummaryPlacement, body); err != nil {

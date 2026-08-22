@@ -166,7 +166,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 	placed := review.Result{Summary: gathered.Summary, Findings: findings}
 	response.Usage = usage
 	attribution := attributionOf(response)
-	style := review.Style{Emoji: config.Emoji}
+	style := review.Style{Emoji: config.Emoji, Tone: string(config.Tone)}
 	view := review.SummaryView{
 		Summary:     placed.Summary,
 		Fallback:    placed.Fallback(),

@@ -27,6 +27,7 @@ func (r Renderer) closingMarker() string {
 
 func (r Renderer) SummaryBody(view review.SummaryView) string {
 	var builder strings.Builder
+	prose := reviewProseFor(view.Style)
 	builder.WriteString(r.Marker())
 	builder.WriteString("\n## Pull Request 요약\n\n")
 	if overview := strings.TrimSpace(view.Summary.Overview); overview != "" {
@@ -37,15 +38,16 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 		builder.WriteString(r.fileTable(view.Summary.Files))
 		builder.WriteString("\n")
 	}
-	if view.InlineCount == 0 && len(view.Fallback) == 0 {
-		builder.WriteString("이번 변경에서 따로 남길 지적은 없습니다.\n\n")
+	if view.Trigger != review.TriggerCommandSummary && view.InlineCount == 0 && len(view.Fallback) == 0 {
+		builder.WriteString(prose.noFindings)
+		builder.WriteString("\n\n")
 	}
 	if len(view.Fallback) > 0 {
 		builder.WriteString(r.fallbackSection(view.Fallback, view.Style))
 		builder.WriteString("\n")
 	}
 	if len(view.Unreviewed) > 0 {
-		builder.WriteString(r.unreviewedSection(view.Unreviewed))
+		builder.WriteString(r.unreviewedSection(view.Unreviewed, prose))
 		builder.WriteString("\n")
 	}
 	builder.WriteString(r.footer(view))
@@ -168,10 +170,11 @@ func (r Renderer) fallbackSection(findings []review.Finding, style review.Style)
 	return builder.String()
 }
 
-func (r Renderer) unreviewedSection(files []review.UnreviewedFile) string {
+func (r Renderer) unreviewedSection(files []review.UnreviewedFile, prose reviewProse) string {
 	var builder strings.Builder
 	builder.WriteString(fmt.Sprintf("<details>\n<summary>이번 리뷰에서 다루지 못한 파일 %d개</summary>\n\n", len(files)))
-	builder.WriteString("아래 파일은 분량 제한으로 이번 리뷰에 담지 못했습니다. 확인이 필요하시면 범위를 좁혀 다시 요청해 주세요.\n\n")
+	builder.WriteString(prose.unreviewedFiles)
+	builder.WriteString("\n\n")
 	builder.WriteString("| 파일 | 변경 | 사유 |\n| --- | --- | --- |\n")
 	for _, file := range files {
 		builder.WriteString(fmt.Sprintf("| `%s` | +%d / -%d | %s |\n", file.Path, file.Additions, file.Deletions, file.Reason))
