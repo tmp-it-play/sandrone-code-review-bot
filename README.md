@@ -1,6 +1,13 @@
-# Sandrone
+# Sandrone Code Review Bot
 
-Sandrone은 GitHub Pull Request의 변경 내용을 요약하고, 실제로 문제가 되는 코드를 찾아 리뷰하는 AI 코드 리뷰 봇입니다.
+<div align="center">
+  <img width="700" alt="Codex 이미지 2026년 8월 23일 오전 04_37_56" src="https://github.com/user-attachments/assets/c070f082-f707-41fa-8bfc-769c83dd7e74" />
+</div>
+
+Sandrone Code Review Bot은 GitHub Pull Request의 변경 내용을 요약하고, 실제로 문제가 되는 코드를 찾아 리뷰하는 AI 코드 리뷰 봇입니다.
+
+<sub>Sandrone Code Review Bot는 HoYoverse와 연관이 없습니다.Genshin Impact의 캐릭터 「산드로네」에 대한 콘텐츠와 소재의 트레이드마크와 저작권은 HoYoverse에 있습니다.</sub
+>
 
 ## 주요 기능
 
