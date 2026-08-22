@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/llm/provider"
 )
 
 type Config struct {
@@ -98,31 +100,19 @@ func privateKey() ([]byte, error) {
 }
 
 func providerConfigs() map[string]ProviderConfig {
-	defaults := []ProviderConfig{
-		{Name: "gemini", APIKey: os.Getenv("GEMINI_API_KEY"), Model: env("GEMINI_MODEL", "gemini-3.7-flash"), BaseURL: env("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")},
-		{Name: "groq", APIKey: os.Getenv("GROQ_API_KEY"), Model: env("GROQ_MODEL", "openai/gpt-oss-120b"), BaseURL: env("GROQ_BASE_URL", "https://api.groq.com/openai/v1")},
-		{Name: "openrouter", APIKey: os.Getenv("OPENROUTER_API_KEY"), Model: env("OPENROUTER_MODEL", "z-ai/glm-5.2:free"), BaseURL: env("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")},
-		{Name: "nvidia", APIKey: os.Getenv("NVIDIA_API_KEY"), Model: env("NVIDIA_MODEL", "google/gemma-4-31b-it"), BaseURL: env("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")},
-	}
+	catalog := provider.NewCatalog()
 	configured := map[string]ProviderConfig{}
-	for _, candidate := range defaults {
+	for _, name := range catalog.Order() {
+		candidate := ProviderConfig{Name: name, APIKey: os.Getenv(catalog.APIKeyEnv(name))}
 		if candidate.Enabled() {
-			configured[candidate.Name] = candidate
+			configured[name] = candidate
 		}
 	}
 	return configured
 }
 
 func providerOrder(configured map[string]ProviderConfig) []string {
-	preferred := []string{"gemini", "groq", "openrouter", "nvidia"}
-	if raw := os.Getenv("SANDRONE_PROVIDER_ORDER"); strings.TrimSpace(raw) != "" {
-		preferred = nil
-		for _, entry := range strings.Split(raw, ",") {
-			if trimmed := strings.TrimSpace(entry); trimmed != "" {
-				preferred = append(preferred, trimmed)
-			}
-		}
-	}
+	preferred := provider.NewCatalog().Order()
 	order := make([]string, 0, len(preferred))
 	for _, name := range preferred {
 		if _, ok := configured[name]; ok {
