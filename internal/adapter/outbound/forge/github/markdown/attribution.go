@@ -8,11 +8,8 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 )
 
-func attributionLine(botName string, attribution review.Attribution, extra ...string) string {
-	parts := []string{botName}
-	if attribution.Provider != "" {
-		parts = append(parts, attribution.Provider)
-	}
+func attributionLine(attribution review.Attribution, extra ...string) string {
+	parts := make([]string, 0, 3)
 	if attribution.Model != "" {
 		parts = append(parts, attribution.Model)
 	}
@@ -20,6 +17,9 @@ func attributionLine(botName string, attribution review.Attribution, extra ...st
 		parts = append(parts, usageText(attribution))
 	}
 	parts = append(parts, extra...)
+	if len(parts) == 0 {
+		return ""
+	}
 	return fmt.Sprintf("<sub>%s</sub>", strings.Join(parts, " · "))
 }
 

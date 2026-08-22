@@ -225,11 +225,30 @@ func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, task jo
 
 func (u *UseCase) fail(ctx context.Context, task job.ReviewJob, startedAt time.Time, message string, cause error) error {
 	u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
+	if notice, announce := failureNotice(task.Attempt, task.FinalAttempt, message); announce {
+		u.announce(ctx, task.Target, notice)
+	}
 	if task.FinalAttempt {
-		u.notify(ctx, task.Target, task, review.Notice{Kind: review.NoticeFailed, Message: message})
 		u.save(ctx, task, startedAt, review.OutcomeFailed, message, llm.Response{}, 0, 0)
 	}
 	return fmt.Errorf("%s: %w", message, cause)
+}
+
+func (u *UseCase) announce(ctx context.Context, target pullrequest.Target, notice review.Notice) {
+	if _, err := u.deps.Publisher.CreateComment(ctx, target, u.deps.Renderer.NoticeBody(notice)); err != nil {
+		u.deps.Logger.Warn("실패 안내를 남기지 못했습니다", "target", target.Reference(), "error", err)
+	}
+}
+
+func failureNotice(attempt int, final bool, message string) (review.Notice, bool) {
+	switch {
+	case final:
+		return review.Notice{Kind: review.NoticeFailed, Message: message + " 재시도했지만 해결되지 않아 중단합니다."}, true
+	case attempt == 0:
+		return review.Notice{Kind: review.NoticeRetrying, Message: message + " 잠시 후 다시 시도합니다."}, true
+	default:
+		return review.Notice{}, false
+	}
 }
 
 func (u *UseCase) save(ctx context.Context, task job.ReviewJob, startedAt time.Time, outcome review.Outcome, detail string, response llm.Response, inline int, fallback int) uint64 {

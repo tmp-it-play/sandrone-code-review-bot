@@ -26,6 +26,7 @@ func (h *ReplyHandler) ProcessTask(ctx context.Context, task *asynq.Task) error 
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return fmt.Errorf("작업을 해석하지 못했습니다: %w", asynq.SkipRetry)
 	}
+	payload.Attempt = attemptNumber(ctx)
 	payload.FinalAttempt = isFinalAttempt(ctx)
 	startedAt := time.Now()
 	err := h.usecase.Execute(ctx, payload)

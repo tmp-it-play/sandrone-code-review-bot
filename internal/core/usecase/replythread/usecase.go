@@ -93,9 +93,16 @@ func (u *UseCase) currentSource(ctx context.Context, task job.ReplyJob, path str
 
 func (u *UseCase) fail(ctx context.Context, task job.ReplyJob, message string, cause error) error {
 	u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
-	if task.FinalAttempt {
-		notice := u.deps.Renderer.NoticeBody(review.Notice{Kind: review.NoticeFailed, Message: message})
-		if err := u.deps.Threads.Reply(ctx, task.Target, task.CommentID, notice); err != nil {
+	var notice review.Notice
+	switch {
+	case task.FinalAttempt:
+		notice = review.Notice{Kind: review.NoticeFailed, Message: message + " 재시도했지만 해결되지 않아 중단합니다."}
+	case task.Attempt == 0:
+		notice = review.Notice{Kind: review.NoticeRetrying, Message: message + " 잠시 후 다시 시도합니다."}
+	}
+	if notice.Kind != "" {
+		body := u.deps.Renderer.NoticeBody(notice)
+		if err := u.deps.Threads.Reply(ctx, task.Target, task.CommentID, body); err != nil {
 			u.deps.Logger.Warn("실패 안내를 남기지 못했습니다", "target", task.Target.Reference(), "error", err)
 		}
 	}

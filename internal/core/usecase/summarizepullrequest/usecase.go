@@ -142,9 +142,12 @@ func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, notice 
 
 func (u *UseCase) fail(ctx context.Context, task job.SummaryJob, startedAt time.Time, message string, cause error) error {
 	u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
-	if task.FinalAttempt {
-		u.notify(ctx, task.Target, review.Notice{Kind: review.NoticeFailed, Message: message})
+	switch {
+	case task.FinalAttempt:
+		u.notify(ctx, task.Target, review.Notice{Kind: review.NoticeFailed, Message: message + " 재시도했지만 해결되지 않아 중단합니다."})
 		u.save(ctx, task, startedAt, review.OutcomeFailed, message, llm.Response{})
+	case task.Attempt == 0:
+		u.notify(ctx, task.Target, review.Notice{Kind: review.NoticeRetrying, Message: message + " 잠시 후 다시 시도합니다."})
 	}
 	return fmt.Errorf("%s: %w", message, cause)
 }

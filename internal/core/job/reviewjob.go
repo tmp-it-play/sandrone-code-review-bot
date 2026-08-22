@@ -11,6 +11,7 @@ type ReviewJob struct {
 	Invoker      string
 	Instruction  string
 	CommentID    int64
+	Attempt      int
 	FinalAttempt bool
 	Incremental  bool
 }

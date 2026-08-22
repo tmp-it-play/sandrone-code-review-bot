@@ -6,6 +6,14 @@ import (
 	"github.com/hibiken/asynq"
 )
 
+func attemptNumber(ctx context.Context) int {
+	retried, ok := asynq.GetRetryCount(ctx)
+	if !ok {
+		return 0
+	}
+	return retried
+}
+
 func isFinalAttempt(ctx context.Context) bool {
 	retried, ok := asynq.GetRetryCount(ctx)
 	if !ok {

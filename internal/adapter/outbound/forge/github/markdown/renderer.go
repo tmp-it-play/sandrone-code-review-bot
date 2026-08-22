@@ -26,7 +26,7 @@ func (r Renderer) closingMarker() string {
 func (r Renderer) SummaryBody(view review.SummaryView) string {
 	var builder strings.Builder
 	builder.WriteString(r.Marker())
-	builder.WriteString("\n## 리뷰 요약\n\n")
+	builder.WriteString("\n## Pull Request 요약\n\n")
 	if overview := strings.TrimSpace(view.Summary.Overview); overview != "" {
 		builder.WriteString(overview)
 		builder.WriteString("\n\n")
@@ -53,7 +53,7 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 }
 
 func (r Renderer) InlineReviewBody(attribution review.Attribution) string {
-	return attributionLine(r.botName, review.Attribution{Model: attribution.Model})
+	return attributionLine(review.Attribution{Model: attribution.Model})
 }
 
 func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribution) string {
@@ -70,17 +70,44 @@ func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribut
 		builder.WriteString(suggestion)
 		builder.WriteString("\n```")
 	}
-	builder.WriteString("\n\n")
-	builder.WriteString(attributionLine(r.botName, review.Attribution{Model: attribution.Model}))
+	if footer := attributionLine(review.Attribution{Model: attribution.Model}); footer != "" {
+		builder.WriteString("\n\n")
+		builder.WriteString(footer)
+	}
 	return builder.String()
 }
 
 func (r Renderer) NoticeBody(notice review.Notice) string {
-	return fmt.Sprintf("%s\n\n<sub>%s</sub>", strings.TrimSpace(notice.Message), r.botName)
+	var builder strings.Builder
+	builder.WriteString("> [!")
+	builder.WriteString(alertKind(notice.Kind))
+	builder.WriteString("]\n")
+	for _, line := range strings.Split(strings.TrimSpace(notice.Message), "\n") {
+		builder.WriteString("> ")
+		builder.WriteString(strings.TrimSpace(line))
+		builder.WriteString("\n")
+	}
+	return strings.TrimRight(builder.String(), "\n")
+}
+
+func alertKind(kind review.NoticeKind) string {
+	switch kind {
+	case review.NoticeFailed, review.NoticeUnavailable:
+		return "CAUTION"
+	case review.NoticeRetrying, review.NoticeRejected:
+		return "WARNING"
+	default:
+		return "NOTE"
+	}
 }
 
 func (r Renderer) ReplyBody(text string, attribution review.Attribution) string {
-	return fmt.Sprintf("%s\n\n%s", strings.TrimSpace(text), attributionLine(r.botName, attribution))
+	body := strings.TrimSpace(text)
+	footer := attributionLine(attribution)
+	if footer == "" {
+		return body
+	}
+	return fmt.Sprintf("%s\n\n%s", body, footer)
 }
 
 func (r Renderer) statusLine(view review.SummaryView) string {
@@ -128,9 +155,9 @@ func (r Renderer) fallbackSection(findings []review.Finding) string {
 
 func (r Renderer) footer(view review.SummaryView) string {
 	if view.Incremental {
-		return attributionLine(r.botName, view.Attribution, "직전 리뷰 이후 변경분")
+		return attributionLine(view.Attribution, "직전 리뷰 이후 변경분")
 	}
-	return attributionLine(r.botName, view.Attribution)
+	return attributionLine(view.Attribution)
 }
 
 func escapeCell(text string) string {
