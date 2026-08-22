@@ -1,0 +1,23 @@
+package github
+
+import (
+	"context"
+
+	gh "github.com/google/go-github/v90/github"
+)
+
+type ClientFactory struct {
+	tokens *TokenSource
+}
+
+func NewClientFactory(tokens *TokenSource) *ClientFactory {
+	return &ClientFactory{tokens: tokens}
+}
+
+func (f *ClientFactory) Client(ctx context.Context, installationID int64) (*gh.Client, error) {
+	token, err := f.tokens.InstallationToken(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	return gh.NewClient(gh.WithAuthToken(token))
+}
