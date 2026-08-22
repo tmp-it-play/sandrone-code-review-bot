@@ -54,10 +54,6 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 	return builder.String()
 }
 
-func (r Renderer) InlineReviewBody(attribution review.Attribution) string {
-	return attributionLine(review.Attribution{Model: attribution.Model, Label: attribution.Label})
-}
-
 func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribution, style review.Style) string {
 	var builder strings.Builder
 	builder.WriteString(severityBadge(finding.Severity, style))

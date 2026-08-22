@@ -244,16 +244,7 @@ func (u *UseCase) executor(target pullrequest.Target, config setting.RepoConfig)
 }
 
 func (u *UseCase) publish(ctx context.Context, target pullrequest.Target, view review.SummaryView, result review.Result, attribution review.Attribution, style review.Style) error {
-	commentID, err := u.deps.Publisher.CreateComment(ctx, target, u.deps.Renderer.SummaryBody(view))
-	if err != nil {
-		return err
-	}
-
 	inline := result.Inline()
-	if len(inline) == 0 {
-		return nil
-	}
-
 	comments := make([]review.InlineComment, 0, len(inline))
 	for _, finding := range inline {
 		comments = append(comments, review.InlineComment{
@@ -262,16 +253,18 @@ func (u *UseCase) publish(ctx context.Context, target pullrequest.Target, view r
 			Body: u.deps.Renderer.InlineBody(finding, attribution, style),
 		})
 	}
-	submitErr := u.deps.Publisher.SubmitReview(ctx, target, u.deps.Renderer.InlineReviewBody(attribution), comments)
+
+	submitErr := u.deps.Publisher.SubmitReview(ctx, target, u.deps.Renderer.SummaryBody(view), comments)
 	if submitErr == nil {
 		return nil
 	}
-	u.deps.Logger.Warn("인라인 리뷰를 제출하지 못해 요약 코멘트에 합칩니다", "target", target.Reference(), "error", submitErr)
+	u.deps.Logger.Warn("리뷰를 제출하지 못해 요약 코멘트로 대신합니다", "target", target.Reference(), "error", submitErr)
 
 	degraded := view
 	degraded.Fallback = append(append([]review.Finding{}, result.Fallback()...), inline...)
 	degraded.InlineCount = 0
-	return u.deps.Publisher.UpdateComment(ctx, target, commentID, u.deps.Renderer.SummaryBody(degraded))
+	_, err := u.deps.Publisher.CreateComment(ctx, target, u.deps.Renderer.SummaryBody(degraded))
+	return err
 }
 
 func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, task job.ReviewJob, notice review.Notice) {
