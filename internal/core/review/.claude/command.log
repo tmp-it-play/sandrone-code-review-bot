@@ -1,0 +1,110 @@
+[2026-08-23 00:31:09] cd internal/core/review
+cat > filenote.go <<'EOF'
+package review
+
+type FileNote struct {
+	Path string
+	Note string
+}
+EOF
+cat > summary.go <<'EOF'
+package review
+
+import "strings"
+
+type Summary struct {
+	Overview string
+	Files    []FileNote
+}
+
+func (s Summary) IsEmpty() bool {
+	return strings.TrimSpace(s.Overview) == "" && len(s.Files) == 0
+}
+EOF
+cat > result.go <<'EOF'
+package review
+
+type Result struct {
+	Summary  Summary
+	Findings []Finding
+}
+
+func (r Result) Inline() []Finding {
+	return r.byPlacement(PlacementInline)
+}
+
+func (r Result) Fallback() []Finding {
+	return r.byPlacement(PlacementFallback)
+}
+
+func (r Result) byPlacement(placement Placement) []Finding {
+	selected := make([]Finding, 0, len(r.Findings))
+	for _, finding := range r.Findings {
+		if finding.Placement == placement {
+			selected = append(selected, finding)
+		}
+	}
+	return selected
+}
+EOF
+cat > trigger.go <<'EOF'
+package review
+
+type Trigger string
+
+const (
+	TriggerPullRequestOpened Trigger = "pull_request_opened"
+	TriggerPullRequestPushed Trigger = "pull_request_pushed"
+	TriggerCommandReview     Trigger = "command_review"
+	TriggerCommandSummary    Trigger = "command_summary"
+	TriggerCommandReply      Trigger = "command_reply"
+	TriggerDashboardRerun    Trigger = "dashboard_rerun"
+)
+
+func (t Trigger) IsAutomatic() bool {
+	return t == TriggerPullRequestOpened || t == TriggerPullRequestPushed
+}
+EOF
+cat > outcome.go <<'EOF'
+package review
+
+type Outcome string
+
+const (
+	OutcomeSucceeded   Outcome = "succeeded"
+	OutcomeSkipped     Outcome = "skipped"
+	OutcomeFailed      Outcome = "failed"
+	OutcomeUnavailable Outcome = "unavailable"
+)
+EOF
+cat > record.go <<'EOF'
+package review
+
+import "time"
+
+type Record struct {
+	ID           uint64
+	Owner        string
+	Repository   string
+	Number       int
+	HeadSHA      string
+	Trigger      Trigger
+	Outcome      Outcome
+	Provider     string
+	Model        string
+	InlineCount  int
+	FallbackCount int
+	Detail       string
+	StartedAt    time.Time
+	FinishedAt   time.Time
+}
+
+func (r Record) Duration() time.Duration {
+	if r.FinishedAt.IsZero() || r.StartedAt.IsZero() {
+		return 0
+	}
+	return r.FinishedAt.Sub(r.StartedAt)
+}
+EOF
+gofmt -w . && gofmt -l . && echo "fmt ok"
+[2026-08-23 00:31:17] cd /Users/snowykte0426/Programming/sandrone-code-review-bot && ls internal/core/review/ && pwd

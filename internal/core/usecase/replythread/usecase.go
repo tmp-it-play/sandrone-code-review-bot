@@ -1,0 +1,96 @@
+package replythread
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/prompt"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
+)
+
+type UseCase struct {
+	deps Dependencies
+}
+
+func New(deps Dependencies) *UseCase {
+	return &UseCase{deps: deps}
+}
+
+func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
+	config, err := u.deps.Settings.RepoConfig(ctx, task.Target)
+	if err != nil {
+		return u.fail(ctx, task, "설정을 읽지 못했다", err)
+	}
+	if !config.ThreadReply {
+		return nil
+	}
+	conversation, err := u.deps.Threads.Thread(ctx, task.Target, task.CommentID)
+	if err != nil {
+		return u.fail(ctx, task, "리뷰 스레드를 읽지 못했다", err)
+	}
+
+	target := task.Target
+	if target.HeadSHA == "" {
+		request, requestErr := u.deps.Source.PullRequest(ctx, target)
+		if requestErr != nil {
+			return u.fail(ctx, task, "Pull Request를 읽지 못했다", requestErr)
+		}
+		target.HeadSHA = request.HeadSHA
+	}
+
+	source, truncated := u.currentSource(ctx, task, conversation.Path, target.HeadSHA, config.MaxSourceChars)
+	messages := prompt.ReplyPrompt{
+		Thread:        conversation,
+		CurrentSource: source,
+		Truncated:     truncated,
+		Config:        config,
+		Extra:         task.Instruction,
+	}.Messages()
+
+	response, err := u.deps.Completer.Complete(ctx, llm.Request{
+		Messages:        messages,
+		Temperature:     config.Temperature,
+		MaxOutputTokens: config.MaxOutputTokens,
+	}, nil)
+	if err != nil {
+		return u.fail(ctx, task, "답글 모델을 호출하지 못했다", err)
+	}
+	body := strings.TrimSpace(response.Content)
+	if body == "" {
+		return u.fail(ctx, task, "모델이 답글을 만들지 못했다", fmt.Errorf("빈 응답"))
+	}
+	if err := u.deps.Threads.Reply(ctx, task.Target, task.CommentID, u.deps.Renderer.ReplyBody(body)); err != nil {
+		return u.fail(ctx, task, "답글을 남기지 못했다", err)
+	}
+	return nil
+}
+
+func (u *UseCase) currentSource(ctx context.Context, task job.ReplyJob, path string, ref string, limit int) (string, bool) {
+	if strings.TrimSpace(path) == "" {
+		return "", false
+	}
+	content, err := u.deps.Source.FileContent(ctx, task.Target, path, ref)
+	if err != nil {
+		u.deps.Logger.Warn("최신 파일 내용을 읽지 못했다", "target", task.Target.Reference(), "path", path, "error", err)
+		return "", false
+	}
+	content = u.deps.Masker.Mask(content)
+	if limit > 0 && len(content) > limit {
+		return content[:limit], true
+	}
+	return content, false
+}
+
+func (u *UseCase) fail(ctx context.Context, task job.ReplyJob, message string, cause error) error {
+	u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
+	if task.FinalAttempt {
+		notice := u.deps.Renderer.NoticeBody(review.Notice{Kind: review.NoticeFailed, Message: message})
+		if err := u.deps.Threads.Reply(ctx, task.Target, task.CommentID, notice); err != nil {
+			u.deps.Logger.Warn("실패 안내를 남기지 못했다", "target", task.Target.Reference(), "error", err)
+		}
+	}
+	return fmt.Errorf("%s: %w", message, cause)
+}

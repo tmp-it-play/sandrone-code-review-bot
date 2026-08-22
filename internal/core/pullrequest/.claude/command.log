@@ -1,0 +1,106 @@
+[2026-08-23 00:32:04] cd /Users/snowykte0426/Programming/sandrone-code-review-bot/internal/core
+cat > access/permission.go <<'EOF'
+package access
+
+import "strings"
+
+type Permission string
+
+const (
+	PermissionAdmin    Permission = "admin"
+	PermissionMaintain Permission = "maintain"
+	PermissionWrite    Permission = "write"
+	PermissionTriage   Permission = "triage"
+	PermissionRead     Permission = "read"
+	PermissionNone     Permission = "none"
+)
+
+func ParsePermission(value string) Permission {
+	switch Permission(strings.ToLower(strings.TrimSpace(value))) {
+	case PermissionAdmin:
+		return PermissionAdmin
+	case PermissionMaintain:
+		return PermissionMaintain
+	case PermissionWrite:
+		return PermissionWrite
+	case PermissionTriage:
+		return PermissionTriage
+	case PermissionRead:
+		return PermissionRead
+	default:
+		return PermissionNone
+	}
+}
+
+func (p Permission) CanInvoke() bool {
+	return p == PermissionAdmin || p == PermissionMaintain || p == PermissionWrite
+}
+EOF
+cat > thread/message.go <<'EOF'
+package thread
+
+import "time"
+
+type Message struct {
+	Author    string
+	Body      string
+	FromBot   bool
+	CreatedAt time.Time
+}
+EOF
+cat > thread/thread.go <<'EOF'
+package thread
+
+type Thread struct {
+	RootCommentID int64
+	ReplyToID     int64
+	Path          string
+	Line          int
+	DiffHunk      string
+	Messages      []Message
+}
+
+func (t Thread) Origin() (Message, bool) {
+	if len(t.Messages) == 0 {
+		return Message{}, false
+	}
+	return t.Messages[0], true
+}
+
+func (t Thread) LastHumanRequest() (Message, bool) {
+	for index := len(t.Messages) - 1; index >= 0; index-- {
+		if !t.Messages[index].FromBot {
+			return t.Messages[index], true
+		}
+	}
+	return Message{}, false
+}
+EOF
+cat > command/kind.go <<'EOF'
+package command
+
+type Kind string
+
+const (
+	KindUnknown Kind = "unknown"
+	KindReview  Kind = "review"
+	KindSummary Kind = "summary"
+	KindReply   Kind = "reply"
+)
+EOF
+cat > command/command.go <<'EOF'
+package command
+
+type Command struct {
+	Kind        Kind
+	Invoker     string
+	Instruction string
+	CommentID   int64
+	InThread    bool
+}
+
+func (c Command) IsRecognized() bool {
+	return c.Kind != KindUnknown
+}
+EOF
+gofmt -l ./access ./thread ./command && echo "fmt ok"
