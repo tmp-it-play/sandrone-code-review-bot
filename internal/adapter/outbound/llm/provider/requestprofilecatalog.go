@@ -23,7 +23,7 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 			TopP:                   float64Value(1),
 			ReasoningEffort:        "medium",
 			ParallelToolCalls:      boolValue(false),
-			OutputTokenLimit:       65536,
+			OutputTokenLimit:       2500,
 			UseMaxCompletionTokens: true,
 		}
 	case "openrouter/z-ai/glm-5.2":

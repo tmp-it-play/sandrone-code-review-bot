@@ -9,7 +9,7 @@ type Catalog struct {
 
 func NewCatalog() Catalog {
 	return Catalog{
-		order: []string{"gemini", "groq", "openrouter", "nvidia"},
+		order: []string{"gemini", "nvidia", "openrouter", "groq"},
 		descriptors: map[string]Descriptor{
 			"gemini": {
 				Name:           "gemini",
@@ -25,7 +25,7 @@ func NewCatalog() Catalog {
 				DisplayName:    "GPT-OSS 120B",
 				BaseURL:        "https://api.groq.com/openai/v1",
 				Capability:     llm.Capability{ToolCalling: true, JSONMode: true},
-				MaxPromptChars: 60000,
+				MaxPromptChars: 12000,
 			},
 			"openrouter": {
 				Name:           "openrouter",

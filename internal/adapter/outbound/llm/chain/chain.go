@@ -40,17 +40,10 @@ func New(providers []outbound.Provider, cooldown outbound.Cooldown, usageReposit
 }
 
 func (c *Chain) PromptBudget() int {
-	budget := 0
 	for _, candidate := range c.providers {
-		limit := candidate.PromptLimit()
-		if limit <= 0 {
-			continue
-		}
-		if budget == 0 || limit < budget {
-			budget = limit
-		}
+		return candidate.PromptLimit()
 	}
-	return budget
+	return 0
 }
 
 func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outbound.ToolExecutor) (llm.Response, error) {
@@ -64,6 +57,11 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			c.logger.Warn("쿨다운 상태를 읽지 못했습니다", "provider", candidate.Name(), "error", err)
 		}
 		if cooling {
+			continue
+		}
+		if !fitsWithinTrimBudget(request.Messages, candidate.PromptLimit()) {
+			c.logger.Info("입력이 프로바이더 한도에 비해 너무 커서 건너뜁니다",
+				"provider", candidate.Name(), "limit", candidate.PromptLimit())
 			continue
 		}
 		response, attemptErr := c.attemptWithRetry(ctx, candidate, request, executor)

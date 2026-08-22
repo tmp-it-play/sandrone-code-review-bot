@@ -53,3 +53,16 @@ func trimMessages(messages []llm.Message, limit int) ([]llm.Message, bool) {
 	}
 	return trimmed, changed
 }
+
+const maxTrimRatio = 4
+
+func fitsWithinTrimBudget(messages []llm.Message, limit int) bool {
+	if limit <= 0 {
+		return true
+	}
+	total := 0
+	for _, message := range messages {
+		total += len(message.Content)
+	}
+	return total*3 <= limit*maxTrimRatio
+}
