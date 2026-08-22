@@ -33,6 +33,33 @@ docker compose up -d --build
 - 지표: `GET /metrics`
 - 관리 콘솔: `GET /dashboard`
 
+## 배포
+
+`main`에 푸시하면 GitHub Actions가 `linux/arm64` 이미지를 빌드해 `ghcr.io`에 올리고, SSH로 서버에 배포한 뒤 ghcr 패키지를 지웁니다. 서버에는 실행 중인 컨테이너와 이미지만 남고 배포 스크립트는 스스로 정리합니다.
+
+배포 흐름은 `deploy/deployspec.yml`에 정의되어 있습니다.
+
+| 단계 | 하는 일 |
+|---|---|
+| AfterInstall | ghcr 로그인 → 이미지 pull → 로그아웃 |
+| ApplicationStart | 이전 컨테이너 제거 → 새 컨테이너 실행 |
+| ValidateService | `/healthz` 확인 → 실패 시 롤백 정리 → 배포 파일 삭제 |
+
+### 필요한 시크릿
+
+| 이름 | 설명 |
+|---|---|
+| `SANDRONE_APP_ID` | GitHub App ID |
+| `SANDRONE_APP_PRIVATE_KEY` | GitHub App 개인키 PEM 전문 |
+| `SANDRONE_WEBHOOK_SECRET` | 웹훅 시크릿 |
+| `SANDRONE_MYSQL_DSN`, `SANDRONE_REDIS_ADDR`, `SANDRONE_REDIS_PASSWORD` | 저장소 연결 정보 |
+| `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PASSWORD` | 배포 대상 SSH 접속 정보 |
+| `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `DASHBOARD_SESSION_SECRET` | 관리 콘솔 로그인 |
+| `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY` | 최소 한 개 필요 |
+| `GHCR_CLEANUP_TOKEN` | `delete:packages` 권한 PAT — 배포 후 패키지 제거용 |
+
+모델과 포트는 레포지토리 variables(`GEMINI_MODEL`, `DEPLOY_HOST_PORT` 등)로 바꿉니다.
+
 ## 저장소별 설정
 
 대상 저장소의 `.reviewbot/config.yml`을 읽습니다. 같은 조직의 `Code-Review-Bot`과 같은 파일을 공유하며, `model`·`baseUrl`·`triggerPrefix`·최상위 `autoReview`는 무시하고 `sandrone:` 블록의 값을 따릅니다.

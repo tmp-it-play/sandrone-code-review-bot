@@ -32,3 +32,8 @@ Thumbs.db
 .claude/settings.local.json
 .claude/command.log
 .codex/command.log
+
+# Local deploy credentials
+.secret-password
+deploy/sandrone.env
+deploy/deploy.env
