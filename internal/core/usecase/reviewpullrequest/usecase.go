@@ -20,6 +20,8 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/setting"
 )
 
+const reactionTimeout = 5 * time.Second
+
 type UseCase struct {
 	deps Dependencies
 }
@@ -48,6 +50,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 		u.deps.Logger.Info("설정에 따라 자동 리뷰를 건너뜁니다", "target", target.Reference(), "reason", reason)
 		return nil
 	}
+	u.acknowledge(ctx, target, task)
 
 	files, incremental, err := u.collectFiles(ctx, target, request, task)
 	if err != nil {
@@ -189,6 +192,17 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {
 	}
 	u.rememberHead(ctx, target)
 	return nil
+}
+
+func (u *UseCase) acknowledge(ctx context.Context, target pullrequest.Target, task job.ReviewJob) {
+	if !task.Trigger.IsAutomatic() {
+		return
+	}
+	reactionContext, cancel := context.WithTimeout(ctx, reactionTimeout)
+	defer cancel()
+	if err := u.deps.Reactions.AddPullRequestReaction(reactionContext, target, "eyes"); err != nil {
+		u.deps.Logger.Warn("Pull Request에 리액션을 남기지 못했습니다", "target", target.Reference(), "error", err)
+	}
 }
 
 func (u *UseCase) collectFiles(ctx context.Context, target pullrequest.Target, request pullrequest.PullRequest, task job.ReviewJob) ([]pullrequest.ChangedFile, bool, error) {

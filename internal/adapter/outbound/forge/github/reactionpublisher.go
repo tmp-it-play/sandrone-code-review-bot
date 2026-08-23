@@ -30,3 +30,14 @@ func (p *ReactionPublisher) AddReaction(ctx context.Context, target pullrequest.
 	}
 	return nil
 }
+
+func (p *ReactionPublisher) AddPullRequestReaction(ctx context.Context, target pullrequest.Target, reaction string) error {
+	client, err := p.clients.Client(ctx, target.InstallationID)
+	if err != nil {
+		return err
+	}
+	if _, _, err := client.Reactions.CreateIssueReaction(ctx, target.Owner, target.Repository, target.Number, reaction); err != nil {
+		return fmt.Errorf("리액션을 남기지 못했습니다: %w", err)
+	}
+	return nil
+}

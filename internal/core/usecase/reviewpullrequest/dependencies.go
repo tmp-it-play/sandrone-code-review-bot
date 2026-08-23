@@ -14,6 +14,7 @@ type Dependencies struct {
 	Completer outbound.Completer
 	Tools     outbound.ToolExecutorFactory
 	Publisher outbound.ReviewPublisher
+	Reactions outbound.ReactionPublisher
 	Renderer  outbound.Renderer
 	Reviews   outbound.ReviewRepository
 	Findings  outbound.FindingRepository

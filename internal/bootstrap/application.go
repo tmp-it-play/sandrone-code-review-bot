@@ -105,6 +105,7 @@ func NewApplication(config Config) (*Application, error) {
 		Completer: completer,
 		Tools:     tools,
 		Publisher: publisher,
+		Reactions: reactions,
 		Renderer:  renderer,
 		Reviews:   reviews,
 		Findings:  findings,
