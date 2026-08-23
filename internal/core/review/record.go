@@ -4,6 +4,7 @@ import "time"
 
 type Record struct {
 	ID            uint64
+	RunID         uint64
 	Owner         string
 	Repository    string
 	Number        int

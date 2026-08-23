@@ -3,8 +3,9 @@ package batching
 import "github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 
 type Plan struct {
-	Batches  [][]pullrequest.ChangedFile
-	Overflow []pullrequest.ChangedFile
+	Batches   [][]pullrequest.ChangedFile
+	Overflow  []pullrequest.ChangedFile
+	Oversized []pullrequest.ChangedFile
 }
 
 func (p Plan) Count() int {

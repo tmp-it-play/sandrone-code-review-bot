@@ -8,5 +8,5 @@ import (
 
 type Completer interface {
 	Complete(ctx context.Context, request llm.Request, executor ToolExecutor) (llm.Response, error)
-	PromptBudget() int
+	PromptBudget(providers []string) int
 }

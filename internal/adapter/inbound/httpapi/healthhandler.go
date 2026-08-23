@@ -19,21 +19,20 @@ func NewHealthHandler(database *gorm.DB, cache *redis.Client) *HealthHandler {
 
 func (h *HealthHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	status := map[string]string{"mysql": "ok", "redis": "ok"}
-	healthy := true
+	ready := true
 
 	pool, err := h.database.DB()
 	if err != nil || pool.PingContext(request.Context()) != nil {
 		status["mysql"] = "unreachable"
-		healthy = false
+		ready = false
 	}
 	if err := h.cache.Ping(request.Context()).Err(); err != nil {
-		status["redis"] = "unreachable"
-		healthy = false
+		status["redis"] = "degraded"
 	}
 
 	writer.Header().Set("Content-Type", "application/json")
-	if !healthy {
+	if !ready {
 		writer.WriteHeader(http.StatusServiceUnavailable)
 	}
-	json.NewEncoder(writer).Encode(status)
+	_ = json.NewEncoder(writer).Encode(status)
 }

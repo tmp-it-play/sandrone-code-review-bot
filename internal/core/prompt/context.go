@@ -3,6 +3,7 @@ package prompt
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/instruction"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
@@ -19,24 +20,32 @@ type Context struct {
 }
 
 func (c Context) Render() string {
-	var builder strings.Builder
-	builder.WriteString(c.renderPullRequest())
-	builder.WriteString(c.renderInventory())
-	builder.WriteString(c.renderInstructions())
-	builder.WriteString(c.renderFiles())
-	rendered := builder.String()
-	if c.Config.MaxPromptChars > 0 && len(rendered) > c.Config.MaxPromptChars {
-		return rendered[:c.Config.MaxPromptChars] + "\n\n[컨텍스트가 길어 이후 내용은 생략되었다]\n"
+	required := c.renderPullRequest() + c.renderFiles()
+	optional := c.renderInstructions() + c.renderInventory()
+	if c.Config.MaxPromptChars <= 0 || len(required)+len(optional) <= c.Config.MaxPromptChars {
+		return required + optional
 	}
-	return rendered
+	remaining := c.Config.MaxPromptChars - len(required)
+	if remaining <= 0 {
+		return required
+	}
+	notice := "\n\n[부가 컨텍스트가 길어 이후 내용은 생략되었다]\n"
+	keep := remaining - len(notice)
+	if keep <= 0 {
+		return required
+	}
+	for keep > 0 && !utf8.RuneStart(optional[keep]) {
+		keep--
+	}
+	return required + optional[:keep] + notice
 }
 
 func (c Context) renderPullRequest() string {
 	var builder strings.Builder
 	builder.WriteString("<pull_request>\n")
-	builder.WriteString(fmt.Sprintf("제목: %s\n", c.PullRequest.Title))
-	builder.WriteString(fmt.Sprintf("작성자: %s\n", c.PullRequest.Author))
-	builder.WriteString(fmt.Sprintf("대상 브랜치: %s\n", c.PullRequest.BaseRef))
+	fmt.Fprintf(&builder, "제목: %s\n", c.PullRequest.Title)
+	fmt.Fprintf(&builder, "작성자: %s\n", c.PullRequest.Author)
+	fmt.Fprintf(&builder, "대상 브랜치: %s\n", c.PullRequest.BaseRef)
 	if body, truncated := truncateBody(c.PullRequest.Body); body != "" {
 		builder.WriteString("본문:\n")
 		builder.WriteString(body)
@@ -60,7 +69,7 @@ func (c Context) renderInventory() string {
 	builder.WriteString("<all_changed_files>\n")
 	builder.WriteString("이 PR이 건드린 파일 전체다. 이 중 아래 <changed_files>에 실린 파일만 이번 요청에서 검토한다.\n")
 	for _, file := range c.Inventory {
-		builder.WriteString(fmt.Sprintf("- %s (+%d/-%d)\n", file.Path, file.Additions, file.Deletions))
+		fmt.Fprintf(&builder, "- %s (+%d/-%d)\n", file.Path, file.Additions, file.Deletions)
 	}
 	builder.WriteString("</all_changed_files>\n\n")
 	return builder.String()
@@ -74,7 +83,7 @@ func (c Context) renderInstructions() string {
 	builder.WriteString("<project_rules>\n")
 	builder.WriteString("이 저장소의 규칙 문서다. 리뷰 기준으로 삼는다.\n\n")
 	for _, document := range c.Instructions.Documents {
-		builder.WriteString(fmt.Sprintf("--- %s ---\n", document.Path))
+		fmt.Fprintf(&builder, "--- %s ---\n", document.Path)
 		builder.WriteString(document.Content)
 		if document.Truncated {
 			builder.WriteString("\n[분량 제한으로 이후 내용 생략]")
@@ -94,7 +103,7 @@ func (c Context) renderFiles() string {
 	var builder strings.Builder
 	builder.WriteString("<changed_files>\n")
 	for _, file := range c.Files {
-		builder.WriteString(fmt.Sprintf("<file path=\"%s\" status=\"%s\" additions=\"%d\" deletions=\"%d\">\n", file.Path, file.Status, file.Additions, file.Deletions))
+		fmt.Fprintf(&builder, "<file path=\"%s\" status=\"%s\" additions=\"%d\" deletions=\"%d\">\n", file.Path, file.Status, file.Additions, file.Deletions)
 		if patch := strings.TrimSpace(file.Patch); patch != "" {
 			builder.WriteString("<diff>\n")
 			builder.WriteString(patch)

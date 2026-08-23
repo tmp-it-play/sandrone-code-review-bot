@@ -16,14 +16,18 @@ type FileSelector struct {
 
 func (s FileSelector) Select(files []pullrequest.ChangedFile) Selection {
 	kept := make([]pullrequest.ChangedFile, 0, len(files))
+	excluded := make([]Exclusion, 0)
 	for _, file := range files {
-		if file.IsRemoved() {
+		if !s.allowed(file.Path) {
+			excluded = append(excluded, Exclusion{File: file, Reason: ExclusionReasonPathPolicy})
 			continue
 		}
 		if strings.TrimSpace(file.Patch) == "" {
-			continue
-		}
-		if !s.allowed(file.Path) {
+			reason := ExclusionReasonPatchUnavailable
+			if file.Status == "renamed" && file.Additions == 0 && file.Deletions == 0 {
+				reason = ExclusionReasonNoContentChange
+			}
+			excluded = append(excluded, Exclusion{File: file, Reason: reason})
 			continue
 		}
 		kept = append(kept, file)
@@ -38,7 +42,7 @@ func (s FileSelector) Select(files []pullrequest.ChangedFile) Selection {
 	}
 	sortByPath(kept)
 	sortByPath(skipped)
-	return Selection{Files: kept, Skipped: skipped}
+	return Selection{Files: kept, Skipped: skipped, Excluded: excluded}
 }
 
 func sortByPath(files []pullrequest.ChangedFile) {

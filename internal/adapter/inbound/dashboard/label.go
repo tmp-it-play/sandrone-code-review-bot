@@ -18,9 +18,11 @@ var triggerLabels = map[review.Trigger]string{
 
 var outcomeLabels = map[review.Outcome]string{
 	review.OutcomeSucceeded:   "성공",
+	review.OutcomePartial:     "부분 완료",
 	review.OutcomeSkipped:     "건너뜀",
 	review.OutcomeFailed:      "실패",
 	review.OutcomeUnavailable: "사용 불가",
+	review.OutcomeSuperseded:  "대체됨",
 }
 
 var commandLabels = map[command.Kind]string{

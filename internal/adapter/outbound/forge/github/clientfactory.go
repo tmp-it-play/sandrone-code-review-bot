@@ -2,9 +2,12 @@ package github
 
 import (
 	"context"
+	"time"
 
 	gh "github.com/google/go-github/v90/github"
 )
+
+const githubRequestTimeout = 90 * time.Second
 
 type ClientFactory struct {
 	tokens *TokenSource
@@ -19,5 +22,5 @@ func (f *ClientFactory) Client(ctx context.Context, installationID int64) (*gh.C
 	if err != nil {
 		return nil, err
 	}
-	return gh.NewClient(gh.WithAuthToken(token))
+	return gh.NewClient(gh.WithTimeout(githubRequestTimeout), gh.WithAuthToken(token))
 }

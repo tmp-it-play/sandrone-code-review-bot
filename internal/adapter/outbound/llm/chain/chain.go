@@ -39,8 +39,11 @@ func New(providers []outbound.Provider, cooldown outbound.Cooldown, usageReposit
 	}
 }
 
-func (c *Chain) PromptBudget() int {
+func (c *Chain) PromptBudget(providers []string) int {
 	for _, candidate := range c.providers {
+		if !allowed(candidate.Name(), providers) || candidate.PromptLimit() <= 0 {
+			continue
+		}
 		return candidate.PromptLimit()
 	}
 	return 0
@@ -59,7 +62,11 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		if cooling {
 			continue
 		}
-		if !fitsWithinTrimBudget(request.Messages, candidate.PromptLimit()) {
+		fits := fitsWithinTrimBudget(request.Messages, candidate.PromptLimit())
+		if request.RequireCompletePrompt {
+			fits = messagesFit(request.Messages, candidate.PromptLimit())
+		}
+		if !fits {
 			c.logger.Info("입력이 프로바이더 한도에 비해 너무 커서 건너뜁니다",
 				"provider", candidate.Name(), "limit", candidate.PromptLimit())
 			continue
@@ -125,12 +132,24 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 	}
 	accumulated := llm.Usage{}
 	for round := 0; round < c.maxToolRounds; round++ {
+		if request.RequireCompletePrompt && !messagesFit(messages, candidate.PromptLimit()) {
+			final := request
+			final.Tools = nil
+			response, err := candidate.Complete(ctx, final)
+			if err != nil {
+				return llm.Response{}, err
+			}
+			response.Usage = accumulated.Add(response.Usage)
+			return response, nil
+		}
 		attempt := request
 		attempt.Messages = messages
 		attempt.Tools = tools
-		if fitted, trimmed := trimMessages(attempt.Messages, candidate.PromptLimit()); trimmed {
-			attempt.Messages = fitted
-			c.logger.Warn("프로바이더 입력 한도에 맞추어 프롬프트를 줄였습니다", "provider", candidate.Name(), "limit", candidate.PromptLimit())
+		if !request.RequireCompletePrompt {
+			if fitted, trimmed := trimMessages(attempt.Messages, candidate.PromptLimit()); trimmed {
+				attempt.Messages = fitted
+				c.logger.Warn("프로바이더 입력 한도에 맞추어 프롬프트를 줄였습니다", "provider", candidate.Name(), "limit", candidate.PromptLimit())
+			}
 		}
 		response, err := candidate.Complete(ctx, attempt)
 		if err != nil {
@@ -161,8 +180,12 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 	final := request
 	final.Messages = messages
 	final.Tools = nil
-	if fitted, trimmed := trimMessages(final.Messages, candidate.PromptLimit()); trimmed {
-		final.Messages = fitted
+	if request.RequireCompletePrompt && !messagesFit(final.Messages, candidate.PromptLimit()) {
+		final.Messages = request.Messages
+	} else if !request.RequireCompletePrompt {
+		if fitted, trimmed := trimMessages(final.Messages, candidate.PromptLimit()); trimmed {
+			final.Messages = fitted
+		}
 	}
 	response, err := candidate.Complete(ctx, final)
 	if err != nil {

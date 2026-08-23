@@ -26,16 +26,18 @@ func (s *PullRequestSource) PullRequest(ctx context.Context, target pullrequest.
 		return pullrequest.PullRequest{}, fmt.Errorf("PR %s를 읽지 못했습니다: %w", target.Reference(), err)
 	}
 	return pullrequest.PullRequest{
-		Number:  found.GetNumber(),
-		Title:   found.GetTitle(),
-		Body:    found.GetBody(),
-		Author:  found.GetUser().GetLogin(),
-		BaseRef: found.GetBase().GetRef(),
-		HeadRef: found.GetHead().GetRef(),
-		BaseSHA: found.GetBase().GetSHA(),
-		HeadSHA: found.GetHead().GetSHA(),
-		State:   found.GetState(),
-		Draft:   found.GetDraft(),
+		Number:       found.GetNumber(),
+		Title:        found.GetTitle(),
+		Body:         found.GetBody(),
+		Author:       found.GetUser().GetLogin(),
+		BaseRef:      found.GetBase().GetRef(),
+		HeadRef:      found.GetHead().GetRef(),
+		BaseSHA:      found.GetBase().GetSHA(),
+		HeadSHA:      found.GetHead().GetSHA(),
+		State:        found.GetState(),
+		Draft:        found.GetDraft(),
+		ChangedFiles: found.GetChangedFiles(),
+		UpdatedAt:    found.GetUpdatedAt().Time,
 	}, nil
 }
 
@@ -67,20 +69,13 @@ func (s *PullRequestSource) ChangedFilesBetween(ctx context.Context, target pull
 	if err != nil {
 		return nil, err
 	}
-	options := &gh.ListOptions{PerPage: 100}
-	collected := make([]pullrequest.ChangedFile, 0, 64)
-	for {
-		comparison, response, compareErr := client.Repositories.CompareCommits(ctx, target.Owner, target.Repository, baseSHA, headSHA, options)
-		if compareErr != nil {
-			return nil, fmt.Errorf("커밋 비교에 실패했습니다: %w", compareErr)
-		}
-		for _, file := range comparison.Files {
-			collected = append(collected, toChangedFile(file))
-		}
-		if response == nil || response.NextPage == 0 {
-			break
-		}
-		options.Page = response.NextPage
+	comparison, _, err := client.Repositories.CompareCommits(ctx, target.Owner, target.Repository, baseSHA, headSHA, &gh.ListOptions{PerPage: 100})
+	if err != nil {
+		return nil, fmt.Errorf("커밋 비교에 실패했습니다: %w", err)
+	}
+	collected := make([]pullrequest.ChangedFile, 0, len(comparison.Files))
+	for _, file := range comparison.Files {
+		collected = append(collected, toChangedFile(file))
 	}
 	return collected, nil
 }

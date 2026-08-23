@@ -6,8 +6,13 @@ import (
 )
 
 func ToReviewModel(record review.Record) model.Review {
+	var reviewRunID *uint64
+	if record.RunID != 0 {
+		reviewRunID = &record.RunID
+	}
 	return model.Review{
 		ID:            record.ID,
+		ReviewRunID:   reviewRunID,
 		Owner:         record.Owner,
 		Repository:    record.Repository,
 		Number:        record.Number,
@@ -25,8 +30,13 @@ func ToReviewModel(record review.Record) model.Review {
 }
 
 func ToReviewRecord(entry model.Review) review.Record {
+	runID := uint64(0)
+	if entry.ReviewRunID != nil {
+		runID = *entry.ReviewRunID
+	}
 	return review.Record{
 		ID:            entry.ID,
+		RunID:         runID,
 		Owner:         entry.Owner,
 		Repository:    entry.Repository,
 		Number:        entry.Number,

@@ -12,6 +12,7 @@ import (
 	inboundcommand "github.com/it-play/sandrone-code-review-bot/internal/adapter/inbound/command"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/inbound/dashboard"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/inbound/httpapi"
+	"github.com/it-play/sandrone-code-review-bot/internal/adapter/inbound/maintenance"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/inbound/webhook"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/inbound/worker"
 	redisadapter "github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/cache/redis"
@@ -35,13 +36,16 @@ import (
 const botName = "sandrone-code-review-bot"
 
 type Application struct {
-	logger      *slog.Logger
-	httpServer  *http.Server
-	asynqServer *asynq.Server
-	asynqMux    *asynq.ServeMux
-	queueClient *queueadapter.Client
-	inspector   *asynq.Inspector
-	cache       *redis.Client
+	logger            *slog.Logger
+	httpServer        *http.Server
+	asynqServer       *asynq.Server
+	asynqMux          *asynq.ServeMux
+	queueClient       *queueadapter.Client
+	inspector         *asynq.Inspector
+	cache             *redis.Client
+	reviewRetention   *maintenance.ReviewRetentionWorker
+	reviewPublication *maintenance.ReviewPublicationWorker
+	webhookInbox      *maintenance.WebhookInboxWorker
 }
 
 func NewApplication(config Config) (*Application, error) {
@@ -87,13 +91,13 @@ func NewApplication(config Config) (*Application, error) {
 	)
 
 	reviews := mysql.NewReviewRepository(database)
+	reviewWorkflows := mysql.NewReviewWorkflowRepository(database)
 	findings := mysql.NewFindingRepository(database)
-	states := mysql.NewPullRequestStateRepository(database)
 	installations := mysql.NewInstallationRepository(database)
 	usageRepository := mysql.NewUsageRepository(database)
 	commands := mysql.NewCommandRepository(database)
+	webhookInboxRepository := mysql.NewWebhookInboxRepository(database)
 	cooldown := redisadapter.NewCooldown(cache)
-	deduplicator := redisadapter.NewDeduplicator(cache)
 
 	completer := chain.New(buildProviders(config), cooldown, usageRepository, metrics, clock, logger, config.ProviderCooldown)
 	parser := parsing.ResultParser{}
@@ -108,34 +112,40 @@ func NewApplication(config Config) (*Application, error) {
 		Reactions: reactions,
 		Renderer:  renderer,
 		Reviews:   reviews,
+		Workflows: reviewWorkflows,
 		Findings:  findings,
-		State:     states,
 		Clock:     clock,
 		Parser:    parser,
 		Logger:    logger,
+		Retention: config.ReviewRetention,
 	})
+	reviewRetention := maintenance.NewReviewRetentionWorker(reviewWorkflows, clock, logger, config.ReviewRetention)
+	reviewPublication := maintenance.NewReviewPublicationWorker(reviewWorkflows, pullRequests, publisher, reviews, clock, logger, config.ReviewRetention)
 	summaryUseCase := summarizepullrequest.New(summarizepullrequest.Dependencies{
-		Source:    pullRequests,
-		Settings:  settingSource,
-		Masker:    masker,
-		Completer: completer,
-		Publisher: publisher,
-		Renderer:  renderer,
-		Reviews:   reviews,
-		Clock:     clock,
-		Parser:    parser,
-		Logger:    logger,
+		Source:       pullRequests,
+		Settings:     settingSource,
+		Masker:       masker,
+		Completer:    completer,
+		Publisher:    publisher,
+		Renderer:     renderer,
+		Reviews:      reviews,
+		Publications: reviewWorkflows,
+		Clock:        clock,
+		Parser:       parser,
+		Logger:       logger,
+		Retention:    config.ReviewRetention,
 	})
 	replyUseCase := replythread.New(replythread.Dependencies{
-		Source:    pullRequests,
-		Settings:  settingSource,
-		Masker:    masker,
-		Completer: completer,
-		Threads:   threads,
-		Publisher: publisher,
-		Renderer:  renderer,
-		Clock:     clock,
-		Logger:    logger,
+		Source:       pullRequests,
+		Settings:     settingSource,
+		Masker:       masker,
+		Completer:    completer,
+		Threads:      threads,
+		Renderer:     renderer,
+		Publications: reviewWorkflows,
+		Clock:        clock,
+		Logger:       logger,
+		Retention:    config.ReviewRetention,
 	})
 	commandUseCase := handlecommand.New(handlecommand.Dependencies{
 		Permissions: permissions,
@@ -149,8 +159,9 @@ func NewApplication(config Config) (*Application, error) {
 		Logger:      logger,
 	})
 
-	router := webhook.NewEventRouter(queueClient, commandUseCase, inboundcommand.NewParser(botName), installations, logger)
-	webhookHandler := webhook.NewHandler(config.WebhookSecret, router, deduplicator, metrics, logger, webhook.Retention(config.DeliveryRetention))
+	router := webhook.NewEventRouter(queueClient, commandUseCase, inboundcommand.NewParser(botName), installations)
+	webhookInbox := maintenance.NewWebhookInboxWorker(webhookInboxRepository, router, clock, masker, metrics, logger, config.DeliveryRetention)
+	webhookHandler := webhook.NewHandler(config.WebhookSecret, webhookInboxRepository, clock, logger)
 
 	dashboardServer, err := dashboard.NewServer(dashboard.Dependencies{
 		Reviews:       reviews,
@@ -198,13 +209,16 @@ func NewApplication(config Config) (*Application, error) {
 	})
 
 	return &Application{
-		logger:      logger,
-		httpServer:  &http.Server{Addr: config.HTTPAddress, Handler: handler, ReadHeaderTimeout: 10 * time.Second},
-		asynqServer: asynqServer,
-		asynqMux:    asynqMux,
-		queueClient: queueClient,
-		inspector:   inspector,
-		cache:       cache,
+		logger:            logger,
+		httpServer:        &http.Server{Addr: config.HTTPAddress, Handler: handler, ReadHeaderTimeout: 10 * time.Second},
+		asynqServer:       asynqServer,
+		asynqMux:          asynqMux,
+		queueClient:       queueClient,
+		inspector:         inspector,
+		cache:             cache,
+		reviewRetention:   reviewRetention,
+		reviewPublication: reviewPublication,
+		webhookInbox:      webhookInbox,
 	}, nil
 }
 
@@ -212,6 +226,9 @@ func (a *Application) Run(ctx context.Context) error {
 	if err := a.asynqServer.Start(a.asynqMux); err != nil {
 		return fmt.Errorf("워커를 시작하지 못했습니다: %w", err)
 	}
+	go a.reviewRetention.Run(ctx)
+	go a.reviewPublication.Run(ctx)
+	go a.webhookInbox.Run(ctx)
 	errs := make(chan error, 1)
 	go func() {
 		a.logger.Info("HTTP 서버를 시작합니다", "address", a.httpServer.Addr)

@@ -51,7 +51,7 @@ func (p *ThreadPublisher) Thread(ctx context.Context, target pullrequest.Target,
 		collected = append(collected, anchor)
 	}
 	sort.SliceStable(collected, func(left, right int) bool {
-		return collected[left].GetCreatedAt().Time.Before(collected[right].GetCreatedAt().Time)
+		return collected[left].GetCreatedAt().Before(collected[right].GetCreatedAt().Time)
 	})
 
 	conversation := thread.Thread{

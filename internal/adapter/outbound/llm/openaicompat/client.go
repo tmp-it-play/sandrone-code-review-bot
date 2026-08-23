@@ -88,7 +88,9 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 	if err != nil {
 		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureUnavailable, Cause: err}
 	}
-	defer httpResponse.Body.Close()
+	defer func() {
+		_ = httpResponse.Body.Close()
+	}()
 
 	raw, err := io.ReadAll(httpResponse.Body)
 	if err != nil {

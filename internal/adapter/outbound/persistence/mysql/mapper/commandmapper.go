@@ -6,20 +6,31 @@ import (
 )
 
 func ToCommandModel(invocation command.Invocation) model.CommandInvocation {
+	var key *string
+	if invocation.Key != "" {
+		value := invocation.Key
+		key = &value
+	}
 	return model.CommandInvocation{
-		Owner:      invocation.Owner,
-		Repository: invocation.Repository,
-		Number:     invocation.Number,
-		Invoker:    invocation.Invoker,
-		Kind:       string(invocation.Kind),
-		Allowed:    invocation.Allowed,
-		Detail:     invocation.Detail,
-		OccurredAt: invocation.OccurredAt,
+		InvocationKey: key,
+		Owner:         invocation.Owner,
+		Repository:    invocation.Repository,
+		Number:        invocation.Number,
+		Invoker:       invocation.Invoker,
+		Kind:          string(invocation.Kind),
+		Allowed:       invocation.Allowed,
+		Detail:        invocation.Detail,
+		OccurredAt:    invocation.OccurredAt,
 	}
 }
 
 func ToCommandInvocation(entry model.CommandInvocation) command.Invocation {
+	key := ""
+	if entry.InvocationKey != nil {
+		key = *entry.InvocationKey
+	}
 	return command.Invocation{
+		Key:        key,
 		Owner:      entry.Owner,
 		Repository: entry.Repository,
 		Number:     entry.Number,

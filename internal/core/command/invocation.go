@@ -3,6 +3,7 @@ package command
 import "time"
 
 type Invocation struct {
+	Key        string
 	Owner      string
 	Repository string
 	Number     int

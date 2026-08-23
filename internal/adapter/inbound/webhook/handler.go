@@ -1,31 +1,34 @@
 package webhook
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	gh "github.com/google/go-github/v90/github"
-	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/observability"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/webhookinbox"
 )
 
+const deliveryStoreTimeout = 5 * time.Second
+
 type Handler struct {
-	secret       []byte
-	router       *EventRouter
-	deduplicator outbound.Deduplicator
-	metrics      *observability.Metrics
-	logger       *slog.Logger
-	retention    Retention
+	secret []byte
+	inbox  outbound.WebhookInboxRepository
+	clock  outbound.Clock
+	logger *slog.Logger
 }
 
-func NewHandler(secret string, router *EventRouter, deduplicator outbound.Deduplicator, metrics *observability.Metrics, logger *slog.Logger, retention Retention) *Handler {
+func NewHandler(secret string, inbox outbound.WebhookInboxRepository, clock outbound.Clock, logger *slog.Logger) *Handler {
 	return &Handler{
-		secret:       []byte(secret),
-		router:       router,
-		deduplicator: deduplicator,
-		metrics:      metrics,
-		logger:       logger,
-		retention:    retention,
+		secret: []byte(secret),
+		inbox:  inbox,
+		clock:  clock,
+		logger: logger,
 	}
 }
 
@@ -42,22 +45,41 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	eventType := gh.WebHookType(request)
 	deliveryID := gh.DeliveryID(request)
-	if deliveryID != "" {
-		first, dedupeErr := h.deduplicator.FirstSeen(request.Context(), deliveryID, h.retention.Duration())
-		if dedupeErr != nil {
-			h.logger.Warn("중복 확인에 실패했습니다", "delivery", deliveryID, "error", dedupeErr)
-		} else if !first {
-			writer.WriteHeader(http.StatusOK)
-			return
-		}
+	identity := webhookRequestIdentity(eventType, deliveryID, payload)
+	key := deliveryID
+	if key == "" {
+		key = identity
 	}
-	event, err := gh.ParseWebHook(eventType, payload)
+	now := h.clock.Now()
+	storeContext, cancel := context.WithTimeout(context.WithoutCancel(request.Context()), deliveryStoreTimeout)
+	err = h.inbox.Store(storeContext, webhookinbox.Delivery{
+		Key:             key,
+		EventType:       eventType,
+		Payload:         payload,
+		RequestIdentity: identity,
+		AvailableAt:     now,
+		ReceivedAt:      now,
+	})
+	cancel()
 	if err != nil {
-		h.logger.Warn("웹훅 본문을 해석하지 못했습니다", "event", eventType, "error", err)
-		writer.WriteHeader(http.StatusAccepted)
+		h.logger.Error("웹훅 delivery를 inbox에 저장하지 못했습니다", "event", eventType, "delivery", deliveryID, "error", err)
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, webhookinbox.ErrIdentityConflict) {
+			status = http.StatusConflict
+		}
+		http.Error(writer, "웹훅 delivery를 저장하지 못했습니다", status)
 		return
 	}
-	action := h.router.Route(request.Context(), event)
-	h.metrics.ObserveWebhook(eventType, action)
 	writer.WriteHeader(http.StatusAccepted)
+}
+
+func webhookRequestIdentity(eventType string, deliveryID string, payload []byte) string {
+	if deliveryID != "" {
+		return "delivery:" + deliveryID
+	}
+	hash := sha256.New()
+	hash.Write([]byte(eventType))
+	hash.Write([]byte{0})
+	hash.Write(payload)
+	return "payload:" + hex.EncodeToString(hash.Sum(nil))
 }

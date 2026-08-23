@@ -8,6 +8,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/persistence/mysql/model"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/command"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type CommandRepository struct {
@@ -20,7 +21,7 @@ func NewCommandRepository(database *gorm.DB) *CommandRepository {
 
 func (r *CommandRepository) Record(ctx context.Context, invocation command.Invocation) error {
 	entry := mapper.ToCommandModel(invocation)
-	if err := r.database.WithContext(ctx).Create(&entry).Error; err != nil {
+	if err := r.database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&entry).Error; err != nil {
 		return fmt.Errorf("명령 기록을 저장하지 못했습니다: %w", err)
 	}
 	return nil

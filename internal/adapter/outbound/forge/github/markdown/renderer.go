@@ -127,11 +127,11 @@ func (r Renderer) fileTable(notes []review.FileNote) string {
 	var builder strings.Builder
 	collapse := len(notes) > fileTableToggleThreshold
 	if collapse {
-		builder.WriteString(fmt.Sprintf("<details>\n<summary>파일별 변경 내용 %d개</summary>\n\n", len(notes)))
+		fmt.Fprintf(&builder, "<details>\n<summary>파일별 변경 내용 %d개</summary>\n\n", len(notes))
 	}
 	builder.WriteString("| 파일 | 변경 내용 |\n| --- | --- |\n")
 	for _, note := range notes {
-		builder.WriteString(fmt.Sprintf("| `%s` | %s |\n", note.Path, escapeCell(note.Note)))
+		fmt.Fprintf(&builder, "| `%s` | %s |\n", note.Path, escapeCell(note.Note))
 	}
 	if collapse {
 		builder.WriteString("\n</details>\n")
@@ -141,14 +141,14 @@ func (r Renderer) fileTable(notes []review.FileNote) string {
 
 func (r Renderer) fallbackSection(findings []review.Finding, style review.Style) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("<details>\n<summary>인라인으로 달지 못한 지적 %d건</summary>\n\n", len(findings)))
+	fmt.Fprintf(&builder, "<details>\n<summary>인라인으로 달지 못한 지적 %d건</summary>\n\n", len(findings))
 	for _, finding := range findings {
 		location := finding.File
 		if finding.Line > 0 {
 			location = fmt.Sprintf("%s:%d", finding.File, finding.Line)
 		}
 		builder.WriteString(severityBadge(finding.Severity, style))
-		builder.WriteString(fmt.Sprintf(" `%s`", location))
+		fmt.Fprintf(&builder, " `%s`", location)
 		if title := strings.TrimSpace(finding.Title); title != "" {
 			builder.WriteString(" · ")
 			builder.WriteString(title)
@@ -172,12 +172,12 @@ func (r Renderer) fallbackSection(findings []review.Finding, style review.Style)
 
 func (r Renderer) unreviewedSection(files []review.UnreviewedFile, prose reviewProse) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("<details>\n<summary>이번 리뷰에서 다루지 못한 파일 %d개</summary>\n\n", len(files)))
+	fmt.Fprintf(&builder, "<details>\n<summary>이번 리뷰에서 다루지 못한 파일 %d개</summary>\n\n", len(files))
 	builder.WriteString(prose.unreviewedFiles)
 	builder.WriteString("\n\n")
 	builder.WriteString("| 파일 | 변경 | 사유 |\n| --- | --- | --- |\n")
 	for _, file := range files {
-		builder.WriteString(fmt.Sprintf("| `%s` | +%d / -%d | %s |\n", file.Path, file.Additions, file.Deletions, file.Reason))
+		fmt.Fprintf(&builder, "| `%s` | +%d / -%d | %s |\n", file.Path, file.Additions, file.Deletions, file.Reason)
 	}
 	builder.WriteString("\n</details>\n")
 	return builder.String()

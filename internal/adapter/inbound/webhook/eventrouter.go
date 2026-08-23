@@ -2,7 +2,7 @@ package webhook
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
 
 	gh "github.com/google/go-github/v90/github"
 	inboundcommand "github.com/it-play/sandrone-code-review-bot/internal/adapter/inbound/command"
@@ -19,40 +19,38 @@ type EventRouter struct {
 	commands      *handlecommand.UseCase
 	parser        inboundcommand.Parser
 	installations outbound.InstallationRepository
-	logger        *slog.Logger
 }
 
-func NewEventRouter(queue outbound.Queue, commands *handlecommand.UseCase, parser inboundcommand.Parser, installations outbound.InstallationRepository, logger *slog.Logger) *EventRouter {
+func NewEventRouter(queue outbound.Queue, commands *handlecommand.UseCase, parser inboundcommand.Parser, installations outbound.InstallationRepository) *EventRouter {
 	return &EventRouter{
 		queue:         queue,
 		commands:      commands,
 		parser:        parser,
 		installations: installations,
-		logger:        logger,
 	}
 }
 
-func (r *EventRouter) Route(ctx context.Context, event any) string {
+func (r *EventRouter) Route(ctx context.Context, event any, requestIdentity string) (string, error) {
 	switch payload := event.(type) {
 	case *gh.PullRequestEvent:
-		return r.pullRequest(ctx, payload)
+		return r.pullRequest(ctx, payload, requestIdentity)
 	case *gh.IssueCommentEvent:
-		return r.issueComment(ctx, payload)
+		return r.issueComment(ctx, payload, requestIdentity)
 	case *gh.PullRequestReviewCommentEvent:
-		return r.reviewComment(ctx, payload)
+		return r.reviewComment(ctx, payload, requestIdentity)
 	case *gh.InstallationEvent:
 		return r.installation(ctx, payload)
 	case *gh.InstallationRepositoriesEvent:
 		return r.installationRepositories(ctx, payload)
 	default:
-		return "ignored"
+		return "ignored", nil
 	}
 }
 
-func (r *EventRouter) pullRequest(ctx context.Context, payload *gh.PullRequestEvent) string {
+func (r *EventRouter) pullRequest(ctx context.Context, payload *gh.PullRequestEvent, requestIdentity string) (string, error) {
 	action := payload.GetAction()
 	if payload.GetPullRequest().GetDraft() && action != "ready_for_review" {
-		return action
+		return action, nil
 	}
 	target := pullrequest.Target{
 		InstallationID: payload.GetInstallation().GetID(),
@@ -62,7 +60,12 @@ func (r *EventRouter) pullRequest(ctx context.Context, payload *gh.PullRequestEv
 		HeadSHA:        payload.GetPullRequest().GetHead().GetSHA(),
 		BaseSHA:        payload.GetPullRequest().GetBase().GetSHA(),
 	}
-	task := job.ReviewJob{Target: target}
+	task := job.ReviewJob{
+		Target:             target,
+		RequestIdentity:    requestIdentity,
+		SnapshotObservedAt: payload.GetPullRequest().GetUpdatedAt().Time,
+		SnapshotOrderKey:   "automatic",
+	}
 	switch action {
 	case "opened", "reopened", "ready_for_review":
 		task.Trigger = review.TriggerPullRequestOpened
@@ -70,22 +73,22 @@ func (r *EventRouter) pullRequest(ctx context.Context, payload *gh.PullRequestEv
 		task.Trigger = review.TriggerPullRequestPushed
 		task.Incremental = true
 	default:
-		return action
+		return action, nil
 	}
 	if err := r.queue.EnqueueReview(ctx, task); err != nil {
-		r.logger.Error("리뷰 작업을 큐에 넣지 못했습니다", "target", target.Reference(), "error", err)
+		return action, fmt.Errorf("%s 리뷰 작업을 큐에 넣지 못했습니다: %w", target.Reference(), err)
 	}
-	return action
+	return action, nil
 }
 
-func (r *EventRouter) issueComment(ctx context.Context, payload *gh.IssueCommentEvent) string {
+func (r *EventRouter) issueComment(ctx context.Context, payload *gh.IssueCommentEvent, requestIdentity string) (string, error) {
 	action := payload.GetAction()
 	if action != "created" || !payload.GetIssue().IsPullRequest() || isBot(payload.GetSender()) {
-		return action
+		return action, nil
 	}
 	parsed := r.parser.Parse(payload.GetComment().GetBody(), payload.GetSender().GetLogin(), payload.GetComment().GetID(), false)
 	if !parsed.IsRecognized() {
-		return action
+		return action, nil
 	}
 	target := pullrequest.Target{
 		InstallationID: payload.GetInstallation().GetID(),
@@ -97,20 +100,22 @@ func (r *EventRouter) issueComment(ctx context.Context, payload *gh.IssueComment
 		Target:            target,
 		Command:           parsed,
 		PullRequestAuthor: payload.GetIssue().GetUser().GetLogin(),
+		RequestIdentity:   requestIdentity,
+		OccurredAt:        payload.GetComment().GetCreatedAt().Time,
 	}); err != nil {
-		r.logger.Error("명령을 처리하지 못했습니다", "target", target.Reference(), "error", err)
+		return action, fmt.Errorf("%s 명령을 처리하지 못했습니다: %w", target.Reference(), err)
 	}
-	return action
+	return action, nil
 }
 
-func (r *EventRouter) reviewComment(ctx context.Context, payload *gh.PullRequestReviewCommentEvent) string {
+func (r *EventRouter) reviewComment(ctx context.Context, payload *gh.PullRequestReviewCommentEvent, requestIdentity string) (string, error) {
 	action := payload.GetAction()
 	if action != "created" || isBot(payload.GetSender()) {
-		return action
+		return action, nil
 	}
 	parsed := r.parser.Parse(payload.GetComment().GetBody(), payload.GetSender().GetLogin(), payload.GetComment().GetID(), true)
 	if !parsed.IsRecognized() {
-		return action
+		return action, nil
 	}
 	target := pullrequest.Target{
 		InstallationID: payload.GetInstallation().GetID(),
@@ -123,13 +128,15 @@ func (r *EventRouter) reviewComment(ctx context.Context, payload *gh.PullRequest
 		Target:            target,
 		Command:           parsed,
 		PullRequestAuthor: payload.GetPullRequest().GetUser().GetLogin(),
+		RequestIdentity:   requestIdentity,
+		OccurredAt:        payload.GetComment().GetCreatedAt().Time,
 	}); err != nil {
-		r.logger.Error("스레드 명령을 처리하지 못했습니다", "target", target.Reference(), "error", err)
+		return action, fmt.Errorf("%s 스레드 명령을 처리하지 못했습니다: %w", target.Reference(), err)
 	}
-	return action
+	return action, nil
 }
 
-func (r *EventRouter) installation(ctx context.Context, payload *gh.InstallationEvent) string {
+func (r *EventRouter) installation(ctx context.Context, payload *gh.InstallationEvent) (string, error) {
 	action := payload.GetAction()
 	entry := installation.Installation{
 		ID:          payload.GetInstallation().GetID(),
@@ -139,30 +146,34 @@ func (r *EventRouter) installation(ctx context.Context, payload *gh.Installation
 		InstalledAt: payload.GetInstallation().GetCreatedAt().Time,
 	}
 	if err := r.installations.Upsert(ctx, entry); err != nil {
-		r.logger.Error("설치 정보를 저장하지 못했습니다", "installation", entry.ID, "error", err)
+		return action, fmt.Errorf("%d 설치 정보를 저장하지 못했습니다: %w", entry.ID, err)
 	}
 	for _, repository := range payload.Repositories {
-		r.saveRepository(ctx, entry.ID, repository)
+		if err := r.saveRepository(ctx, entry.ID, repository); err != nil {
+			return action, err
+		}
 	}
-	return action
+	return action, nil
 }
 
-func (r *EventRouter) installationRepositories(ctx context.Context, payload *gh.InstallationRepositoriesEvent) string {
+func (r *EventRouter) installationRepositories(ctx context.Context, payload *gh.InstallationRepositoriesEvent) (string, error) {
 	installationID := payload.GetInstallation().GetID()
 	for _, repository := range payload.RepositoriesAdded {
-		r.saveRepository(ctx, installationID, repository)
+		if err := r.saveRepository(ctx, installationID, repository); err != nil {
+			return payload.GetAction(), err
+		}
 	}
-	return payload.GetAction()
+	return payload.GetAction(), nil
 }
 
-func (r *EventRouter) saveRepository(ctx context.Context, installationID int64, repository *gh.Repository) {
+func (r *EventRouter) saveRepository(ctx context.Context, installationID int64, repository *gh.Repository) error {
 	owner, name := splitFullName(repository.GetFullName())
 	if owner == "" {
 		owner = repository.GetOwner().GetLogin()
 		name = repository.GetName()
 	}
 	if owner == "" || name == "" {
-		return
+		return nil
 	}
 	entry := installation.Repository{
 		InstallationID: installationID,
@@ -171,8 +182,9 @@ func (r *EventRouter) saveRepository(ctx context.Context, installationID int64, 
 		Private:        repository.GetPrivate(),
 	}
 	if err := r.installations.UpsertRepository(ctx, entry); err != nil {
-		r.logger.Error("저장소 정보를 저장하지 못했습니다", "repository", entry.FullName(), "error", err)
+		return fmt.Errorf("%s 저장소 정보를 저장하지 못했습니다: %w", entry.FullName(), err)
 	}
+	return nil
 }
 
 func isBot(sender *gh.User) bool {

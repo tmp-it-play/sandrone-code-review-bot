@@ -13,12 +13,12 @@ func (b Batcher) Split(files []pullrequest.ChangedFile, reserved int) Plan {
 	if len(files) == 0 {
 		return Plan{}
 	}
+	if b.MaxChars <= 0 {
+		return Plan{Batches: [][]pullrequest.ChangedFile{files}}
+	}
 	budget := b.MaxChars - reserved
 	if budget <= 0 {
-		budget = b.MaxChars
-	}
-	if budget <= 0 {
-		return Plan{Batches: [][]pullrequest.ChangedFile{files}}
+		return Plan{Oversized: append([]pullrequest.ChangedFile{}, files...)}
 	}
 
 	plan := Plan{}
@@ -26,6 +26,15 @@ func (b Batcher) Split(files []pullrequest.ChangedFile, reserved int) Plan {
 	used := 0
 	for _, file := range files {
 		cost := fileCost(file)
+		if cost > budget {
+			if len(current) > 0 {
+				plan.Batches = append(plan.Batches, current)
+				current = make([]pullrequest.ChangedFile, 0, len(files))
+				used = 0
+			}
+			plan.Oversized = append(plan.Oversized, file)
+			continue
+		}
 		if len(current) > 0 && used+cost > budget {
 			plan.Batches = append(plan.Batches, current)
 			current = make([]pullrequest.ChangedFile, 0, len(files))

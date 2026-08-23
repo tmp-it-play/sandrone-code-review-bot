@@ -29,7 +29,11 @@ func (h *ReviewHandler) ProcessTask(ctx context.Context, task *asynq.Task) error
 	payload.Attempt = attemptNumber(ctx)
 	payload.FinalAttempt = isFinalAttempt(ctx)
 	startedAt := time.Now()
-	err := h.usecase.Execute(ctx, payload)
-	h.metrics.ObserveJob("review", outcomeLabel(err), time.Since(startedAt))
+	outcome, err := h.usecase.ExecuteWithOutcome(ctx, payload)
+	label := outcomeLabel(err)
+	if err == nil {
+		label = string(outcome)
+	}
+	h.metrics.ObserveJob("review", label, time.Since(startedAt))
 	return err
 }

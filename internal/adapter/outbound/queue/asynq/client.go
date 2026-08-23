@@ -3,12 +3,15 @@ package asynq
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
 )
+
+const taskRetention = 30 * 24 * time.Hour
 
 type Client struct {
 	client *asynq.Client
@@ -43,9 +46,15 @@ func (c *Client) enqueue(ctx context.Context, taskType string, payload any) erro
 	options := []asynq.Option{
 		asynq.MaxRetry(6),
 		asynq.Timeout(20 * time.Minute),
-		asynq.Retention(48 * time.Hour),
+		asynq.Retention(taskRetention),
+	}
+	if id := deterministicTaskID(taskType, payload); id != "" {
+		options = append(options, asynq.TaskID(id))
 	}
 	if _, err := c.client.EnqueueContext(ctx, task, options...); err != nil {
+		if errors.Is(err, asynq.ErrTaskIDConflict) {
+			return nil
+		}
 		return fmt.Errorf("작업을 큐에 넣지 못했습니다: %w", err)
 	}
 	return nil

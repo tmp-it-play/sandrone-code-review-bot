@@ -1,14 +1,15 @@
 package pullrequest
 
 type ChangedFile struct {
-	Path         string
-	PreviousPath string
-	Status       string
-	Additions    int
-	Deletions    int
-	Patch        string
-	Content      string
-	Truncated    bool
+	Path           string
+	PreviousPath   string
+	Status         string
+	Additions      int
+	Deletions      int
+	Patch          string
+	Content        string
+	Truncated      bool
+	PatchTruncated bool
 }
 
 func (f ChangedFile) IsRemoved() bool {

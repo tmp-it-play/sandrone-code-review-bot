@@ -32,6 +32,7 @@ type Config struct {
 	StaticDirectory   string
 	MetricsToken      string
 	DeliveryRetention time.Duration
+	ReviewRetention   time.Duration
 }
 
 func LoadConfig() (Config, error) {
@@ -52,7 +53,8 @@ func LoadConfig() (Config, error) {
 		TemplateDirectory: env("SANDRONE_TEMPLATE_DIR", "web/template"),
 		StaticDirectory:   env("SANDRONE_STATIC_DIR", "web/static"),
 		MetricsToken:      os.Getenv("SANDRONE_METRICS_TOKEN"),
-		DeliveryRetention: duration("SANDRONE_DELIVERY_RETENTION", 24*time.Hour),
+		DeliveryRetention: deliveryRetention(),
+		ReviewRetention:   reviewRetention(),
 	}
 
 	appID, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("GITHUB_APP_ID")), 10, 64)
@@ -86,6 +88,28 @@ func LoadConfig() (Config, error) {
 		return Config{}, errors.New("사용 가능한 LLM 프로바이더가 하나도 설정되지 않았습니다")
 	}
 	return config, nil
+}
+
+func reviewRetention() time.Duration {
+	const minimum = 120 * 24 * time.Hour
+	const maximum = 180 * 24 * time.Hour
+	configured := duration("SANDRONE_REVIEW_RETENTION", maximum)
+	if configured < minimum {
+		return minimum
+	}
+	if configured > maximum {
+		return maximum
+	}
+	return configured
+}
+
+func deliveryRetention() time.Duration {
+	const minimum = 96 * time.Hour
+	configured := duration("SANDRONE_DELIVERY_RETENTION", minimum)
+	if configured < minimum {
+		return minimum
+	}
+	return configured
 }
 
 func privateKey() ([]byte, error) {

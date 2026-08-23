@@ -2,6 +2,8 @@ package dashboard
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -156,7 +158,6 @@ func (s *Server) rerun(writer http.ResponseWriter, request *http.Request) {
 		Owner:      record.Owner,
 		Repository: record.Repository,
 		Number:     record.Number,
-		HeadSHA:    record.HeadSHA,
 	}
 	installationID, found := s.installationFor(request.Context(), record.Owner, record.Repository)
 	if !found {
@@ -164,9 +165,18 @@ func (s *Server) rerun(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	target.InstallationID = installationID
+	requestID := make([]byte, 16)
+	if _, err := rand.Read(requestID); err != nil {
+		http.Error(writer, "재실행 요청 식별자를 만들지 못했습니다", http.StatusInternalServerError)
+		return
+	}
+	requestIdentity := "dashboard:" + strconv.FormatUint(id, 10) + ":" + hex.EncodeToString(requestID)
 	err = s.deps.Queue.EnqueueReview(request.Context(), job.ReviewJob{
-		Target:  target,
-		Trigger: review.TriggerDashboardRerun,
+		Target:             target,
+		Trigger:            review.TriggerDashboardRerun,
+		RequestIdentity:    requestIdentity,
+		SnapshotObservedAt: time.Now().UTC(),
+		SnapshotOrderKey:   requestIdentity,
 	})
 	if err != nil {
 		http.Error(writer, "재실행을 요청하지 못했습니다", http.StatusInternalServerError)
