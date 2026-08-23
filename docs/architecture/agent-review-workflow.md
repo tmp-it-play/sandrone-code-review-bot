@@ -2,7 +2,7 @@
 
 - 설계 ID: `REVIEW-WORKFLOW-001`
 - 상태: 승인된 구현 기준
-- 구현 상태: 시작 전
+- 구현 상태: 단계 1 수직 슬라이스 및 로컬 통합 검증 완료, 실제 배포 검증 전
 - 최초 작성일: 2026-08-24
 - 최종 갱신일: 2026-08-24
 - 결정 소유자: Sandrone maintainers
@@ -267,6 +267,7 @@ ReviewRun -> Plan -> ReviewUnit -> Verify -> Reduce -> Publish -> Retain/Expire
 | `D-15` | Review completeness는 GitHub Check로 노출하며 partial은 merge gate를 성공시킬 수 없다. |
 | `D-16` | Source, prompt와 raw response는 구조화된 리뷰 결과보다 훨씬 짧게 보존하거나 기본적으로 저장하지 않는다. |
 | `D-17` | Provider와 model은 고정하지 않고 무료로 실제 운영 가능한 후보를 공통 capability와 품질 benchmark로 검증한 후 역할별 catalog에 등록한다. |
+| `D-18` | Stale 게시물 무효화가 7일 이상 실패하면 run 종료와 함께 영속 무효화 부채를 원자 기록하고 review 결과와 같은 hard TTL까지만 재시도한다. |
 
 ## 6. 도메인 모델
 
@@ -277,8 +278,10 @@ ReviewRun -> Plan -> ReviewUnit -> Verify -> Reduce -> Publish -> Retain/Expire
 고유 키:
 
 ```text
-installation + repository + pull request number + head SHA + config hash + prompt version
+installation + repository + pull request number + base SHA + head SHA + config hash + prompt version + model policy hash + request identity
 ```
+
+자동 event는 `X-GitHub-Delivery`를 request identity로 사용한다. 같은 delivery의 재전송은 동일 run으로 합치고, force-push 또는 revert로 과거 head가 다시 등장해도 새 delivery는 새 run으로 구분한다. Delivery header가 없는 호환 webhook은 event type과 검증된 payload hash를 사용한다. 수동 재실행은 comment ID 또는 명시적 요청 ID를 포함해 의도된 새 run으로 구분한다.
 
 주요 속성:
 
@@ -593,6 +596,7 @@ Publication outbox와 숨김 marker를 사용한다.
 3. 게시 후 GitHub ID를 저장한다.
 4. 응답 유실 시 다시 게시하기 전에 reconcile한다.
 5. 일부 inline 위치가 잘못되면 유효한 코멘트를 보존하고 잘못된 위치만 격리한다.
+6. 같은 marker가 응답 유실로 여러 review 또는 issue comment에 존재하면 발견한 모든 occurrence를 무효화하고 일부 실패를 성공으로 숨기지 않는다.
 
 ## 16. 실패와 재시도 정책
 
@@ -659,9 +663,13 @@ patch hash + context hash + instruction hash + prompt version + review policy ve
 | Candidate와 VerifiedFinding | 180일 | Source run과 함께 삭제 |
 | Finding lifecycle과 reuse index | 180일 | 원본 결과보다 오래 보존하지 않음 |
 | Publication과 GitHub ID | 180일 | 멱등 reconcile 기간 동안만 보존 |
+| Review publication invalidation debt | 180일 | 7일 이상 실패한 stale 게시 보상을 terminal 전이와 원자 기록하고 120~180일 hard TTL까지만 lease와 backoff로 재시도 |
+| PR별 summary publication fence | 180일 | 요청 순서, 완료 tombstone과 lease만 보존하고 review state와 함께 120~180일 후 제거 |
+| Reply publication fence | 180일 | Operation key, target, 완료 tombstone과 lease만 보존하고 120~180일 후 제거 |
+| Webhook inbox payload와 tombstone | 처리 중 최대 7일 / terminal 후 최소 96시간 | 성공·실패 terminal 전환에서 payload 즉시 제거하고 identity, hash와 오류 metadata만 TTL까지 유지 |
 | 집계 metric | 장기 보존 가능 | 코드, prompt, 자연어 finding과 저장소 식별 정보를 포함하지 않는 집계만 허용 |
 
-GitHub에 이미 게시된 review와 comment는 외부 시스템의 기록이므로 로컬 cleanup이 삭제하지 않는다. 로컬 publication metadata가 만료된 후에는 과거 게시물을 자동 수정하거나 중복 억제 근거로 사용하지 않는다.
+GitHub에 이미 게시된 review와 comment는 외부 시스템의 기록이므로 로컬 cleanup이 삭제하지 않는다. 다만 TTL 전에 stale 판정을 받은 게시물은 무효화 부채가 유효한 동안 모든 marker occurrence를 수정한다. 로컬 publication metadata와 무효화 부채가 만료된 후에는 과거 게시물을 자동 수정하거나 중복 억제 근거로 사용하지 않는다.
 
 ### 18.3 삭제 기준
 
@@ -753,6 +761,18 @@ Provider capability는 model별로 기록하고 planner, reviewer, verifier와 r
 
 무료 quota와 model availability는 바뀔 수 있으므로 정기적으로 재검증한다. 기준을 더 이상 만족하지 않는 provider는 새 배포 없이도 운영 설정으로 비활성화할 수 있어야 하며, 품질이 확인되지 않은 모델을 단순한 rate-limit fallback으로 사용하지 않는다.
 
+### 19.4 2026-08-24 후보 조사
+
+공식 문서 기준으로 다음 후보를 등록 전 benchmark 대상으로 둔다. 이 목록은 운영 catalog가 아니며 API key를 이용한 live conformance probe와 한국어 코드 리뷰 benchmark를 통과하기 전에는 production route에 넣지 않는다.
+
+| 후보 | 기대 역할 | 무료 사용과 기능 | 등록 전 조건 |
+| --- | --- | --- | --- |
+| Mistral API의 Mistral Small 4 | 한국어 unit reviewer와 reducer | [Free 플랜](https://mistral.ai/pricing/)에 평가용 API credit이 있고, [모델 문서](https://docs.mistral.ai/models/mistral-small-4-0-26-03)는 장문 context, function calling과 structured output을 제공한다. [지원 언어](https://docs.mistral.ai/resources/languages)에 한국어가 포함된다. | 조직별 실제 rate limit과 model ID 확인, private code 사용 전 training opt-out 확인, schema와 한국어 품질 실측 |
+| Cloudflare Workers AI의 GLM-4.7-Flash와 Gemma 4 | 저비용 planner, reviewer와 독립 verifier | Workers Free에서 [일일 무료 Neurons](https://developers.cloudflare.com/workers-ai/platform/pricing/)를 제공하고 [OpenAI-compatible endpoint](https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/)와 tool calling 모델을 제공한다. [데이터 정책](https://developers.cloudflare.com/workers-ai/platform/data-usage/)은 고객 콘텐츠를 모델 학습에 사용하지 않는다고 명시한다. | Account ID를 포함하는 provider account 모델, 모델별 JSON schema 준수율과 한국어 품질 실측 |
+| Cohere North Mini Code와 Command A+ | Public 저장소 coding specialist shadow 평가 | [North Mini Code](https://docs.cohere.com/docs/north-mini-code-1.0)와 [Command A+](https://docs.cohere.com/docs/command-a-plus)는 tool use와 structured output을 제공하고, Command A+ 언어 목록에는 한국어가 포함된다. | [Trial 제한](https://docs.cohere.com/docs/rate-limits)은 production 사용에 적합하지 않으므로 public shadow 평가만 허용하고 별도 운영 계약과 데이터 조건 승인 후 승격 |
+
+Cerebras는 무료 반복 quota와 context 문서가 일관되는지 account probe가 필요해 보류한다. GitHub Models는 [종료 공지](https://docs.github.com/en/github-models)에 따라 후보에서 제외한다. Provider account, model deployment와 review role을 현재의 provider-model 1:1 catalog에서 분리하고 `last_verified_at`, `production_allowed`, `private_code_allowed`, `training_opt_out_required`와 quota 종류를 운영 metadata로 관리하는 작업이 선행돼야 한다.
+
 ## 20. 보안 경계
 
 - PR 제목, 본문, diff와 파일 내용은 신뢰할 수 없는 입력이다.
@@ -819,25 +839,70 @@ ExpireReviewData
 - `verified_findings`
 - `finding_occurrences`
 - `publications`
+- `review_publication_invalidations`
 - `webhook_inbox`
 - `workflow_outbox`
 - `review_unit_dependencies`
 
-MySQL을 상태의 source of truth로 사용하고 Redis와 Asynq는 전달, lease와 짧은 cache에 사용한다.
+MySQL을 상태의 source of truth로 사용하고 Redis와 Asynq는 전달, lease와 짧은 cache에 사용한다. `/healthz`는 durable webhook ingress가 의존하는 MySQL만 readiness 필수 조건으로 삼고 Redis 장애는 응답 body에 `degraded`로 노출한다. 따라서 queue 장애 중에도 검증된 delivery를 inbox에 받아 내부 재시도로 복구한다.
 
 MySQL 상태 변경과 Asynq enqueue는 하나의 transaction이 아니므로 후속 unit, fan-in, publication과 cleanup 요청은 `workflow_outbox`에 먼저 기록한다. Dispatcher는 outbox를 멱등적으로 전달하고, reconciler는 전달이 유실돼도 database 상태에서 필요한 작업을 다시 생성한다.
 
 ## 23. 단계별 구현 계획
 
+### 현재 전환 구현
+
+첫 수직 슬라이스는 기존 직렬 batch loop를 제거하지 않고 durable workflow 상태로 감싼다.
+
+- 모든 실행은 고정된 base/head 전체 diff를 다시 수집하고 unified diff hunk manifest를 만든다.
+- Compare API의 파일 수가 PR manifest보다 작으면 최대 3,000개를 제공하는 PR files API로 다시 수집하고, 그래도 모자라면 manifest gap을 남긴다.
+- 기존 batch는 `legacy_batch` ReviewUnit으로 저장하며 unit attempt lease로 중복 worker의 결과 덮어쓰기를 막는다.
+- Hunk, patch gap, pure rename과 policy exclusion을 CoverageItem으로 남긴다.
+- 후반 unit 실패, 파일·batch 상한, patch 누락이나 절단은 complete가 아니라 partial 또는 failed가 된다.
+- Complete와 명시적 zero-denominator skipped만 같은 transaction에서 watermark를 전진시킨다.
+- PR별 latest-run coordinator와 publication claim이 동시 run의 게시를 fencing하고, run key 기반 숨김 marker를 GitHub 게시 전·불확실한 응답 후·재시작 시 조회한다. GitHub event나 comment의 실제 발생 시각을 먼저 비교하고, 같은 comment namespace에서는 zero-padded comment ID, 서로 비교할 수 없는 source에서는 Run ID를 tie-breaker로 사용한다. Active publication 중 더 최신 run이 도착하면 active token은 보존하되 desired latest slot을 먼저 승격해 오래된 worker의 renew와 재획득을 차단한다. Run 생성 뒤 live base/head도 다시 검증한다.
+- 서명을 검증한 Webhook delivery는 event type, payload hash와 payload를 MySQL inbox에 고유 키로 commit한 뒤 즉시 202를 반환한다. 별도 dispatcher만 fresh context와 token-fenced lease로 event를 처리하고, enqueue 또는 설치 정보 저장 실패는 외부 side effect 전에 확인하는 7일 처리 기한 안에서 내부 backoff로 다시 시도한 뒤 조사 가능한 terminal failure로 격리한다. 같은 GUID와 payload hash의 명시적 redelivery가 failed tombstone에 도착하면 payload를 복원하고 새 7일 창의 pending 상태로 원자 재개한다. Delivery 또는 comment 종류와 identity로 만든 deterministic Asynq task ID는 30일, 완료 inbox tombstone은 최소 96시간 보존해 enqueue 응답 유실과 redelivery의 중복 등록을 흡수한다.
+- 명령 요약과 review-thread 답글도 request identity 기반 숨김 marker를 게시물에 포함하고 모델 호출 전과 불확실한 게시 응답 뒤에 다시 조회한다. 요약은 comment와 PR body 양쪽에서 marker를 찾고, PR별 desired request와 active publisher를 분리한 30분 token-fenced claim으로 모든 placement의 외부 쓰기를 직렬화한다. 더 최신 요약이 active claim 중 도착해도 desired slot부터 승격하므로 오래된 worker는 외부 쓰기 직전 renew에 실패하며, 외부 응답이 불확실해진 뒤에는 lease를 즉시 풀지 않는다. Reply는 operation별 MySQL claim과 완료 tombstone을 사용하고 GitHub 제약에 맞춰 항상 thread의 top-level review comment에 게시한다. 두 fence는 리뷰 보존 기간과 함께 제거한다. Issue comment와 pull-request review comment의 숫자 ID 공간은 task와 감사 key에서 별도 scope로 구분한다.
+- Review 제출 adapter는 marker 조회 뒤에도 live base/head를 한 번 더 확인하고, 제출 직후 기준점이나 desired latest run 변경이 확인되면 같은 marker를 가진 모든 review의 bot 소유 최상위 inline comment와 review body, 모든 bot issue comment를 무효화한 뒤에만 run을 superseded 처리한다. Inline comment는 삭제하지 않고 본문을 바꿔 사람이 남긴 thread reply와 대화 기록을 보존한다. 일부 occurrence 처리 실패는 전체 보상 실패로 합산한다. 보상 실패는 최대 7일 동안 nonterminal publishing 상태로 두고 즉시 재시도하며, 이후에도 실패하면 외부 호출의 취소와 분리된 finalize context에서 run 종료와 `review_publication_invalidations` 생성을 같은 transaction으로 수행한다. 별도 reconciler는 한 번에 한 항목만 token-fenced lease로 claim하고 한 pass의 run과 무효화 부채 처리량을 각각 10건으로 제한해 두 backlog를 교대로 진행한다. Run 순회는 epoch 시작 시 최대 ID를 high-watermark로 고정하고 그 지점에 도달하면 반드시 처음으로 되감아 지속적인 신규 유입 중에도 과거 ID가 기아 상태에 빠지지 않게 한다. 실패는 10분에서 최대 24시간의 backoff로 hard TTL까지 재시도하며, 각 외부 호출 deadline도 남은 TTL을 넘지 않는다. Marker가 더는 없거나 이미 무효화됐으면 성공으로 수렴한다. [GitHub review 생성 API](https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-request)에는 expected-head 조건부 write가 없으므로 database와 GitHub 사이의 원자성은 제공할 수 없다. 현재 보상은 stale 내용을 유효한 리뷰로 남기지 않기 위한 안전망이며, review ID와 payload hash를 저장하는 완전한 publication 상태 머신은 단계 3의 outbox 범위다.
+- 정상 publisher는 20분 task 전체를 덮는 30분 publication claim을 사용한다. Worker가 살아서 ambiguous publish lease를 해제하면 claim을 5분 뒤 만료하도록 줄이고, 90초 context의 reconciler도 5분 claim으로 외부 조회를 단일화해 안전한 큐 재시도와 새 head의 진행을 함께 보장한다.
+- GitHub 쓰기 전에 provisional review와 finding을 원자 저장한다. 10분 주기의 reconciler는 marker와 내부 이력을 다시 확인하며 run 종료와 review projection 생성·승격을 같은 transaction에서 처리한다. 외부 조회가 계속 실패하면 7일 뒤 failed 종료와 보수적인 무효화 부채 생성을 원자 처리해 hard TTL의 시작점을 만든다.
+- 리뷰 이력은 ReviewRun ID로 멱등하고 review와 finding을 하나의 transaction에서 저장한다.
+- Terminal run, review/finding/state, publication fence와 해결 여부와 무관한 무효화 부채는 기본 180일, 설정 가능한 120~180일 뒤 daily batched cleanup에서 제거한다.
+- Migration은 기존 `LastReviewedSHA` row의 immutable 보존 기준을 당시 `updated_at`으로 한 번 backfill한다. 이후 summary나 publication 상태 갱신은 `last_reviewed_at`을 연장하지 않으며, 기준 시각이 없는 watermark는 cleanup에서 보수적으로 제거한다.
+- Prompt는 실제 changed file diff를 필수 영역에 두고 inventory와 규칙 문서를 부가 영역으로 절단한다. System/schema, 수동 추가 지시와 tool 안내까지 포함한 실제 message 크기를 첫 사용 가능 provider의 입력 한도에 맞춰 batch로 구성한다. Review 요청은 provider chain의 자동 message 절단을 금지하며 단일 파일의 필수 diff도 한도에 맞지 않으면 `prompt_limit` deferred coverage로 남기고 unit을 만들지 않는다.
+- Review job metric은 succeeded, partial, unavailable, skipped와 superseded를 terminal outcome대로 구분한다.
+
+이 단계는 상태 정확성을 먼저 확보하는 전환 구현이다. Unit별 candidate/result 저장, 성공 unit 재사용, durable fan-out/fan-in, verifier, reducer와 review publication outbox는 아직 구현되지 않았다. 따라서 재시도는 성공 unit도 다시 호출할 수 있고 deferred coverage를 별도 작업으로 자동 재개하지 않는다. [GitHub는 실패한 webhook delivery를 자동 재전송하지 않으므로](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries), inbox insert 자체가 실패한 delivery는 GitHub App delivery API 감시와 redelivery 운영이 여전히 필요하다. 현재 marker reconcile은 provisional 이력과 terminal projection을 이용해 응답 유실과 database finalization 재개를 처리한다. Marker를 읽을 수 없는 장기 GitHub 장애는 7일 뒤 확인 불가 실패와 영속 무효화 부채로 전환해 stale 결과 정리를 계속 시도하지만, review payload hash, GitHub ID와 발송 상태를 담는 durable publication row/outbox가 없어 정확한 payload 재구성이나 외부 write의 완전한 추적은 할 수 없다. 이 한계는 단계 3에서 제거한다.
+
+### 단계 1 배포 제약
+
+이 변경은 구 worker가 이해하지 못하는 latest-run, publication claim과 marker protocol을 추가하므로 구·신 worker를 같은 queue consumer 집합에서 동시에 실행하는 rolling 배포와 호환되지 않는다.
+
+1. 새 review job 유입을 잠시 멈춘다.
+2. 구 worker를 drain한 뒤 모두 중지한다.
+3. database backup과 복구 지점을 확인하고 새 binary 한 instance로 schema migration을 완료한다.
+4. 새 binary만 시작하고 health, migration, publication reconciler와 retention worker 로그를 확인한다.
+5. 유입을 재개하고 작은 PR, 부분 실패 PR, 오래된 publishing run 순으로 canary 검증한다.
+
+Application startup migration은 같은 MySQL session에서 `GET_LOCK`을 획득한 뒤 normalize와 AutoMigrate를 수행해 신버전 replica 사이 DDL을 직렬화한다. 이 lock은 구 worker의 protocol 동작을 바꾸지 않으므로 drain 절차를 대체하지 않는다.
+
+구형 queue payload에는 발생 순서와 publication operation key가 없으므로 새 worker는 이를 안전하게 no-op 처리한다. Drain은 실행 중인 작업만이 아니라 retry와 scheduled queue까지 확인해야 하며, 필요한 요청은 새 webhook redelivery나 dashboard rerun으로 새 형식에 맞춰 다시 생성한다.
+
+Webhook inbox claim과 cleanup은 `FOR UPDATE SKIP LOCKED`를 사용하므로 단계 1의 database 최소 버전은 MySQL 8.0이다.
+
 ### 단계 1. 정확한 상태와 부분 성공
 
-- [ ] `ReviewRun`, `ReviewUnit`, `CoverageItem` 모델 추가
-- [ ] Head SHA와 config/prompt version으로 run 고유성 보장
-- [ ] Complete, partial, failed와 superseded 상태 도입
-- [ ] Partial에서 전체 SHA watermark를 전진시키지 않음
-- [ ] PR별 lease와 stale head 게시 차단
-- [ ] 보존 기간 필드와 cleanup worker를 초기 schema에 포함
-- [ ] Prompt에서 실제 diff 예산을 우선 보장
+- [x] `ReviewRun`, `ReviewUnit`, `CoverageItem` 모델 추가
+- [x] Base/head SHA, config/prompt/model policy와 delivery 또는 수동 request identity로 run 고유성 보장
+- [x] Complete, partial, failed와 superseded 상태 도입
+- [x] Partial에서 전체 SHA watermark를 전진시키지 않음
+- [x] Unit attempt lease와 stale head 게시 차단
+- [x] PR별 latest-run coordinator와 publication claim 도입
+- [x] Summary shared-slot과 reply operation별 durable publication fence 도입
+- [x] MySQL webhook inbox와 lease dispatcher로 수신과 처리 retry 분리
+- [x] 보존 기간 필드와 cleanup worker를 초기 schema에 포함
+- [x] Stale 게시 전체 occurrence 무효화와 TTL 제한 영속 재시도 도입
+- [x] 실제 review message 크기로 batch를 구성하고 diff 우선 예산과 silent trim 금지
 
 ### 단계 2. Durable fan-out/fan-in
 
@@ -853,7 +918,8 @@ MySQL 상태 변경과 Asynq enqueue는 하나의 transaction이 아니므로 �
 - [ ] Exact hunk, excerpt와 anchor 검증
 - [ ] 자동 nearest-line 이동 제거
 - [ ] Root cause와 occurrence 기반 중복 키 도입
-- [ ] Publication outbox와 marker reconcile 구현
+- [x] Run marker 기반 게시 전·응답 유실 후 reconcile 초기 구현
+- [ ] Durable publication row, payload hash, GitHub ID와 outbox 구현
 - [ ] Compact coverage summary와 GitHub Check 구현
 
 ### 단계 4. Agentic planning과 통합 검토
