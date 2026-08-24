@@ -30,9 +30,9 @@ go.work.sum
 Thumbs.db
 
 # AI harness (local only)
-.claude/settings.local.json
-.claude/command.log
-.codex/command.log
+**/.claude/settings.local.json
+**/.claude/command.log
+**/.codex/command.log
 
 # Local deploy credentials
 deploy/sandrone.env
