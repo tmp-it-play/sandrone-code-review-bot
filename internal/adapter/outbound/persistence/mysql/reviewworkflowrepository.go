@@ -390,10 +390,10 @@ func (r *ReviewWorkflowRepository) StartUnit(ctx context.Context, runID uint64, 
 				string(reviewworkflow.CoverageStatusFailed),
 				string(reviewworkflow.CoverageStatusDeferred),
 			}).Updates(map[string]any{
-				"status":      string(reviewworkflow.CoverageStatusPlanned),
-				"reason":      "",
-				"reviewed_at": nil,
-			}).Error
+			"status":      string(reviewworkflow.CoverageStatusPlanned),
+			"reason":      "",
+			"reviewed_at": nil,
+		}).Error
 	})
 	if err != nil {
 		return reviewworkflow.UnitClaim{}, fmt.Errorf("리뷰 unit을 시작하지 못했습니다: %w", err)
