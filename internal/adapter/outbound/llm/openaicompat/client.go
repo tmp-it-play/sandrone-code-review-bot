@@ -70,7 +70,7 @@ func (c *Client) PromptLimit() int {
 
 func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Response, error) {
 	payload := c.chatRequest(request)
-	if request.ForceJSON && c.capability.JSONMode && len(request.Tools) == 0 {
+	if request.ForceJSON && c.capability.JSONMode && (len(request.Tools) == 0 || c.requestProfile.ForceJSONWithTools) {
 		payload.ResponseFormat = &responseFormat{Type: "json_object"}
 	}
 	if c.capability.ToolCalling {
@@ -108,10 +108,11 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 	}
 	if httpResponse.StatusCode >= 400 {
 		return llm.Response{}, &llm.Failure{
-			Provider: c.name,
-			Kind:     classify(httpResponse.StatusCode, raw),
-			Status:   httpResponse.StatusCode,
-			Cause:    fmt.Errorf("%s", describe(raw)),
+			Provider:   c.name,
+			Kind:       classify(httpResponse.StatusCode, raw),
+			Status:     httpResponse.StatusCode,
+			RetryAfter: parseRetryAfter(httpResponse.Header.Get("Retry-After"), time.Now()),
+			Cause:      fmt.Errorf("%s", describe(raw)),
 		}
 	}
 
@@ -123,6 +124,10 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureInvalid, Status: httpResponse.StatusCode, Cause: fmt.Errorf("응답에 선택지가 없습니다")}
 	}
 	choice := decoded.Choices[0]
+	content := choice.Message.Content
+	if c.requestProfile.StripLeadingEmptyThought {
+		content = strings.TrimPrefix(content, "<|channel>thought\n<channel|>")
+	}
 	resolvedModel := strings.TrimSpace(decoded.Model)
 	if resolvedModel == "" {
 		resolvedModel = c.model
@@ -136,7 +141,7 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 		}
 	}
 	return llm.Response{
-		Content:      choice.Message.Content,
+		Content:      content,
 		ToolCalls:    fromChatToolCalls(choice.Message.ToolCalls),
 		Provider:     c.name,
 		Model:        resolvedModel,

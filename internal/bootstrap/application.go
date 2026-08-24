@@ -128,7 +128,7 @@ func NewApplication(config Config) (*Application, error) {
 		Retention:   config.ReviewRetention,
 		LLMMaxCalls: config.LLMMaxCalls,
 	})
-	reviewRetention := maintenance.NewReviewRetentionWorker(reviewWorkflows, clock, logger, config.ReviewRetention)
+	reviewRetention := maintenance.NewReviewRetentionWorker(reviewWorkflows, usageRepository, clock, logger, config.ReviewRetention)
 	reviewPublication := maintenance.NewReviewPublicationWorker(reviewWorkflows, pullRequests, publisher, reviews, clock, logger, config.ReviewRetention)
 	occurrenceBootstrap := maintenance.NewFindingOccurrenceBootstrapWorker(occurrenceBootstrapRepository, logger)
 	summaryUseCase := summarizepullrequest.New(summarizepullrequest.Dependencies{

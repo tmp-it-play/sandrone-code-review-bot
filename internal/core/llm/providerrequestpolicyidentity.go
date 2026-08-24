@@ -10,4 +10,6 @@ type ProviderRequestPolicyIdentity struct {
 	ParallelToolCalls     *bool
 	MaxOutputTokens       int
 	MaxCompletionTokens   bool
+	ForceJSONWithTools    bool
+	StripEmptyThought     bool
 }

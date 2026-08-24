@@ -192,10 +192,8 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		if ok {
 			outcome = string(failure.Kind)
 			status = failure.Status
-			if failure.Kind.TriggersCooldown() {
-				if markErr := c.cooldown.Mark(ctx, candidate.Name(), c.cooldownFor); markErr != nil {
-					c.logger.Warn("쿨다운을 기록하지 못했습니다", "provider", candidate.Name(), "error", markErr)
-				}
+			if failure.Kind.TriggersCooldown() || failure.RetryAfter > 0 {
+				c.markProviderCooldown(ctx, candidate, failure.RetryAfter)
 			}
 		}
 		if invoked {
@@ -241,7 +239,7 @@ func (c *Chain) attemptWithRetry(ctx context.Context, candidate outbound.Provide
 		}
 		lastErr = err
 		failure, ok := llm.AsFailure(err)
-		if !ok || !failure.Kind.IsTransient() || tryIndex == transientRetries {
+		if !ok || !failure.Kind.IsTransient() || failure.RetryAfter > 0 || tryIndex == transientRetries {
 			return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, lastAttemptUsage, err
 		}
 		c.observe(ctx, candidate, candidate.Model(), request.TaskRole, string(failure.Kind), failure.Status, lastAttemptUsage)

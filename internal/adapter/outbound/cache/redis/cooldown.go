@@ -25,8 +25,11 @@ func (c *Cooldown) Active(ctx context.Context, provider string) (bool, error) {
 }
 
 func (c *Cooldown) Mark(ctx context.Context, provider string, duration time.Duration) error {
+	if duration <= 0 {
+		return nil
+	}
 	deadline := time.Now().Add(duration).UTC().Format(time.RFC3339)
-	if err := c.client.Set(ctx, cooldownKey(provider), deadline, duration).Err(); err != nil {
+	if err := markCooldownScript.Run(ctx, c.client, []string{cooldownKey(provider)}, deadline, duration.Milliseconds()).Err(); err != nil {
 		return fmt.Errorf("쿨다운을 기록하지 못했습니다: %w", err)
 	}
 	return nil

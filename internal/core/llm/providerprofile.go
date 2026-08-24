@@ -4,6 +4,7 @@ type ProviderProfile struct {
 	Roles              []TaskRole
 	PublicDataAllowed  bool
 	PrivateCodeAllowed bool
+	FailureDomain      string
 }
 
 func (p ProviderProfile) Allows(role TaskRole, classification DataClassification) bool {

@@ -80,6 +80,32 @@ func (r *UsageRepository) Snapshot(ctx context.Context) ([]usage.Snapshot, error
 	return snapshots, nil
 }
 
+func (r *UsageRepository) DeleteExpired(ctx context.Context, before time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var ids []uint64
+	if err := r.database.WithContext(ctx).
+		Model(&model.ProviderUsage{}).
+		Where("occurred_at <= ?", before).
+		Order("occurred_at ASC").
+		Order("id ASC").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, fmt.Errorf("만료된 프로바이더 사용량을 찾지 못했습니다: %w", err)
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	deleted := r.database.WithContext(ctx).
+		Where("id IN ? AND occurred_at <= ?", ids, before).
+		Delete(&model.ProviderUsage{})
+	if deleted.Error != nil {
+		return 0, fmt.Errorf("만료된 프로바이더 사용량을 제거하지 못했습니다: %w", deleted.Error)
+	}
+	return deleted.RowsAffected, nil
+}
+
 func (r *UsageRepository) attachLastFailure(ctx context.Context, byProvider map[string]*usage.Snapshot) error {
 	var rows []struct {
 		Provider   string

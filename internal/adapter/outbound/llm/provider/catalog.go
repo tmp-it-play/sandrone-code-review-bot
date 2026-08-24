@@ -69,7 +69,7 @@ func NewCatalog() Catalog {
 				BaseURL:        "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
 				AccountIDEnv:   "CLOUDFLARE_ACCOUNT_ID",
 				Capability:     llm.Capability{ToolCalling: true},
-				Profile:        llm.ProviderProfile{Roles: promptContractRoles, PublicDataAllowed: true},
+				Profile:        llm.ProviderProfile{Roles: promptContractRoles, PublicDataAllowed: true, FailureDomain: "cloudflare-workers-ai"},
 				MaxPromptChars: 450000,
 			},
 			"cloudflare-gemma": {
@@ -79,7 +79,7 @@ func NewCatalog() Catalog {
 				BaseURL:        "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
 				AccountIDEnv:   "CLOUDFLARE_ACCOUNT_ID",
 				Capability:     llm.Capability{ToolCalling: true},
-				Profile:        llm.ProviderProfile{Roles: promptContractRoles, PublicDataAllowed: true},
+				Profile:        llm.ProviderProfile{Roles: promptContractRoles, PublicDataAllowed: true, FailureDomain: "cloudflare-workers-ai"},
 				MaxPromptChars: 450000,
 			},
 		},

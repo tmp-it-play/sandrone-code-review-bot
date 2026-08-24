@@ -3,13 +3,15 @@ package llm
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 type Failure struct {
-	Provider string
-	Kind     FailureKind
-	Status   int
-	Cause    error
+	Provider   string
+	Kind       FailureKind
+	Status     int
+	RetryAfter time.Duration
+	Cause      error
 }
 
 func (f *Failure) Error() string {

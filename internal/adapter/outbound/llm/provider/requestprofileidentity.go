@@ -21,6 +21,8 @@ func (p RequestProfile) Identity(request llm.Request) llm.ProviderRequestPolicyI
 		ParallelToolCalls:     cloneBool(p.ParallelToolCalls),
 		MaxOutputTokens:       maxOutputTokens,
 		MaxCompletionTokens:   p.UseMaxCompletionTokens,
+		ForceJSONWithTools:    p.ForceJSONWithTools,
+		StripEmptyThought:     p.StripLeadingEmptyThought,
 	}
 	if p.NestedReasoningEffort != "" {
 		identity.ExcludeReasoning = p.ExcludeReasoning

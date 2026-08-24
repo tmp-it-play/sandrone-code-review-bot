@@ -202,8 +202,8 @@ max_files, max_batches 또는 prompt_limit로 deferred된 범위는 같은 head�
 | Inline comment | 최대 25개 | repository 설정으로 더 낮출 수 있음 |
 | Occurrence 재검증 | 최대 500건 | 변경 경로에 한정 |
 | Occurrence source read | 최대 32개 경로, 파일당 1 MiB | 불확실하면 open 유지 |
-| Review retention | 기본 180일 | 120~180일로 clamp |
-| Cleanup | 24시간마다, 10건 batch | 작은 transaction으로 반복 |
+| Review와 provider usage retention | 기본 180일 | 120~180일로 clamp |
+| Cleanup | 24시간마다, review 10건·provider usage 500건 batch | 작은 transaction으로 반복 |
 
 External call budget은 review_runs.external_calls에서 MySQL 조건부 update로 예약한다. 같은 run의 queue retry도 같은 counter를 사용한다. Summary와 reply도 각 publication checkpoint의 durable counter로 operation당 같은 12회 상한을 사용한다.
 
@@ -245,11 +245,15 @@ Credential:
 - CLOUDFLARE_API_TOKEN
 - CLOUDFLARE_ACCOUNT_ID
 
+CLOUDFLARE_API_TOKEN은 CLOUDFLARE_ACCOUNT_ID와 같은 account 범위의 [Workers AI 권한](https://developers.cloudflare.com/ai-gateway/usage/rest-api/)을 가져야 한다. AI Gateway 권한만 있는 token은 direct `/accounts/{account_id}/ai/*` endpoint를 인증할 수 없다.
+
 공개 코드는 역할 capability를 만족하는 활성 provider로 route할 수 있다. 비공개 코드는 운영자가 데이터 처리 조건을 확인해 SANDRONE_PRIVATE_CODE_PROVIDERS에 명시한 provider에만 전송한다. Allowlist가 비어 있거나 해당 역할을 수행할 provider가 없으면 fail closed한다.
 
 [Mistral Free mode](https://help.mistral.ai/en/articles/455207-can-i-opt-out-of-my-input-or-output-data-being-used-for-training)는 기본 privacy 설정에서 API input과 output을 모델 개선에 사용할 수 있다. 비공개 코드 allowlist에 mistral을 넣기 전에 Mistral Admin의 Privacy 설정에서 학습 사용을 opt out해야 한다. Cloudflare는 현재 AI Gateway를 거치지 않는 [Workers AI direct endpoint](https://developers.cloudflare.com/workers-ai/platform/data-usage/)를 사용한다.
 
 Batch 계획은 첫 eligible provider의 cap과 repository config를 사용한다. Fallback provider마다 완성된 message와 tool definition 크기를 다시 검사하므로 Groq처럼 작은 cap의 provider는 큰 batch에서 호출 없이 건너뛴다. 전체 provider 가운데 가장 작은 cap으로 모든 batch를 축소하지 않는다.
+
+ForceJSON 요청에서 Mistral은 tool definition이 함께 있어도 [JSON mode](https://docs.mistral.ai/studio/conversations/structured-output/json_mode)를 유지한다. NVIDIA Gemma 4 31B는 thinking을 끈 응답 선두에 [문서화된 빈 thought channel](https://docs.api.nvidia.com/nim/reference/google-gemma-4-31b-it)을 붙일 수 있어 해당 exact prefix만 client boundary에서 제거하며, 임의 prose나 Markdown fence에서 JSON을 추출하지 않는다. Provider의 Retry-After는 transient retry 대신 fallback에 반영하고 설정된 cooldown보다 길 때 최대 24시간까지 유지한다. 새 실패의 cooldown이 기존 deadline보다 짧으면 기존 값을 줄이지 않는다. 같은 credential과 quota를 쓰는 Cloudflare GLM과 Gemma는 하나의 failure domain으로 취급해 auth, quota 또는 rate-limit 실패 시 둘 다 cooldown한다.
 
 관련 구현:
 
@@ -344,7 +348,8 @@ Summary는 pull_request_states의 summary operation/result fields에 canonical c
 - Summary와 reply checkpoint도 생성 시 고정한 expiry를 사용하고 조회로 연장하지 않는다.
 - Finding occurrence는 source run StartedAt 기준의 immutable expiry를 사용한다.
 - Cross-run AI result reuse를 하지 않는다.
-- Retention worker는 시작 시와 이후 24시간마다 10건 batch로 orphan 종료와 expired data 삭제를 반복한다.
+- Provider usage도 review와 같은 retention cutoff로 삭제하므로 dashboard 수치는 현재 보존 구간만 집계한다.
+- Retention worker는 시작 시와 이후 24시간마다 review 10건, provider usage 500건 batch로 orphan 종료와 expired data 삭제를 반복하며 두 cleanup의 실패를 서로 격리한다.
 - 7일 동안 heartbeat와 유효 lease가 없는 nonterminal run은 failed로 종료해 TTL을 시작한다.
 - 만료 데이터는 중복 억제, incremental baseline과 lifecycle 판단에 사용하지 않는다.
 
