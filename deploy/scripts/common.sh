@@ -18,6 +18,43 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! docker compose version >/dev/null 2>&1; then
+  echo "docker compose not found on this server" >&2
+  exit 1
+fi
+
+compose_version="$(docker compose version --short)"
+compose_version="${compose_version#v}"
+compose_version="${compose_version%%-*}"
+IFS=. read -r compose_major compose_minor _ <<< "$compose_version"
+if [[ ! "${compose_major:-}" =~ ^[0-9]+$ ]] || [[ ! "${compose_minor:-}" =~ ^[0-9]+$ ]] || [ "$compose_major" -lt 2 ] || { [ "$compose_major" -eq 2 ] && [ "$compose_minor" -lt 39 ]; }; then
+  echo "docker compose 2.39.0 or later is required, found: $compose_version" >&2
+  exit 1
+fi
+
+if [ ! -f "$DEPLOY_ROOT/compose.yaml" ]; then
+  echo "compose.yaml is missing" >&2
+  exit 1
+fi
+
+if ! docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then
+  echo "External Docker network is unavailable: $DOCKER_NETWORK" >&2
+  exit 1
+fi
+
+run_compose() {
+  docker compose \
+    --project-name "$COMPOSE_PROJECT_NAME" \
+    --env-file "$DEPLOY_ROOT/deploy.env" \
+    --file "$DEPLOY_ROOT/compose.yaml" \
+    "$@"
+}
+
+if ! run_compose config --quiet; then
+  echo "Invalid deployment Compose configuration" >&2
+  exit 1
+fi
+
 STOP_TIMEOUT="${STOP_TIMEOUT:-180}"
 
 if [[ ! "$STOP_TIMEOUT" =~ ^[0-9]+$ ]] || [ "$STOP_TIMEOUT" -eq 0 ]; then

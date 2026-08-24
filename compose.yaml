@@ -1,0 +1,47 @@
+name: ${COMPOSE_PROJECT_NAME:-sandrone}
+
+services:
+  sandrone:
+    build:
+      context: .
+    image: ${IMAGE:-sandrone-code-review-bot:latest}
+    container_name: ${CONTAINER_NAME:-sandrone}
+    restart: unless-stopped
+    env_file:
+      - path: ${SANDRONE_ENV_FILE:-.env}
+        required: true
+        format: raw
+    environment:
+      LOCAL_AI_API_KEY: docker-model-runner
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+    labels:
+      org.opencontainers.image.revision: ${REVISION:-development}
+    networks:
+      - sandrone
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- \"http://127.0.0.1:8080$${SANDRONE_BASE_PATH:-}/healthz\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    models:
+      granite:
+        endpoint_var: LOCAL_AI_BASE_URL
+        model_var: LOCAL_AI_MODEL
+
+networks:
+  sandrone:
+    external: true
+    name: ${DOCKER_NETWORK:-sandrone}
+
+models:
+  granite:
+    model: hf.co/ibm-granite/granite-4.1-3b-GGUF:Q4_K_M
+    context_size: 4096
+    runtime_flags:
+      - "--temp"
+      - "0.2"
+      - "--top-p"
+      - "0.95"
+      - "--parallel"
+      - "1"

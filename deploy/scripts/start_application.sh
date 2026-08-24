@@ -20,14 +20,7 @@ trap 'exit 124' TERM HUP INT
 remove_container "$CONTAINER_NAME"
 START_ATTEMPTED=1
 
-if ! docker run -d \
-    --name "$CONTAINER_NAME" \
-    --restart unless-stopped \
-    --network "$DOCKER_NETWORK" \
-    --env-file "$DEPLOY_ROOT/sandrone.env" \
-    --publish "$HOST_PORT:8080" \
-    --label "org.opencontainers.image.revision=$REVISION" \
-    "$IMAGE" >/dev/null; then
+if ! run_compose up --detach --no-build --remove-orphans sandrone >/dev/null; then
   echo "Failed to start the new container" >&2
   exit 1
 fi

@@ -24,5 +24,26 @@ docker pull "$IMAGE"
 echo "Pulled image: $IMAGE"
 
 logout
+
+if ! docker model status >/dev/null 2>&1; then
+  echo "Docker Model Runner is unavailable" >&2
+  exit 1
+fi
+
+models="$(run_compose config --models)"
+if [ -z "$models" ]; then
+  echo "No deployment model is configured" >&2
+  exit 1
+fi
+
+while IFS= read -r model; do
+  if [ -z "$model" ]; then
+    continue
+  fi
+  docker model pull "$model"
+  docker model inspect "$model" >/dev/null
+  echo "Pulled model: $model"
+done <<< "$models"
+
 trap - EXIT TERM HUP INT
 echo "Logged out of ghcr.io"

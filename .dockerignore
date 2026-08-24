@@ -8,7 +8,7 @@
 *.md
 *.xml
 Dockerfile
-docker-compose.yml
+compose*.yaml
 .env
 .env.*
 deploy

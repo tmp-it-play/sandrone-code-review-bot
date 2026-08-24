@@ -10,7 +10,6 @@ on:
       - .gitignore
       - .gitattributes
       - .env.example
-      - docker-compose.yml
       - .harness/**
       - .reviewbot/**
       - .claude/**
@@ -153,7 +152,8 @@ jobs:
           write MISTRAL_API_KEY "$MISTRAL_API_KEY"
           write CLOUDFLARE_API_TOKEN "$CLOUDFLARE_API_TOKEN"
           write CLOUDFLARE_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID"
-          write SANDRONE_PRIVATE_CODE_PROVIDERS "$PRIVATE_CODE_PROVIDERS"
+          private_code_providers="${PRIVATE_CODE_PROVIDERS:+$PRIVATE_CODE_PROVIDERS,}local"
+          write SANDRONE_PRIVATE_CODE_PROVIDERS "$private_code_providers"
           write SANDRONE_PROVIDER_COOLDOWN "15m"
           write SANDRONE_REQUEST_TIMEOUT "5m"
           write SANDRONE_LLM_MAX_CALLS_PER_OPERATION "12"
@@ -173,6 +173,8 @@ jobs:
             printf 'HOST_PORT=%s\n' "$HOST_PORT"
             printf 'BASE_PATH=%s\n' "$BASE_PATH"
             printf 'STOP_TIMEOUT=%s\n' "180"
+            printf 'COMPOSE_PROJECT_NAME=%s\n' "sandrone"
+            printf 'SANDRONE_ENV_FILE=%s\n' "./sandrone.env"
             printf 'GHCR_USER=%s\n' "$GITHUB_ACTOR"
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } > deploy/deploy.env
@@ -212,11 +214,11 @@ jobs:
           tar -xzf - -C "$deploy_root"
           chmod 0700 "$deploy_root"
           chmod 0755 "$deploy_root"/scripts/*.sh
-          chmod 0600 "$deploy_root"/*.env
+          chmod 0600 "$deploy_root"/*.env "$deploy_root/compose.yaml"
           bash "$deploy_root/scripts/pull_image.sh"
           bash "$deploy_root/scripts/start_application.sh"'
           encoded_script="$(printf '%s' "$remote_script" | base64 -w 0)"
-          tar -C deploy -czf - . | timeout --signal=TERM --kill-after=30s 2100s sshpass -e ssh \
+          tar -czf - -C deploy scripts sandrone.env deploy.env -C "$GITHUB_WORKSPACE" compose.yaml | timeout --signal=TERM --kill-after=30s 2100s sshpass -e ssh \
             -p 22 \
             -o BatchMode=no \
             -o ConnectTimeout=30 \
