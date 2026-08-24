@@ -21,7 +21,7 @@ Sandrone은 모든 PR을 코드가 통제하는 하나의 bounded agentic workfl
 - 다른 run의 AI 결과를 재사용하지 않아 hard TTL과 현재 코드 근거를 우회하지 않는다.
 - 부분 검토는 complete로 표시하지 않고 complete watermark를 전진시키지 않는다.
 - 공개 finding은 필수 필드와 exact added-line evidence를 만족해야 하며, 잘못 기입된 위치는 같은 파일에서 근거가 유일하게 일치할 때만 실제 추가 줄로 재앵커한다.
-- 조건을 만족하는 독립 provider가 있으면 verifier를 실행하고 supported 판정만 게시한다.
+- 조건을 만족하는 독립 provider가 있으면 verifier를 실행하고, 완료되면 supported 판정만 게시한다. verifier를 완료하지 못하면 exact evidence gate를 통과한 결정론적 결과로 강등한다.
 - 분석량과 게시량 모두 durable hard cap으로 제한한다.
 - 구조화된 리뷰 데이터는 기본 180일, 설정 가능한 120~180일의 sliding이 아닌 hard TTL을 가진다.
 
@@ -129,11 +129,11 @@ Finding은 다음 순서로 처리한다.
 
 거리나 유사도로 가장 가까운 hunk 또는 줄을 고르지 않는다. 같은 evidence가 여러 위치에 있어 하나로 확정할 수 없거나 exact match를 찾지 못하면 게시하지 않는다. 검증 결과는 exact, normalized, reanchored, unknown_file, invalid_span, non_added_span, not_found와 ambiguous로 나누어 운영 로그에 기록한다.
 
-독립 verifier의 의미론은 fail-safe다.
+독립 verifier의 의미론은 bounded graceful degradation이다.
 
 - 독립 provider가 없으면 이미 통과한 deterministic exact-evidence 결과를 사용한다.
 - 독립 provider가 있으면 supported만 게시한다.
-- 호출 예산 부족, prompt overflow, provider 오류, incomplete 응답 또는 parse 오류가 발생하면 verifier 대상 finding을 모두 보류하고 run을 partial로 만든다.
+- 호출 예산 부족, prompt overflow, provider 오류, incomplete 응답 또는 parse 오류가 발생하면 exact evidence와 severity 검증을 통과한 finding을 유지하고 run을 partial로 만든다.
 - verifier 완료 결과와 실패 시도 usage는 review_verifications에 checkpoint한다.
 
 Root-cause reduce는 추가 LLM 호출을 만들지 않는다. 같은 root cause의 여러 occurrence를 한 finding으로 모으고 severity, suggestion 유무, 근거 길이와 위치에 따른 결정론적 대표를 고른다.
@@ -182,7 +182,7 @@ Coverage 상태:
 
 Complete는 모든 eligible coverage가 reviewed 또는 deep_reviewed일 때만 가능하다. 일부만 성공하면 partial, 성공한 coverage가 없으면 failed다. 분석 대상 denominator가 0이고 모든 제외 사유가 명시된 경우만 skipped다. Complete와 정상 zero-denominator skipped만 complete watermark를 전진시킨다.
 
-Coverage ledger와 total, reviewed, failed, deferred, skipped 같은 내부 카운터는 상태 판정과 retry에만 사용하고 공개 Review 본문에는 표시하지 않는다. 실제로 다루지 못한 파일이 있으면 bounded reason별 집계와 파일 예시만 접은 영역으로 표시한다.
+Coverage ledger와 total, reviewed, failed, deferred, skipped 같은 내부 카운터 및 다루지 못한 파일 목록은 상태 판정과 retry에만 사용하고 공개 Review 본문에는 표시하지 않는다.
 
 Complete는 eligible coverage의 분석 완료를 뜻하며 모든 candidate finding의 공개를 뜻하지 않는다. 분석을 끝낸 뒤 verifier와 publication의 25건 예산에서 제외된 하위 후보 수는 omitted로 표시하지만 coverage를 partial로 바꾸거나 complete watermark를 막지 않는다. 분석 coverage와 공개 코멘트 예산을 결합해 같은 코드를 반복 호출하지 않는다.
 
@@ -200,7 +200,7 @@ max_files, max_batches 또는 prompt_limit로 deferred된 범위는 같은 head�
 | Unit read_file | 최대 6회 | unit별 executor에 적용 |
 | Tool round | 최대 2회 | chain 내부 왕복 상한 |
 | Unit tool output | 합계 2,000 bytes | alias 복원과 masking 이후 누적 상한 |
-| Review 외부 호출 | run당 최대 12회 | model, retry, fallback, verifier와 tool execution을 모두 합산 |
+| Review 논리 시도 | run당 최대 12회 | provider 후보에 작업을 맡긴 횟수이며 unit별 최소 기회와 verifier 1회를 선예약 |
 | Verifier 입력 finding | 최대 25개 | severity와 root-cause 분산 순서 |
 | 최종 publication finding | 최대 25개 | inline과 fallback 합계의 상한 |
 | Inline comment | 최대 25개 | repository 설정으로 더 낮출 수 있음 |
@@ -209,7 +209,7 @@ max_files, max_batches 또는 prompt_limit로 deferred된 범위는 같은 head�
 | Review와 provider usage retention | 기본 180일 | 120~180일로 clamp |
 | Cleanup | 24시간마다, review 10건·provider usage 500건 batch | 작은 transaction으로 반복 |
 
-External call budget은 review_runs.external_calls에서 MySQL 조건부 update로 예약한다. 같은 run의 queue retry도 같은 counter를 사용한다. Summary와 reply도 각 publication checkpoint의 durable counter로 operation당 같은 12회 상한을 사용한다.
+External call budget은 review_runs.external_calls에서 MySQL 조건부 update로 예약한다. 한 provider 후보에 진입할 때 논리 시도 1회를 차감하며 그 안의 1회 transient retry, model tool round와 tool execution은 추가 차감하지 않는다. 같은 run의 queue retry도 같은 counter를 사용하고 in-memory budget도 저장된 사용량에서 재개한다. Reviewer는 아직 완료되지 않은 unit마다 최소 1회와 verifier 1회를 먼저 보존하고 앞 unit에는 나머지 여유분만 허용한다. Reviewer 몫을 모두 사용한 뒤 실패 unit이 남으면 회복 불가능한 queue retry를 만들지 않고 성공 결과가 있으면 즉시 partial, 없으면 failed로 종료한다. Partial 확정 시 독립 verifier가 불가능해도 이미 exact evidence gate를 통과한 결과를 게시한다. 저장소 예약 오류는 예산 소진과 구분해 재시도할 수 있다. Summary와 reply도 각 publication checkpoint의 durable counter로 operation당 같은 12회 상한을 사용한다.
 
 관련 구현:
 
@@ -238,6 +238,8 @@ External call budget은 review_runs.external_calls에서 MySQL 조건부 update�
 Repository의 MaxOutputTokens는 최대 8,192이므로 실제 요청은 repository 한도와 provider output profile 중 더 작은 값에 맞는다.
 
 허용 역할은 catalog capability를 뜻한다. 현재 review workflow는 LLM planner와 LLM reducer를 호출하지 않는다.
+
+Provider의 transient unavailable은 같은 provider에서 1회 재시도한 뒤에도 실패했을 때 기존 provider cooldown을 적용한다. 이 내부 재시도는 Dashboard에는 별도 실패 응답으로 기록될 수 있지만 run의 논리 시도 예산은 추가로 차감하지 않는다. Dashboard의 성공과 실패는 보존 기간 안에 기록된 provider 응답 event 수다. 최근 호출 실패는 해당 provider의 가장 최신 event가 실패일 때만 표시하며 이후 성공하면 과거 실패 사유를 숨긴다. Semantic 성공은 응답 후보 전체가 정확하다는 뜻이 아니라 schema와 grounding 검증 뒤 사용할 수 있는 결과가 남았다는 뜻이다.
 
 Credential:
 
@@ -442,9 +444,9 @@ Schema migration은 새 process startup에서 GET_LOCK과 bounded AutoMigrate로
 - 모든 eligible coverage item은 terminal 시 reviewed, failed 또는 deferred다.
 - Partial은 complete watermark를 전진시키지 않는다.
 - Same-run retry는 성공 unit을 다시 호출하지 않는다.
-- Run 전체 model, tool, retry와 verifier 호출 합계는 12를 넘지 않는다.
+- Run 전체 provider 논리 시도는 12를 넘지 않고 같은 시도 안의 transient retry와 tool round는 각각 별도 상한을 지킨다.
 - Exact added-line evidence를 만족하지 않는 finding은 게시하지 않는다. 위치가 틀린 finding은 같은 파일의 추가 줄에서 evidence가 유일하게 일치할 때만 재앵커한다.
-- 실행 가능한 independent verifier가 실패하면 해당 candidate를 게시하지 않고 partial로 종료한다.
+- 실행 가능한 independent verifier가 실패하면 exact evidence gate를 통과한 candidate를 게시하고 partial로 종료한다.
 - Open exact occurrence만 duplicate suppression에 사용한다.
 - Resolved 또는 expired occurrence는 재발 finding을 억제하지 않는다.
 - Publication canonical payload와 result checkpoint가 외부 write보다 먼저 저장된다.
@@ -460,7 +462,7 @@ PR #13 stress case, 작은 PR, 고위험 단일 파일 PR과 retry/stale 시나�
 - Finding이 있을 때만 independent verifier가 실행된다.
 - Successful unit checkpoint는 queue retry에서 재사용된다.
 - Malformed reviewer response가 다음 eligible provider로 fallback한다.
-- Verifier 실패는 clean 신호가 아니라 partial이며 finding을 게시하지 않는다.
+- Verifier 실패는 clean 신호가 아니라 partial이며 exact evidence gate를 통과한 finding으로 강등한다.
 - Exact evidence가 아닌 JVM target 단정은 게시되지 않는다.
 - 잘못된 line은 거리나 유사도로 이동하지 않고 같은 파일에 유일한 exact evidence가 있을 때만 재앵커한다.
 - 같은 root cause의 occurrence가 결정론적으로 병합된다.
@@ -470,7 +472,7 @@ PR #13 stress case, 작은 PR, 고위험 단일 파일 PR과 retry/stale 시나�
 - Review, summary와 reply의 응답 유실이 stored canonical result와 marker로 수렴한다.
 - 동일 run의 review가 중복 게시되지 않는다.
 - Stale publication이 무효화되거나 bounded invalidation debt로 남는다.
-- Review 본문은 내부 coverage 카운터와 unit 번호를 노출하지 않고, 미검토 범위가 있을 때만 bounded 사유와 예시를 표시한다.
+- Review 본문은 내부 coverage 카운터, unit 번호와 미검토 파일 목록을 노출하지 않는다.
 - Worker 2, units 8, calls 12, findings 25와 read_file 6 상한이 유지된다.
 - 120~180일 hard TTL과 daily cleanup이 expired data를 중복 억제에서 제거한다.
 - Main CD가 old container 제거 후 새 container health 성공으로만 완료된다.
