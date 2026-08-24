@@ -3,6 +3,7 @@ package llm
 type ResponseValidation struct {
 	Policy        string
 	RequiredPaths []string
+	Validator     func(string) error `json:"-"`
 }
 
 const ResponseValidationReviewResult = "review-result-v1"

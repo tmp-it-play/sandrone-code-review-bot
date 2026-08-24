@@ -360,17 +360,18 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	inventory := inventoryOf(files)
 	toolsAllowed := config.MaxExtraReads > 0 && u.deps.Tools != nil
 	planner := reviewBatchPlanner{
-		PullRequest:      request,
-		Inventory:        inventory,
-		Instructions:     instructions,
-		Config:           config,
-		Incremental:      incremental,
-		Extra:            task.Instruction,
-		ToolsAllowed:     toolsAllowed,
-		ProviderLimit:    u.deps.Completer.PromptBudgetFor(reviewRequest),
-		MaxReviewBatches: config.Sandrone.MaxReviewBatches,
-		Mask:             u.deps.Masker.Mask,
-		Paths:            pathMap,
+		PullRequest:       request,
+		Inventory:         inventory,
+		TotalChangedFiles: request.ChangedFiles,
+		Instructions:      instructions,
+		Config:            config,
+		Incremental:       incremental,
+		Extra:             task.Instruction,
+		ToolsAllowed:      toolsAllowed,
+		ProviderLimit:     u.deps.Completer.PromptBudgetFor(reviewRequest),
+		MaxReviewBatches:  config.Sandrone.MaxReviewBatches,
+		Mask:              u.deps.Masker.Mask,
+		Paths:             pathMap,
 	}
 	includeFileNotes := planner.includeFileNotes()
 	plan, promptConfig := planner.Build(loaded)
@@ -387,7 +388,9 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	multipleModels := false
 	reviewed := make([]pullrequest.ChangedFile, 0, len(loaded))
 	failed := make([]pullrequest.ChangedFile, 0)
-	evidenceDropped := 0
+	schemaDropped := 0
+	evidenceReport := reviewanalysis.EvidenceReport{}
+	reusedFindings := 0
 	reviewerProviders := map[string]struct{}{}
 	captureFailureResponse := func() {
 		response.Usage = usage
@@ -404,7 +407,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		unit := units[index]
 		messages := llm.MaskMessages(planner.Messages(batch, promptConfig), u.deps.Masker.Mask)
 		batchRequest := reviewRequest.WithMessages(messages)
-		promptFiles := pathMap.PromptFiles(batch)
+		promptFiles := planner.maskedFiles(batch)
 		if includeFileNotes {
 			batchRequest.ResponseValidation.RequiredPaths = make([]string, 0, len(promptFiles))
 			for _, file := range promptFiles {
@@ -412,6 +415,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			}
 			sort.Strings(batchRequest.ResponseValidation.RequiredPaths)
 		}
+		batchRequest.ResponseValidation.Validator = reviewGroundingValidator(promptFiles, config.MinSeverity, u.deps.Masker.Mask)
 		executor := u.executor(target, config, pathMap)
 		var toolDefinitions []llm.Tool
 		if executor != nil {
@@ -432,6 +436,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 				finishedAt = unitStartedAt
 			}
 			batchResults = append(batchResults, claim.Result.Review)
+			reusedFindings += len(claim.Result.Review.Findings)
 			if !claim.Reused {
 				usage = usage.Add(claim.Result.Usage)
 				toolExecutions += claim.Result.ToolExecutions
@@ -508,7 +513,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			reviewerProviders[batchResponse.Provider] = struct{}{}
 		}
 
-		batchResponse.Content = u.deps.Masker.Mask(batchResponse.Content)
+		contentLength := len(batchResponse.Content)
 		batchResult := review.Result{}
 		report := parsing.Report{}
 		var parseErr error
@@ -517,7 +522,11 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		} else {
 			batchResult, report, parseErr = u.deps.Parser.Parse(batchResponse.Content)
 			batchResult = pathMap.RestoreResult(batchResult)
+			batchResult = maskReviewResult(batchResult, u.deps.Masker.Mask)
 		}
+		batchResponse.Content = ""
+		response.Content = ""
+		failureResponse.Content = ""
 		if parseErr == nil {
 			batchResult = boundedBatchResult(batch, batchResult, includeFileNotes)
 			parseErr = validateBatchResult(batch, batchResult, report, includeFileNotes)
@@ -542,11 +551,24 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			failed = append(failed, batch...)
 			continue
 		}
-		evidenceDropped += report.Dropped
+		schemaDropped += report.Dropped
+		minimumSeverityCandidates := len((selection.SeverityFilter{Minimum: config.MinSeverity}).Apply(batchResult.Findings))
+		var batchEvidenceReport reviewanalysis.EvidenceReport
+		batchResult.Findings, batchEvidenceReport = (reviewanalysis.EvidenceVerifier{}).VerifyWithReport(batchResult.Findings, batch)
+		evidenceReport = evidenceReport.Add(batchEvidenceReport)
 		batchResult.Findings = (selection.SeverityFilter{Minimum: config.MinSeverity}).Apply(batchResult.Findings)
-		var dropped int
-		batchResult.Findings, dropped = (reviewanalysis.EvidenceVerifier{}).Verify(batchResult.Findings, batch)
-		evidenceDropped += dropped
+		if minimumSeverityCandidates > 0 && len(batchResult.Findings) == 0 {
+			u.deps.Logger.Warn("게시 기준을 충족한 지적의 diff 근거를 확정하지 못했습니다",
+				"target", target.Reference(),
+				"batch", index+1,
+				"provider", batchResponse.Provider,
+				"candidates", minimumSeverityCandidates,
+				"unknown_file", batchEvidenceReport.UnknownFile,
+				"invalid_span", batchEvidenceReport.InvalidSpan,
+				"non_added_span", batchEvidenceReport.NonAddedSpan,
+				"not_found", batchEvidenceReport.NotFound,
+				"ambiguous", batchEvidenceReport.Ambiguous)
+		}
 		unitFinishedAt := u.deps.Clock.Now()
 		if unitErr := u.finishUnitCheckpoint(ctx, run.ID, runLease, unit.Hash, claim.LeaseToken, reviewworkflow.UnitResult{
 			Status:         reviewworkflow.UnitStatusSucceeded,
@@ -568,10 +590,17 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			"provider", batchResponse.Provider,
 			"files", len(batch),
 			"raw_findings", report.RawFindings,
-			"dropped", report.Dropped,
-			"unsupported", dropped,
+			"schema_dropped", report.Dropped,
+			"evidence_exact", batchEvidenceReport.Exact,
+			"evidence_normalized", batchEvidenceReport.Normalized,
+			"evidence_reanchored", batchEvidenceReport.Reanchored,
+			"evidence_unknown_file", batchEvidenceReport.UnknownFile,
+			"evidence_invalid_span", batchEvidenceReport.InvalidSpan,
+			"evidence_non_added_span", batchEvidenceReport.NonAddedSpan,
+			"evidence_not_found", batchEvidenceReport.NotFound,
+			"evidence_ambiguous", batchEvidenceReport.Ambiguous,
 			"has_summary", report.HasSummary,
-			"content_length", len(batchResponse.Content))
+			"content_length", contentLength)
 		if report.Dropped > 0 {
 			u.deps.Logger.Warn("형식이 맞지 않아 버린 지적이 있습니다", "target", target.Reference(), "dropped", report.Dropped)
 		}
@@ -610,8 +639,8 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 
 	findings := selection.SeverityFilter{Minimum: config.MinSeverity}.Apply(gathered.Findings)
 	afterSeverity := len(findings)
-	var finalUnsupported int
-	findings, finalUnsupported = (reviewanalysis.EvidenceVerifier{}).Verify(findings, reviewed)
+	var finalEvidenceReport reviewanalysis.EvidenceReport
+	findings, finalEvidenceReport = (reviewanalysis.EvidenceVerifier{}).VerifyWithReport(findings, reviewed)
 	known, err := u.deps.Findings.Fingerprints(ctx, target)
 	if err != nil {
 		return fail("기존 지적을 읽지 못했습니다", err)
@@ -642,7 +671,22 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		"target", target.Reference(),
 		"collected", len(gathered.Findings),
 		"after_severity", afterSeverity,
-		"unsupported", evidenceDropped+finalUnsupported,
+		"schema_dropped", schemaDropped,
+		"checkpoint_reused_findings", reusedFindings,
+		"evidence_exact", evidenceReport.Exact,
+		"evidence_normalized", evidenceReport.Normalized,
+		"evidence_reanchored", evidenceReport.Reanchored,
+		"evidence_unknown_file", evidenceReport.UnknownFile,
+		"evidence_invalid_span", evidenceReport.InvalidSpan,
+		"evidence_non_added_span", evidenceReport.NonAddedSpan,
+		"evidence_not_found", evidenceReport.NotFound,
+		"evidence_ambiguous", evidenceReport.Ambiguous,
+		"evidence_accepted", evidenceReport.Accepted(),
+		"evidence_rejected", evidenceReport.Dropped(),
+		"final_evidence_exact", finalEvidenceReport.Exact,
+		"final_evidence_normalized", finalEvidenceReport.Normalized,
+		"final_evidence_reanchored", finalEvidenceReport.Reanchored,
+		"final_evidence_rejected", finalEvidenceReport.Dropped(),
 		"root_causes_collapsed", reduced+finalReduced,
 		"verifier_used", verifierUsed,
 		"verifier_rejected", verifierRejected,

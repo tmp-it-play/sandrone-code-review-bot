@@ -10,17 +10,18 @@ import (
 )
 
 type reviewBatchPlanner struct {
-	PullRequest      pullrequest.PullRequest
-	Inventory        []pullrequest.ChangedFile
-	Instructions     instruction.Collection
-	Config           setting.RepoConfig
-	Incremental      bool
-	Extra            string
-	ToolsAllowed     bool
-	ProviderLimit    int
-	MaxReviewBatches int
-	Mask             func(string) string
-	Paths            *promptPathMap
+	PullRequest       pullrequest.PullRequest
+	Inventory         []pullrequest.ChangedFile
+	TotalChangedFiles int
+	Instructions      instruction.Collection
+	Config            setting.RepoConfig
+	Incremental       bool
+	Extra             string
+	ToolsAllowed      bool
+	ProviderLimit     int
+	MaxReviewBatches  int
+	Mask              func(string) string
+	Paths             *promptPathMap
 }
 
 const toolPromptReserve = 3072
@@ -109,7 +110,11 @@ func (p reviewBatchPlanner) fixedCost(config setting.RepoConfig) int {
 }
 
 func (p reviewBatchPlanner) includeFileNotes() bool {
-	return len(p.Inventory) <= maximumDetailedFileSummaryChanges
+	changedFiles := p.TotalChangedFiles
+	if changedFiles <= 0 {
+		changedFiles = len(p.Inventory)
+	}
+	return changedFiles <= maximumDetailedFileSummaryChanges
 }
 
 func (p reviewBatchPlanner) fits(files []pullrequest.ChangedFile, config setting.RepoConfig, limit int) bool {

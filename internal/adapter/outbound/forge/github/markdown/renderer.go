@@ -35,17 +35,6 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 		builder.WriteString(overview)
 		builder.WriteString("\n\n")
 	}
-	if !view.Coverage.IsEmpty() {
-		fmt.Fprintf(&builder, "> 리뷰 커버리지 · 상태 `%s` · 전체 %d · 검토 %d · 실패 %d · 이월 %d · 제외 %d · 대기 %d\n\n",
-			view.Coverage.Status,
-			view.Coverage.Total,
-			view.Coverage.Reviewed,
-			view.Coverage.Failed,
-			view.Coverage.Deferred,
-			view.Coverage.Skipped,
-			view.Coverage.Pending,
-		)
-	}
 	if view.OmittedFindings > 0 {
 		fmt.Fprintf(&builder, "> 출력 크기 상한으로 우선순위가 낮은 지적 %d건을 생략했습니다.\n\n", view.OmittedFindings)
 	}

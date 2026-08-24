@@ -25,7 +25,7 @@ type ReadFileExecutor struct {
 func (e *ReadFileExecutor) Definitions() []llm.Tool {
 	return []llm.Tool{{
 		Name:        "read_file",
-		Description: "저장소에서 파일 하나의 현재 내용을 읽는다. 리뷰 판단에 주변 코드가 필요할 때만 사용한다.",
+		Description: "저장소에서 파일 하나의 현재 내용을 읽는다. 리뷰 판단에 주변 코드가 필요할 때만 사용하며 finding 위치와 evidence는 반드시 changed_files의 추가 diff 줄에서 고른다.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

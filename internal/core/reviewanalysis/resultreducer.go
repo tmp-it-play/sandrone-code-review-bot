@@ -1,7 +1,7 @@
 package reviewanalysis
 
 import (
-	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -11,6 +11,8 @@ import (
 const maxMergedOverviewChars = 6000
 const maxMergedFileNotes = 40
 
+var internalReviewUnitLabel = regexp.MustCompile(`(?i)(?:#{1,6}\s*|\*{1,2})?(?:(?:리뷰|검토)\s*(?:단위|배치)|배치|review\s*(?:unit|batch))\s*#?\d+(?:\s*[/／]\s*\d+)?\s*\*{0,2}\s*[:：.\-–—]*`)
+
 type ResultReducer struct{}
 
 func (r ResultReducer) Reduce(results []review.Result) (review.Result, int) {
@@ -19,7 +21,7 @@ func (r ResultReducer) Reduce(results []review.Result) (review.Result, int) {
 	overviews := make([]string, 0, len(results))
 	seenOverviews := map[string]struct{}{}
 	for _, result := range results {
-		overview := strings.TrimSpace(result.Summary.Overview)
+		overview := normalizeOverview(result.Summary.Overview)
 		if overview != "" {
 			if _, exists := seenOverviews[overview]; !exists {
 				seenOverviews[overview] = struct{}{}
@@ -53,6 +55,11 @@ func (r ResultReducer) Reduce(results []review.Result) (review.Result, int) {
 	return merged, 0
 }
 
+func normalizeOverview(value string) string {
+	withoutLabels := internalReviewUnitLabel.ReplaceAllString(value, "")
+	return strings.Join(strings.Fields(withoutLabels), " ")
+}
+
 func mergedOverview(overviews []string) string {
 	if len(overviews) == 0 {
 		return ""
@@ -60,11 +67,7 @@ func mergedOverview(overviews []string) string {
 	if len(overviews) == 1 {
 		return boundedOverview(overviews[0])
 	}
-	sections := make([]string, 0, len(overviews))
-	for index, overview := range overviews {
-		sections = append(sections, fmt.Sprintf("**검토 단위 %d**\n\n%s", index+1, overview))
-	}
-	return boundedOverview(strings.Join(sections, "\n\n"))
+	return boundedOverview(strings.Join(overviews, " "))
 }
 
 func boundedOverview(value string) string {

@@ -104,14 +104,14 @@ func (c Context) renderFiles() string {
 	builder.WriteString("<changed_files>\n")
 	for _, file := range c.Files {
 		fmt.Fprintf(&builder, "<file path=\"%s\" status=\"%s\" additions=\"%d\" deletions=\"%d\">\n", file.Path, file.Status, file.Additions, file.Deletions)
-		if patch := strings.TrimSpace(file.Patch); patch != "" {
+		if strings.TrimSpace(file.Patch) != "" {
 			builder.WriteString("<diff>\n")
-			builder.WriteString(patch)
+			builder.WriteString(strings.TrimRight(file.Patch, "\r\n"))
 			builder.WriteString("\n</diff>\n")
 		}
-		if content := strings.TrimSpace(file.Content); content != "" {
+		if strings.TrimSpace(file.Content) != "" {
 			builder.WriteString("<current_content>\n")
-			builder.WriteString(content)
+			builder.WriteString(strings.TrimRight(file.Content, "\r\n"))
 			if file.Truncated {
 				builder.WriteString("\n[분량 제한으로 이후 내용 생략]")
 			}

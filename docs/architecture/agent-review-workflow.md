@@ -20,7 +20,7 @@ Sandrone은 모든 PR을 코드가 통제하는 하나의 bounded agentic workfl
 - 성공한 unit은 같은 run의 retry에서 다시 호출하지 않는다.
 - 다른 run의 AI 결과를 재사용하지 않아 hard TTL과 현재 코드 근거를 우회하지 않는다.
 - 부분 검토는 complete로 표시하지 않고 complete watermark를 전진시키지 않는다.
-- 공개 finding은 필수 필드, exact added-line evidence와 정확한 commentable position을 만족해야 한다.
+- 공개 finding은 필수 필드와 exact added-line evidence를 만족해야 하며, 잘못 기입된 위치는 같은 파일에서 근거가 유일하게 일치할 때만 실제 추가 줄로 재앵커한다.
 - 조건을 만족하는 독립 provider가 있으면 verifier를 실행하고 supported 판정만 게시한다.
 - 분석량과 게시량 모두 durable hard cap으로 제한한다.
 - 구조화된 리뷰 데이터는 기본 180일, 설정 가능한 120~180일의 sliding이 아닌 hard TTL을 가진다.
@@ -101,8 +101,9 @@ Webhook inbox → immutable ReviewRun → diff와 coverage 수집 → determinis
 - checkpoint JSON이 손상됐거나 input hash가 달라지면 해당 unit만 다시 실행한다.
 - 실패 unit은 coverage를 failed로 전환하고 다른 성공 unit 결과는 유지한다.
 - 각 unit은 별도 read_file executor를 받는다.
-- PR 전체 변경 파일이 8개 이하일 때만 summary.files 스키마와 파일별 요약 지시를 prompt에 포함한다. 9개 이상이면 해당 필드와 지시 자체를 넣지 않고 overview와 finding에 출력 예산을 사용하며, 실제 검토 범위는 model output이 아니라 coverage ledger로 판정한다.
-- reviewer response는 JSON 문법, 필수 overview와 Finding 필드 semantic validation을 통과해야 한다. 일부 malformed finding은 버리고 유효한 finding을 유지하며, 원래 finding이 있었지만 전부 malformed인 응답만 다음 eligible provider로 넘긴다.
+- PR 전체 변경 파일이 8개 이하일 때만 summary.files 스키마와 파일별 요약 지시를 prompt에 포함한다. 9개 이상이면 해당 필드와 지시 자체를 넣지 않고 현재 unit의 짧은 overview와 finding에 출력 예산을 사용하며, 실제 검토 범위는 model output이 아니라 coverage ledger로 판정한다.
+- 여러 unit의 overview는 추가 모델 호출 없이 하나의 연속된 문단으로 합치며 내부 unit 번호나 배치 구조를 공개 본문에 노출하지 않는다.
+- reviewer response는 JSON 문법, 필수 overview와 Finding 필드 semantic validation을 통과해야 한다. 일부 malformed finding은 버리고 유효한 finding을 유지한다. 게시 severity 기준을 충족한 후보가 있었지만 하나도 exact evidence로 고정하거나 안전하게 재앵커할 수 없으면 `all_findings_unanchored` semantic failure로 처리해 같은 호출 상한 안에서 다음 eligible provider로 넘긴다.
 
 Cross-run candidate/result cache는 저장하거나 읽지 않는다.
 
@@ -117,15 +118,16 @@ Cross-run candidate/result cache는 저장하거나 읽지 않는다.
 Finding은 다음 순서로 처리한다.
 
 1. file, line, title, body, evidence, rootCause와 severity의 필수성 검증
-2. repository minimum severity 적용
-3. finding line 범위와 evidence가 완전한 patch의 실제 추가 줄과 byte-for-byte 일치하는지 검증
-4. 현재 open exact occurrence와 같은지 중복 검증
-5. severity 우선, root-cause round-robin으로 verifier 입력을 최대 25건으로 제한
-6. reviewer에 참여하지 않은 eligible provider가 있으면 독립 verifier 실행
-7. supported finding만 root-cause fingerprint로 결정론적으로 병합
-8. 실제 commentable position만 inline으로 배치
+2. finding evidence가 지정 위치의 실제 추가 줄과 byte-for-byte 일치하는지 검증
+3. 지정 위치가 틀렸더라도 같은 파일의 추가 줄에서 동일 evidence가 유일하게 발견될 때만 실제 위치로 재앵커
+4. repository minimum severity 적용
+5. 현재 open exact occurrence와 같은지 중복 검증
+6. severity 우선, root-cause round-robin으로 verifier 입력을 최대 25건으로 제한
+7. reviewer에 참여하지 않은 eligible provider가 있으면 독립 verifier 실행
+8. supported finding만 root-cause fingerprint로 결정론적으로 병합
+9. 실제 commentable position만 inline으로 배치
 
-가장 가까운 hunk나 줄로 finding을 이동하지 않는다. Exact position을 찾지 못한 finding은 게시하지 않는다.
+거리나 유사도로 가장 가까운 hunk 또는 줄을 고르지 않는다. 같은 evidence가 여러 위치에 있어 하나로 확정할 수 없거나 exact match를 찾지 못하면 게시하지 않는다. 검증 결과는 exact, normalized, reanchored, unknown_file, invalid_span, non_added_span, not_found와 ambiguous로 나누어 운영 로그에 기록한다.
 
 독립 verifier의 의미론은 fail-safe다.
 
@@ -180,7 +182,7 @@ Coverage 상태:
 
 Complete는 모든 eligible coverage가 reviewed 또는 deep_reviewed일 때만 가능하다. 일부만 성공하면 partial, 성공한 coverage가 없으면 failed다. 분석 대상 denominator가 0이고 모든 제외 사유가 명시된 경우만 skipped다. Complete와 정상 zero-denominator skipped만 complete watermark를 전진시킨다.
 
-Review 본문에는 전체 미검토 파일 목록 대신 total, reviewed, failed, deferred, skipped 수와 bounded reason별 예시를 compact하게 표시한다.
+Coverage ledger와 total, reviewed, failed, deferred, skipped 같은 내부 카운터는 상태 판정과 retry에만 사용하고 공개 Review 본문에는 표시하지 않는다. 실제로 다루지 못한 파일이 있으면 bounded reason별 집계와 파일 예시만 접은 영역으로 표시한다.
 
 Complete는 eligible coverage의 분석 완료를 뜻하며 모든 candidate finding의 공개를 뜻하지 않는다. 분석을 끝낸 뒤 verifier와 publication의 25건 예산에서 제외된 하위 후보 수는 omitted로 표시하지만 coverage를 partial로 바꾸거나 complete watermark를 막지 않는다. 분석 coverage와 공개 코멘트 예산을 결합해 같은 코드를 반복 호출하지 않는다.
 
@@ -441,7 +443,7 @@ Schema migration은 새 process startup에서 GET_LOCK과 bounded AutoMigrate로
 - Partial은 complete watermark를 전진시키지 않는다.
 - Same-run retry는 성공 unit을 다시 호출하지 않는다.
 - Run 전체 model, tool, retry와 verifier 호출 합계는 12를 넘지 않는다.
-- Exact added-line evidence와 정확한 position을 만족하지 않는 finding은 게시하지 않는다.
+- Exact added-line evidence를 만족하지 않는 finding은 게시하지 않는다. 위치가 틀린 finding은 같은 파일의 추가 줄에서 evidence가 유일하게 일치할 때만 재앵커한다.
 - 실행 가능한 independent verifier가 실패하면 해당 candidate를 게시하지 않고 partial로 종료한다.
 - Open exact occurrence만 duplicate suppression에 사용한다.
 - Resolved 또는 expired occurrence는 재발 finding을 억제하지 않는다.
@@ -460,7 +462,7 @@ PR #13 stress case, 작은 PR, 고위험 단일 파일 PR과 retry/stale 시나�
 - Malformed reviewer response가 다음 eligible provider로 fallback한다.
 - Verifier 실패는 clean 신호가 아니라 partial이며 finding을 게시하지 않는다.
 - Exact evidence가 아닌 JVM target 단정은 게시되지 않는다.
-- 잘못된 line을 nearest hunk로 이동하지 않는다.
+- 잘못된 line은 거리나 유사도로 이동하지 않고 같은 파일에 유일한 exact evidence가 있을 때만 재앵커한다.
 - 같은 root cause의 occurrence가 결정론적으로 병합된다.
 - 앞줄 삽입으로 이동한 기존 occurrence가 재앵커되고 중복 게시되지 않는다.
 - 같은 evidence의 추가 발생은 신규 occurrence로 게시할 수 있다.
@@ -468,7 +470,7 @@ PR #13 stress case, 작은 PR, 고위험 단일 파일 PR과 retry/stale 시나�
 - Review, summary와 reply의 응답 유실이 stored canonical result와 marker로 수렴한다.
 - 동일 run의 review가 중복 게시되지 않는다.
 - Stale publication이 무효화되거나 bounded invalidation debt로 남는다.
-- Review 본문이 compact coverage와 partial 사유를 표시한다.
+- Review 본문은 내부 coverage 카운터와 unit 번호를 노출하지 않고, 미검토 범위가 있을 때만 bounded 사유와 예시를 표시한다.
 - Worker 2, units 8, calls 12, findings 25와 read_file 6 상한이 유지된다.
 - 120~180일 hard TTL과 daily cleanup이 expired data를 중복 억제에서 제거한다.
 - Main CD가 old container 제거 후 새 container health 성공으로만 완료된다.
