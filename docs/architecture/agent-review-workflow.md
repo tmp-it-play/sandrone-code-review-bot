@@ -409,7 +409,7 @@ Summary와 thread reply도 operation marker, lease, canonical result checkpoint�
 
 이 절차에는 서비스 중단 구간이 있다. Health 실패 시 이전 container나 image를 자동 재시작하지 않는다. 사용 중이지 않은 과거 commit-SHA image만 배포 후 정리한다.
 
-Schema migration은 새 process startup에서 GET_LOCK과 bounded AutoMigrate로 실행한다. 대량 finding occurrence 변환은 startup 이후 checkpoint worker가 처리하므로 migration 범위가 startup 시간을 무제한 늘리지 않는다.
+Schema migration은 새 process startup에서 GET_LOCK과 bounded AutoMigrate로 실행한다. 같은 물리 connection을 고정하되 lock 조회, migration, backfill, lock 해제는 새 GORM statement session으로 격리한다. 대량 finding occurrence 변환은 startup 이후 checkpoint worker가 처리하므로 migration 범위가 startup 시간을 무제한 늘리지 않는다.
 
 현재 상태:
 

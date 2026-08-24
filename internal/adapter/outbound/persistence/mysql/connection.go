@@ -32,6 +32,7 @@ func NewConnection(dsn string) (*gorm.DB, error) {
 
 func Migrate(database *gorm.DB) error {
 	return database.Connection(func(connection *gorm.DB) (connectionErr error) {
+		connection = connection.Session(&gorm.Session{NewDB: true})
 		var acquired sql.NullInt64
 		if err := connection.Raw("SELECT GET_LOCK(?, ?)", "sandrone-schema-migration", 600).Scan(&acquired).Error; err != nil {
 			return fmt.Errorf("스키마 마이그레이션 lock을 얻지 못했습니다: %w", err)
