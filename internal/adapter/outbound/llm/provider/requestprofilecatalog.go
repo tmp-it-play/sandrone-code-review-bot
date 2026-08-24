@@ -35,7 +35,7 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 			OutputTokenLimit:      131072,
 		}
 	case "nvidia/google/gemma-4-31b-it":
-		capability := llm.Capability{}
+		capability := llm.Capability{JSONMode: true}
 		return RequestProfile{
 			Capability:               &capability,
 			Temperature:              float64Value(1),

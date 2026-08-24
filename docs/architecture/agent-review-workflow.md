@@ -253,7 +253,7 @@ CLOUDFLARE_API_TOKEN은 CLOUDFLARE_ACCOUNT_ID와 같은 account 범위의 [Worke
 
 Batch 계획은 첫 eligible provider의 cap과 repository config를 사용한다. Fallback provider마다 완성된 message와 tool definition 크기를 다시 검사하므로 Groq처럼 작은 cap의 provider는 큰 batch에서 호출 없이 건너뛴다. 전체 provider 가운데 가장 작은 cap으로 모든 batch를 축소하지 않는다.
 
-ForceJSON 요청에서 Mistral은 tool definition이 함께 있어도 [JSON mode](https://docs.mistral.ai/studio/conversations/structured-output/json_mode)를 유지한다. NVIDIA Gemma 4 31B는 thinking을 끈 응답 선두에 [문서화된 빈 thought channel](https://docs.api.nvidia.com/nim/reference/google-gemma-4-31b-it)을 붙일 수 있어 해당 exact prefix만 client boundary에서 제거하며, 임의 prose나 Markdown fence에서 JSON을 추출하지 않는다. Provider의 Retry-After는 transient retry 대신 fallback에 반영하고 설정된 cooldown보다 길 때 최대 24시간까지 유지한다. 새 실패의 cooldown이 기존 deadline보다 짧으면 기존 값을 줄이지 않는다. 같은 credential과 quota를 쓰는 Cloudflare GLM과 Gemma는 하나의 failure domain으로 취급해 auth, quota 또는 rate-limit 실패 시 둘 다 cooldown한다.
+ForceJSON 요청에서 Mistral은 tool definition이 함께 있어도 [JSON mode](https://docs.mistral.ai/studio/conversations/structured-output/json_mode)를 유지한다. NVIDIA Gemma 4 31B는 tool calling을 끄고 provider의 [structured generation](https://docs.nvidia.com/nim/large-language-models/1.15.0/structured-generation.html)을 사용해 순수 JSON을 강제한다. 비 JSON 응답에는 [문서화된 빈 thought channel](https://docs.api.nvidia.com/nim/reference/google-gemma-4-31b-it)이 선두에 붙을 수 있어 해당 exact prefix만 client boundary에서 제거하며, 임의 prose나 Markdown fence에서 JSON을 추출하지 않는다. Provider의 Retry-After는 transient retry 대신 fallback에 반영하고 설정된 cooldown보다 길 때 최대 24시간까지 유지한다. 새 실패의 cooldown이 기존 deadline보다 짧으면 기존 값을 줄이지 않는다. 같은 credential과 quota를 쓰는 Cloudflare GLM과 Gemma는 하나의 failure domain으로 취급해 auth, quota 또는 rate-limit 실패 시 둘 다 cooldown한다.
 
 관련 구현:
 
