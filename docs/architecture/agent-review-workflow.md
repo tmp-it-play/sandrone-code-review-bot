@@ -2,7 +2,7 @@
 
 - 설계 ID: REVIEW-WORKFLOW-001
 - 상태: 승인된 운영 구조
-- 구현 상태: 로컬 검증 완료, main CD gate와 실제 배포 health 확인 대기
+- 구현 상태: main 반영, 운영 schema migration과 실제 배포 health 검증 완료
 - 최초 작성일: 2026-08-24
 - 최종 갱신일: 2026-08-24
 - 결정 소유자: Sandrone maintainers
@@ -413,9 +413,9 @@ Schema migration은 새 process startup에서 GET_LOCK과 bounded AutoMigrate로
 
 현재 상태:
 
-- 로컬 gofmt, go test, go vet와 build 검증 완료
-- main 반영 후 GitHub Actions verify gate 대기
-- verify 통과 뒤 stop/remove → start → health CD와 실제 MySQL backfill 관측 대기
+- 로컬과 GitHub Actions의 gofmt, go test, go vet와 build 검증 완료
+- main의 stop/remove → start → health CD 완료
+- 운영 MySQL 구 스키마 migration과 보존 기준 시각 backfill 완료
 
 관련 구현:
 
