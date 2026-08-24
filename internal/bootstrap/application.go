@@ -121,6 +121,8 @@ func NewApplication(config Config) (*Application, error) {
 	reviews := mysql.NewReviewRepository(database)
 	reviewWorkflows := mysql.NewReviewWorkflowRepository(database)
 	reviewRetentionRepository := mysql.NewReviewRetentionRepository(database)
+	summaryPublicationRepository := mysql.NewSummaryPublicationRepository(database)
+	replyPublicationRepository := mysql.NewReplyPublicationRepository(database)
 	pullRequestState := mysql.NewPullRequestStateRepository(database)
 	findings := mysql.NewFindingRepository(database)
 	occurrenceBootstrapRepository := mysql.NewFindingOccurrenceBootstrapRepository(database)
@@ -163,7 +165,7 @@ func NewApplication(config Config) (*Application, error) {
 		Publisher:    publisher,
 		Renderer:     renderer,
 		Reviews:      reviews,
-		Publications: reviewWorkflows,
+		Publications: summaryPublicationRepository,
 		Clock:        clock,
 		Parser:       parser,
 		Logger:       logger,
@@ -177,7 +179,7 @@ func NewApplication(config Config) (*Application, error) {
 		Completer:    completer,
 		Threads:      threads,
 		Renderer:     renderer,
-		Publications: reviewWorkflows,
+		Publications: replyPublicationRepository,
 		Clock:        clock,
 		Logger:       logger,
 		Retention:    config.ReviewRetention,

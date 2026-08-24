@@ -14,7 +14,15 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func (r *ReviewWorkflowRepository) ClaimSummaryPublication(ctx context.Context, target pullrequest.Target, operationKey string, orderKey string, observedAt time.Time, claimedAt time.Time, leaseExpiresAt time.Time, expiresAt time.Time) (publication.Claim, error) {
+type SummaryPublicationRepository struct {
+	database *gorm.DB
+}
+
+func NewSummaryPublicationRepository(database *gorm.DB) *SummaryPublicationRepository {
+	return &SummaryPublicationRepository{database: database}
+}
+
+func (r *SummaryPublicationRepository) ClaimSummaryPublication(ctx context.Context, target pullrequest.Target, operationKey string, orderKey string, observedAt time.Time, claimedAt time.Time, leaseExpiresAt time.Time, expiresAt time.Time) (publication.Claim, error) {
 	if target.Owner == "" || target.Repository == "" || target.Number <= 0 || operationKey == "" || claimedAt.IsZero() || !leaseExpiresAt.After(claimedAt) || !expiresAt.After(claimedAt) {
 		return publication.Claim{}, fmt.Errorf("요약 게시 claim 입력이 올바르지 않습니다")
 	}
@@ -142,7 +150,7 @@ func mergeValues(target map[string]any, values map[string]any) {
 	}
 }
 
-func (r *ReviewWorkflowRepository) ReserveSummaryExternalCall(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, limit int) (bool, error) {
+func (r *SummaryPublicationRepository) ReserveSummaryExternalCall(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, limit int) (bool, error) {
 	if limit < 1 {
 		return false, nil
 	}
@@ -156,7 +164,7 @@ func (r *ReviewWorkflowRepository) ReserveSummaryExternalCall(ctx context.Contex
 	return updated.RowsAffected == 1, nil
 }
 
-func (r *ReviewWorkflowRepository) SummaryCompletion(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, inputHash string, currentAt time.Time) (publication.CompletionCheckpoint, bool, error) {
+func (r *SummaryPublicationRepository) SummaryCompletion(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, inputHash string, currentAt time.Time) (publication.CompletionCheckpoint, bool, error) {
 	if operationKey == "" || leaseToken == "" || inputHash == "" || currentAt.IsZero() {
 		return publication.CompletionCheckpoint{}, false, fmt.Errorf("요약 완료 checkpoint 조회 입력이 올바르지 않습니다")
 	}
@@ -196,7 +204,7 @@ func (r *ReviewWorkflowRepository) SummaryCompletion(ctx context.Context, target
 	return checkpoint, found, nil
 }
 
-func (r *ReviewWorkflowRepository) RecordSummaryCompletionAttempt(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, response llm.Response, recordedAt time.Time) (publication.CompletionCheckpoint, error) {
+func (r *SummaryPublicationRepository) RecordSummaryCompletionAttempt(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, response llm.Response, recordedAt time.Time) (publication.CompletionCheckpoint, error) {
 	if operationKey == "" || leaseToken == "" || recordedAt.IsZero() || !validCompletionAttempt(response) {
 		return publication.CompletionCheckpoint{}, fmt.Errorf("요약 모델 시도 기록 입력이 올바르지 않습니다")
 	}
@@ -235,7 +243,7 @@ func (r *ReviewWorkflowRepository) RecordSummaryCompletionAttempt(ctx context.Co
 	return aggregate, nil
 }
 
-func (r *ReviewWorkflowRepository) SaveSummaryCompletion(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, checkpoint publication.CompletionCheckpoint) (publication.CompletionCheckpoint, error) {
+func (r *SummaryPublicationRepository) SaveSummaryCompletion(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, checkpoint publication.CompletionCheckpoint) (publication.CompletionCheckpoint, error) {
 	if operationKey == "" || leaseToken == "" || !validCompletionCheckpoint(checkpoint) {
 		return publication.CompletionCheckpoint{}, fmt.Errorf("요약 완료 checkpoint 입력이 올바르지 않습니다")
 	}
@@ -294,7 +302,7 @@ func (r *ReviewWorkflowRepository) SaveSummaryCompletion(ctx context.Context, ta
 	return aggregate, nil
 }
 
-func (r *ReviewWorkflowRepository) RenewSummaryPublication(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, leaseExpiresAt time.Time) error {
+func (r *SummaryPublicationRepository) RenewSummaryPublication(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, leaseExpiresAt time.Time) error {
 	updated := r.database.WithContext(ctx).Model(&model.PullRequestState{}).
 		Where("owner = ? AND repository = ? AND number = ?", target.Owner, target.Repository, target.Number).
 		Where("summary_operation_key = ? AND summary_publishing_key = ? AND summary_lease_token = ? AND summary_lease_expires_at > CURRENT_TIMESTAMP AND summary_expires_at > CURRENT_TIMESTAMP", operationKey, operationKey, leaseToken).
@@ -308,7 +316,7 @@ func (r *ReviewWorkflowRepository) RenewSummaryPublication(ctx context.Context, 
 	return nil
 }
 
-func (r *ReviewWorkflowRepository) CompleteSummaryPublication(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, completedAt time.Time) error {
+func (r *SummaryPublicationRepository) CompleteSummaryPublication(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, completedAt time.Time) error {
 	updated := r.database.WithContext(ctx).Model(&model.PullRequestState{}).
 		Where("owner = ? AND repository = ? AND number = ?", target.Owner, target.Repository, target.Number).
 		Where("summary_operation_key = ? AND summary_publishing_key = ? AND summary_lease_token = ? AND summary_lease_expires_at > CURRENT_TIMESTAMP AND summary_expires_at > CURRENT_TIMESTAMP", operationKey, operationKey, leaseToken).
@@ -329,7 +337,7 @@ func (r *ReviewWorkflowRepository) CompleteSummaryPublication(ctx context.Contex
 	return nil
 }
 
-func (r *ReviewWorkflowRepository) ReleaseSummaryPublication(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string) error {
+func (r *SummaryPublicationRepository) ReleaseSummaryPublication(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string) error {
 	if operationKey == "" || leaseToken == "" {
 		return nil
 	}

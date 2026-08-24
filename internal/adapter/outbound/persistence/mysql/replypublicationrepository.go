@@ -14,7 +14,15 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func (r *ReviewWorkflowRepository) ClaimReplyPublication(ctx context.Context, target pullrequest.Target, operationKey string, commentID int64, inThread bool, claimedAt time.Time, leaseExpiresAt time.Time, expiresAt time.Time) (publication.Claim, error) {
+type ReplyPublicationRepository struct {
+	database *gorm.DB
+}
+
+func NewReplyPublicationRepository(database *gorm.DB) *ReplyPublicationRepository {
+	return &ReplyPublicationRepository{database: database}
+}
+
+func (r *ReplyPublicationRepository) ClaimReplyPublication(ctx context.Context, target pullrequest.Target, operationKey string, commentID int64, inThread bool, claimedAt time.Time, leaseExpiresAt time.Time, expiresAt time.Time) (publication.Claim, error) {
 	if target.Owner == "" || target.Repository == "" || target.Number <= 0 || operationKey == "" || commentID <= 0 || claimedAt.IsZero() || !leaseExpiresAt.After(claimedAt) || !expiresAt.After(claimedAt) {
 		return publication.Claim{}, fmt.Errorf("답글 게시 claim 입력이 올바르지 않습니다")
 	}
@@ -99,7 +107,7 @@ func (r *ReviewWorkflowRepository) ClaimReplyPublication(ctx context.Context, ta
 	return claim, nil
 }
 
-func (r *ReviewWorkflowRepository) ReserveReplyExternalCall(ctx context.Context, operationKey string, leaseToken string, limit int) (bool, error) {
+func (r *ReplyPublicationRepository) ReserveReplyExternalCall(ctx context.Context, operationKey string, leaseToken string, limit int) (bool, error) {
 	if limit < 1 {
 		return false, nil
 	}
@@ -112,7 +120,7 @@ func (r *ReviewWorkflowRepository) ReserveReplyExternalCall(ctx context.Context,
 	return updated.RowsAffected == 1, nil
 }
 
-func (r *ReviewWorkflowRepository) ReplyCompletion(ctx context.Context, operationKey string, leaseToken string, inputHash string, currentAt time.Time) (publication.CompletionCheckpoint, bool, error) {
+func (r *ReplyPublicationRepository) ReplyCompletion(ctx context.Context, operationKey string, leaseToken string, inputHash string, currentAt time.Time) (publication.CompletionCheckpoint, bool, error) {
 	if operationKey == "" || leaseToken == "" || inputHash == "" || currentAt.IsZero() {
 		return publication.CompletionCheckpoint{}, false, fmt.Errorf("답글 완료 checkpoint 조회 입력이 올바르지 않습니다")
 	}
@@ -150,7 +158,7 @@ func (r *ReviewWorkflowRepository) ReplyCompletion(ctx context.Context, operatio
 	return checkpoint, found, nil
 }
 
-func (r *ReviewWorkflowRepository) RecordReplyCompletionAttempt(ctx context.Context, operationKey string, leaseToken string, response llm.Response, recordedAt time.Time) (publication.CompletionCheckpoint, error) {
+func (r *ReplyPublicationRepository) RecordReplyCompletionAttempt(ctx context.Context, operationKey string, leaseToken string, response llm.Response, recordedAt time.Time) (publication.CompletionCheckpoint, error) {
 	if operationKey == "" || leaseToken == "" || recordedAt.IsZero() || !validCompletionAttempt(response) {
 		return publication.CompletionCheckpoint{}, fmt.Errorf("답글 모델 시도 기록 입력이 올바르지 않습니다")
 	}
@@ -187,7 +195,7 @@ func (r *ReviewWorkflowRepository) RecordReplyCompletionAttempt(ctx context.Cont
 	return aggregate, nil
 }
 
-func (r *ReviewWorkflowRepository) SaveReplyCompletion(ctx context.Context, operationKey string, leaseToken string, checkpoint publication.CompletionCheckpoint) (publication.CompletionCheckpoint, error) {
+func (r *ReplyPublicationRepository) SaveReplyCompletion(ctx context.Context, operationKey string, leaseToken string, checkpoint publication.CompletionCheckpoint) (publication.CompletionCheckpoint, error) {
 	if operationKey == "" || leaseToken == "" || !validCompletionCheckpoint(checkpoint) {
 		return publication.CompletionCheckpoint{}, fmt.Errorf("답글 완료 checkpoint 입력이 올바르지 않습니다")
 	}
@@ -244,7 +252,7 @@ func (r *ReviewWorkflowRepository) SaveReplyCompletion(ctx context.Context, oper
 	return aggregate, nil
 }
 
-func (r *ReviewWorkflowRepository) RenewReplyPublication(ctx context.Context, operationKey string, leaseToken string, leaseExpiresAt time.Time) error {
+func (r *ReplyPublicationRepository) RenewReplyPublication(ctx context.Context, operationKey string, leaseToken string, leaseExpiresAt time.Time) error {
 	updated := r.database.WithContext(ctx).Model(&model.ReplyPublication{}).
 		Where("operation_key = ? AND lease_token = ? AND completed_at IS NULL AND lease_expires_at > CURRENT_TIMESTAMP AND expires_at > CURRENT_TIMESTAMP", operationKey, leaseToken).
 		UpdateColumn("lease_expires_at", gorm.Expr("LEAST(?, expires_at)", leaseExpiresAt))
@@ -257,7 +265,7 @@ func (r *ReviewWorkflowRepository) RenewReplyPublication(ctx context.Context, op
 	return nil
 }
 
-func (r *ReviewWorkflowRepository) CompleteReplyPublication(ctx context.Context, operationKey string, leaseToken string, completedAt time.Time) error {
+func (r *ReplyPublicationRepository) CompleteReplyPublication(ctx context.Context, operationKey string, leaseToken string, completedAt time.Time) error {
 	updated := r.database.WithContext(ctx).Model(&model.ReplyPublication{}).
 		Where("operation_key = ? AND lease_token = ? AND completed_at IS NULL AND lease_expires_at > CURRENT_TIMESTAMP AND expires_at > CURRENT_TIMESTAMP", operationKey, leaseToken).
 		Updates(map[string]any{
@@ -275,7 +283,7 @@ func (r *ReviewWorkflowRepository) CompleteReplyPublication(ctx context.Context,
 	return nil
 }
 
-func (r *ReviewWorkflowRepository) ReleaseReplyPublication(ctx context.Context, operationKey string, leaseToken string) error {
+func (r *ReplyPublicationRepository) ReleaseReplyPublication(ctx context.Context, operationKey string, leaseToken string) error {
 	if operationKey == "" || leaseToken == "" {
 		return nil
 	}
