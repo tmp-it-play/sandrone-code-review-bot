@@ -3,32 +3,18 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
-
-	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 )
 
 type HealthHandler struct {
-	database *gorm.DB
-	cache    *redis.Client
+	checker ReadinessChecker
 }
 
-func NewHealthHandler(database *gorm.DB, cache *redis.Client) *HealthHandler {
-	return &HealthHandler{database: database, cache: cache}
+func NewHealthHandler(checker ReadinessChecker) *HealthHandler {
+	return &HealthHandler{checker: checker}
 }
 
 func (h *HealthHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	status := map[string]string{"mysql": "ok", "redis": "ok"}
-	ready := true
-
-	pool, err := h.database.DB()
-	if err != nil || pool.PingContext(request.Context()) != nil {
-		status["mysql"] = "unreachable"
-		ready = false
-	}
-	if err := h.cache.Ping(request.Context()).Err(); err != nil {
-		status["redis"] = "degraded"
-	}
+	status, ready := h.checker.Check(request.Context())
 
 	writer.Header().Set("Content-Type", "application/json")
 	if !ready {

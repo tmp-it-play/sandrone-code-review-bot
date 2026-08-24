@@ -7,17 +7,16 @@ import (
 	"time"
 
 	"github.com/hibiken/asynq"
-	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/observability"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/reviewpullrequest"
 )
 
 type ReviewHandler struct {
 	usecase *reviewpullrequest.UseCase
-	metrics *observability.Metrics
+	metrics JobMetrics
 }
 
-func NewReviewHandler(usecase *reviewpullrequest.UseCase, metrics *observability.Metrics) *ReviewHandler {
+func NewReviewHandler(usecase *reviewpullrequest.UseCase, metrics JobMetrics) *ReviewHandler {
 	return &ReviewHandler{usecase: usecase, metrics: metrics}
 }
 

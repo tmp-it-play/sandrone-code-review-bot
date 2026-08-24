@@ -8,7 +8,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/observability"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usage"
@@ -20,14 +19,14 @@ type Chain struct {
 	providers     []outbound.Provider
 	cooldown      outbound.Cooldown
 	usage         outbound.UsageRepository
-	metrics       *observability.Metrics
+	metrics       ProviderMetrics
 	clock         outbound.Clock
 	logger        *slog.Logger
 	cooldownFor   time.Duration
 	maxToolRounds int
 }
 
-func New(providers []outbound.Provider, cooldown outbound.Cooldown, usageRepository outbound.UsageRepository, metrics *observability.Metrics, clock outbound.Clock, logger *slog.Logger, cooldownFor time.Duration) *Chain {
+func New(providers []outbound.Provider, cooldown outbound.Cooldown, usageRepository outbound.UsageRepository, metrics ProviderMetrics, clock outbound.Clock, logger *slog.Logger, cooldownFor time.Duration) *Chain {
 	return &Chain{
 		providers:     providers,
 		cooldown:      cooldown,

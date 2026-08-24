@@ -7,17 +7,16 @@ import (
 	"time"
 
 	"github.com/hibiken/asynq"
-	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/observability"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/replythread"
 )
 
 type ReplyHandler struct {
 	usecase *replythread.UseCase
-	metrics *observability.Metrics
+	metrics JobMetrics
 }
 
-func NewReplyHandler(usecase *replythread.UseCase, metrics *observability.Metrics) *ReplyHandler {
+func NewReplyHandler(usecase *replythread.UseCase, metrics JobMetrics) *ReplyHandler {
 	return &ReplyHandler{usecase: usecase, metrics: metrics}
 }
 

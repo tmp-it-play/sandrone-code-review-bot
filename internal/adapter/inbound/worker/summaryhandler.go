@@ -7,17 +7,16 @@ import (
 	"time"
 
 	"github.com/hibiken/asynq"
-	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/observability"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/summarizepullrequest"
 )
 
 type SummaryHandler struct {
 	usecase *summarizepullrequest.UseCase
-	metrics *observability.Metrics
+	metrics JobMetrics
 }
 
-func NewSummaryHandler(usecase *summarizepullrequest.UseCase, metrics *observability.Metrics) *SummaryHandler {
+func NewSummaryHandler(usecase *summarizepullrequest.UseCase, metrics JobMetrics) *SummaryHandler {
 	return &SummaryHandler{usecase: usecase, metrics: metrics}
 }
 

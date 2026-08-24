@@ -4,8 +4,6 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"strings"
-
-	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/observability"
 )
 
 type MetricsHandler struct {
@@ -13,8 +11,8 @@ type MetricsHandler struct {
 	token string
 }
 
-func NewMetricsHandler(metrics *observability.Metrics, token string) *MetricsHandler {
-	return &MetricsHandler{inner: metrics.Handler(), token: token}
+func NewMetricsHandler(inner http.Handler, token string) *MetricsHandler {
+	return &MetricsHandler{inner: inner, token: token}
 }
 
 func (h *MetricsHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {

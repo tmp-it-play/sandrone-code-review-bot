@@ -9,7 +9,6 @@ import (
 
 	gh "github.com/google/go-github/v90/github"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/inbound/webhook"
-	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/observability"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/webhookinbox"
 )
@@ -29,12 +28,12 @@ type WebhookInboxWorker struct {
 	router     *webhook.EventRouter
 	clock      outbound.Clock
 	masker     outbound.Masker
-	metrics    *observability.Metrics
+	metrics    WebhookMetrics
 	logger     *slog.Logger
 	retention  time.Duration
 }
 
-func NewWebhookInboxWorker(repository outbound.WebhookInboxRepository, router *webhook.EventRouter, clock outbound.Clock, masker outbound.Masker, metrics *observability.Metrics, logger *slog.Logger, retention time.Duration) *WebhookInboxWorker {
+func NewWebhookInboxWorker(repository outbound.WebhookInboxRepository, router *webhook.EventRouter, clock outbound.Clock, masker outbound.Masker, metrics WebhookMetrics, logger *slog.Logger, retention time.Duration) *WebhookInboxWorker {
 	return &WebhookInboxWorker{
 		repository: repository,
 		router:     router,

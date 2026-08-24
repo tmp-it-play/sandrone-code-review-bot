@@ -1,9 +1,7 @@
 package bootstrap
 
 import (
-	"context"
-	"errors"
-	"fmt"
+	"database/sql"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -19,9 +17,11 @@ import (
 	redisadapter "github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/cache/redis"
 	githubadapter "github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/forge/github"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/forge/github/markdown"
+	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/health"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/llm/chain"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/masking"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/observability"
+	prometheusmetrics "github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/observability/prometheus"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/persistence/mysql"
 	queueadapter "github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/queue/asynq"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/settings"
@@ -39,6 +39,7 @@ const asynqShutdownTimeout = 2 * time.Minute
 
 type Application struct {
 	logger              *slog.Logger
+	database            *sql.DB
 	httpServer          *http.Server
 	asynqServer         *asynq.Server
 	asynqMux            *asynq.ServeMux
@@ -50,30 +51,52 @@ type Application struct {
 	webhookInbox        *maintenance.WebhookInboxWorker
 	webhookRecovery     *maintenance.WebhookDeliveryRecoveryWorker
 	occurrenceBootstrap *maintenance.FindingOccurrenceBootstrapWorker
+	resourceCloseOnce   sync.Once
 }
 
 func NewApplication(config Config) (*Application, error) {
 	logger := observability.NewLogger()
-	metrics := observability.NewMetrics()
+	metrics := prometheusmetrics.NewMetrics()
 	clock := system.NewClock()
 	masker := masking.NewSecretMasker()
 
-	database, err := mysql.NewConnection(config.MySQLDSN)
+	database, databasePool, err := mysql.NewConnection(config.MySQLDSN)
 	if err != nil {
 		return nil, err
 	}
+	releaseConstructionResources := true
+	defer func() {
+		if releaseConstructionResources {
+			_ = databasePool.Close()
+		}
+	}()
 	if err := mysql.Migrate(database); err != nil {
 		return nil, err
 	}
 
 	cache := redisadapter.NewClient(config.RedisAddress, config.RedisPassword, config.RedisDatabase)
+	defer func() {
+		if releaseConstructionResources {
+			_ = cache.Close()
+		}
+	}()
 	redisOptions := asynq.RedisClientOpt{
 		Addr:     config.RedisAddress,
 		Password: config.RedisPassword,
 		DB:       config.RedisDatabase,
 	}
 	queueClient := queueadapter.NewClient(asynq.NewClient(redisOptions))
+	defer func() {
+		if releaseConstructionResources {
+			_ = queueClient.Close()
+		}
+	}()
 	inspector := asynq.NewInspector(redisOptions)
+	defer func() {
+		if releaseConstructionResources {
+			_ = inspector.Close()
+		}
+	}()
 
 	tokens, err := githubadapter.NewTokenSource(config.AppID, config.PrivateKey)
 	if err != nil {
@@ -199,8 +222,8 @@ func NewApplication(config Config) (*Application, error) {
 
 	mux := http.NewServeMux()
 	mux.Handle("/webhook", webhookHandler)
-	mux.Handle("/healthz", httpapi.NewHealthHandler(database, cache))
-	mux.Handle("/metrics", httpapi.NewMetricsHandler(metrics, config.MetricsToken))
+	mux.Handle("/healthz", httpapi.NewHealthHandler(health.NewChecker(database, cache)))
+	mux.Handle("/metrics", httpapi.NewMetricsHandler(metrics.Handler(), config.MetricsToken))
 	mux.HandleFunc("GET /{$}", func(writer http.ResponseWriter, request *http.Request) {
 		http.Redirect(writer, request, config.BasePath+"/dashboard", http.StatusSeeOther)
 	})
@@ -222,8 +245,9 @@ func NewApplication(config Config) (*Application, error) {
 		Logger: newQueueLogger(logger),
 	})
 
-	return &Application{
+	application := &Application{
 		logger:              logger,
+		database:            databasePool,
 		httpServer:          &http.Server{Addr: config.HTTPAddress, Handler: handler, ReadHeaderTimeout: 10 * time.Second},
 		asynqServer:         asynqServer,
 		asynqMux:            asynqMux,
@@ -235,85 +259,7 @@ func NewApplication(config Config) (*Application, error) {
 		webhookInbox:        webhookInbox,
 		webhookRecovery:     webhookRecovery,
 		occurrenceBootstrap: occurrenceBootstrap,
-	}, nil
-}
-
-func (a *Application) Run(ctx context.Context) error {
-	if err := a.asynqServer.Start(a.asynqMux); err != nil {
-		return fmt.Errorf("워커를 시작하지 못했습니다: %w", err)
 	}
-	errs := make(chan error, 1)
-	go func() {
-		a.logger.Info("HTTP 서버를 시작합니다", "address", a.httpServer.Addr)
-		if err := a.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errs <- err
-			return
-		}
-		errs <- nil
-	}()
-	maintenanceContext, stopMaintenance := context.WithCancel(ctx)
-	var maintenanceWorkers sync.WaitGroup
-	for _, run := range []func(context.Context){
-		a.reviewRetention.Run,
-		a.reviewPublication.Run,
-		a.webhookInbox.Run,
-		a.webhookRecovery.Run,
-		a.occurrenceBootstrap.Run,
-	} {
-		maintenanceWorkers.Add(1)
-		go func(run func(context.Context)) {
-			defer maintenanceWorkers.Done()
-			run(maintenanceContext)
-		}(run)
-	}
-
-	select {
-	case <-ctx.Done():
-	case err := <-errs:
-		stopMaintenance()
-		maintenanceWorkers.Wait()
-		a.shutdown()
-		return err
-	}
-	stopMaintenance()
-	maintenanceWorkers.Wait()
-	a.shutdown()
-	return nil
-}
-
-func (a *Application) shutdown() {
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := a.httpServer.Shutdown(shutdownCtx); err != nil {
-		a.logger.Warn("HTTP 서버를 정상 종료하지 못했습니다", "error", err)
-	}
-	a.asynqServer.Shutdown()
-	if err := a.queueClient.Close(); err != nil {
-		a.logger.Warn("큐 클라이언트를 닫지 못했습니다", "error", err)
-	}
-	if err := a.inspector.Close(); err != nil {
-		a.logger.Warn("큐 인스펙터를 닫지 못했습니다", "error", err)
-	}
-	if err := a.cache.Close(); err != nil {
-		a.logger.Warn("Redis 연결을 닫지 못했습니다", "error", err)
-	}
-	a.logger.Info("종료했습니다")
-}
-
-func retryDelay(attempt int) time.Duration {
-	delays := []time.Duration{
-		1 * time.Minute,
-		5 * time.Minute,
-		15 * time.Minute,
-		30 * time.Minute,
-		1 * time.Hour,
-		2 * time.Hour,
-	}
-	if attempt < 1 {
-		attempt = 1
-	}
-	if attempt > len(delays) {
-		attempt = len(delays)
-	}
-	return delays[attempt-1]
+	releaseConstructionResources = false
+	return application, nil
 }
