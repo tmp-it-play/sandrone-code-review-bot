@@ -10,14 +10,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/batching"
-	"github.com/it-play/sandrone-code-review-bot/internal/core/dedupe"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
-	"github.com/it-play/sandrone-code-review-bot/internal/core/mapping"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
-	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewanalysis"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/selection"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/setting"
@@ -29,12 +26,20 @@ const reviewRunLease = 20 * time.Minute
 const reviewPublicationLease = 30 * time.Minute
 
 type UseCase struct {
-	deps         Dependencies
-	publications *reviewpublication.PreparedPublisher
-	unitExecutor *reviewUnitExecutor
+	deps            Dependencies
+	publications    *reviewpublication.PreparedPublisher
+	unitExecutor    *reviewUnitExecutor
+	resultFinalizer *reviewResultFinalizer
 }
 
 func New(deps Dependencies) *UseCase {
+	verifier := newFindingVerifier(findingVerifierDependencies{
+		workflows: deps.Workflows,
+		completer: deps.Completer,
+		masker:    deps.Masker,
+		clock:     deps.Clock,
+		logger:    deps.Logger,
+	})
 	return &UseCase{
 		deps: deps,
 		publications: reviewpublication.New(reviewpublication.Dependencies{
@@ -51,6 +56,11 @@ func New(deps Dependencies) *UseCase {
 			clock:     deps.Clock,
 			parser:    deps.Parser,
 			logger:    deps.Logger,
+		}),
+		resultFinalizer: newReviewResultFinalizer(reviewResultFinalizerDependencies{
+			findings: deps.Findings,
+			verifier: verifier,
+			logger:   deps.Logger,
 		}),
 	}
 }
@@ -412,29 +422,9 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if unitExecutionErr != nil {
 		return fail(unitExecution.errorMessage, unitExecutionErr)
 	}
-	gathered := unitExecution.review
-	reduced := unitExecution.reduced
 	response := unitExecution.response
-	usage := response.Usage
-	toolExecutions := response.ToolExecutions
-	modelsUsed := unitExecution.modelsUsed
-	multipleModels := unitExecution.multipleModels
 	reviewed := unitExecution.reviewed
 	failed := unitExecution.failed
-	schemaDropped := unitExecution.schemaDropped
-	evidenceReport := unitExecution.evidenceReport
-	reusedFindings := unitExecution.reusedFindings
-	reviewerProviders := unitExecution.reviewerProviders
-	captureFailureResponse := func() {
-		response.Usage = usage
-		response.ToolExecutions = toolExecutions
-		if multipleModels || len(modelsUsed) > 1 {
-			response.Provider = "multiple"
-			response.Model = "multiple"
-			response.ModelLabel = "복수 모델"
-		}
-		failureResponse = response
-	}
 	if len(failed) > 0 && !task.FinalAttempt {
 		return fail("일부 리뷰 unit을 완료하지 못했습니다", fmt.Errorf("%d개 파일이 다음 시도에 남았습니다", len(failed)))
 	}
@@ -464,97 +454,33 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		return fail("유효한 리뷰 결과를 만들지 못했습니다", fmt.Errorf("모든 리뷰 unit이 실패했습니다"))
 	}
 
-	findings := selection.SeverityFilter{Minimum: config.MinSeverity}.Apply(gathered.Findings)
-	afterSeverity := len(findings)
-	var finalEvidenceReport reviewanalysis.EvidenceReport
-	findings, finalEvidenceReport = (reviewanalysis.EvidenceVerifier{}).VerifyWithReport(findings, reviewed)
-	known, err := u.deps.Findings.Fingerprints(ctx, target)
-	if err != nil {
-		return fail("기존 지적을 읽지 못했습니다", err)
+	finalizedResult, finalizationErr := u.resultFinalizer.finalize(ctx, reviewResultFinalization{
+		target:          target,
+		runID:           run.ID,
+		runLease:        runLease,
+		config:          config,
+		execution:       unitExecution,
+		request:         reviewRequest,
+		paths:           pathMap,
+		trigger:         task.Trigger,
+		incremental:     incremental,
+		selection:       chosen,
+		plan:            plan,
+		coverage:        coverage,
+		coverageSummary: coverageSummary,
+		runStatus:       runStatus,
+	})
+	failureResponse = finalizedResult.failureResponse
+	if finalizationErr != nil {
+		return fail(finalizedResult.errorMessage, finalizationErr)
 	}
-	findings, duplicates := dedupe.DuplicateFilter{Known: known}.Apply(findings)
-	findings, omittedFindings := publishedFindingBudget(findings)
-	findings, verifierResponse, verifierRejected, verifierUsed, verificationUnavailable, verificationErr := u.verifyFindings(ctx, run.ID, runLease, findings, reviewed, reviewRequest, reviewerProviders, pathMap)
-	usage = usage.Add(verifierResponse.Usage)
-	toolExecutions += verifierResponse.ToolExecutions
-	trackReviewModel(modelsUsed, verifierResponse.Provider, verifierResponse.Model)
-	multipleModels = multipleModels || verifierResponse.ModelLabel == "복수 모델"
-	if verifierResponse.Provider != "" || verifierResponse.Model != "" {
-		response.Provider = verifierResponse.Provider
-		response.Model = verifierResponse.Model
-		response.ModelLabel = verifierResponse.ModelLabel
-	}
-	captureFailureResponse()
-	if verificationErr != nil {
-		return fail("독립 finding verifier 결과를 저장하지 못했습니다", verificationErr)
-	}
-	if verificationUnavailable {
-		runStatus = reviewworkflow.RunStatusPartial
-	}
-	var finalReduced int
-	findings, finalReduced = (dedupe.RootCauseReducer{}).Apply(findings)
-	findings = mapping.PositionMapper{MaxInline: config.MaxInlineComments}.Map(findings, reviewed)
-	u.deps.Logger.Info("지적 집계",
-		"target", target.Reference(),
-		"collected", len(gathered.Findings),
-		"after_severity", afterSeverity,
-		"schema_dropped", schemaDropped,
-		"checkpoint_reused_findings", reusedFindings,
-		"evidence_exact", evidenceReport.Exact,
-		"evidence_normalized", evidenceReport.Normalized,
-		"evidence_reanchored", evidenceReport.Reanchored,
-		"evidence_unknown_file", evidenceReport.UnknownFile,
-		"evidence_invalid_span", evidenceReport.InvalidSpan,
-		"evidence_non_added_span", evidenceReport.NonAddedSpan,
-		"evidence_not_found", evidenceReport.NotFound,
-		"evidence_ambiguous", evidenceReport.Ambiguous,
-		"evidence_accepted", evidenceReport.Accepted(),
-		"evidence_rejected", evidenceReport.Dropped(),
-		"final_evidence_exact", finalEvidenceReport.Exact,
-		"final_evidence_normalized", finalEvidenceReport.Normalized,
-		"final_evidence_reanchored", finalEvidenceReport.Reanchored,
-		"final_evidence_rejected", finalEvidenceReport.Dropped(),
-		"root_causes_collapsed", reduced+finalReduced,
-		"verifier_used", verifierUsed,
-		"verifier_rejected", verifierRejected,
-		"verification_unavailable", verificationUnavailable,
-		"omitted_by_budget", omittedFindings,
-		"duplicates", duplicates,
-		"final", len(findings),
-		"min_severity", string(config.MinSeverity))
-
-	placed := review.Result{Summary: gathered.Summary, Findings: findings}
-	response.Usage = usage
-	response.ToolExecutions = toolExecutions
-	if multipleModels || len(modelsUsed) > 1 {
-		response.Provider = "multiple"
-		response.Model = "multiple"
-		response.ModelLabel = "복수 모델"
-	}
-	attribution := attributionOf(response)
-	style := review.Style{Emoji: config.Emoji, Tone: string(config.Tone)}
-	view := review.SummaryView{
-		Summary:                 placed.Summary,
-		Fallback:                placed.Fallback(),
-		InlineCount:             len(placed.Inline()),
-		Attribution:             attribution,
-		Style:                   style,
-		Trigger:                 task.Trigger,
-		Incremental:             incremental,
-		SkippedDup:              duplicates,
-		OmittedFindings:         omittedFindings,
-		VerificationUnavailable: verificationUnavailable,
-		Unreviewed:              unreviewedOf(chosen.Skipped, plan.Overflow, plan.Oversized, failed, coverage),
-		Coverage: review.CoverageView{
-			Total:    coverageSummary.Total,
-			Reviewed: coverageSummary.Reviewed,
-			Failed:   coverageSummary.Failed,
-			Deferred: coverageSummary.Deferred,
-			Skipped:  coverageSummary.Skipped,
-			Pending:  coverageSummary.Pending,
-			Status:   string(runStatus),
-		},
-	}
+	placed := finalizedResult.draft
+	view := finalizedResult.view
+	attribution := finalizedResult.attribution
+	style := finalizedResult.style
+	response = finalizedResult.response
+	runStatus = finalizedResult.runStatus
+	verificationUnavailable := finalizedResult.verificationUnavailable
 	heartbeatAt := u.deps.Clock.Now()
 	if leaseErr := u.deps.Workflows.RenewRun(ctx, run.ID, runLease, heartbeatAt, heartbeatAt.Add(reviewRunLease)); leaseErr != nil {
 		if errors.Is(leaseErr, reviewworkflow.ErrRunSuperseded) {
