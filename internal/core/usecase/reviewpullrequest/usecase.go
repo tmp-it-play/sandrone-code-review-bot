@@ -23,6 +23,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/selection"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/setting"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/reviewpublication"
 )
 
 const reactionTimeout = 5 * time.Second
@@ -31,11 +32,20 @@ const reviewRunLease = 20 * time.Minute
 const reviewPublicationLease = 30 * time.Minute
 
 type UseCase struct {
-	deps Dependencies
+	deps         Dependencies
+	publications *reviewpublication.PreparedPublisher
 }
 
 func New(deps Dependencies) *UseCase {
-	return &UseCase{deps: deps}
+	return &UseCase{
+		deps: deps,
+		publications: reviewpublication.New(reviewpublication.Dependencies{
+			Publisher: deps.Publisher,
+			Receipts:  deps.Workflows,
+			Clock:     deps.Clock,
+			Logger:    deps.Logger,
+		}),
+	}
 }
 
 func (u *UseCase) Execute(ctx context.Context, task job.ReviewJob) error {

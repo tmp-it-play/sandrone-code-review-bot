@@ -11,6 +11,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/reviewpublication"
 )
 
 type ReviewPublicationWorker struct {
@@ -30,6 +31,7 @@ type ReviewPublicationWorker struct {
 	invalidationLimit int
 	afterID           uint64
 	throughID         uint64
+	publications      *reviewpublication.PreparedPublisher
 }
 
 func NewReviewPublicationWorker(workflows outbound.ReviewPublicationRecoveryRepository, source outbound.PullRequestSource, publisher outbound.ReviewPublisher, reviews outbound.ReviewRepository, clock outbound.Clock, logger *slog.Logger, retention time.Duration) *ReviewPublicationWorker {
@@ -48,6 +50,12 @@ func NewReviewPublicationWorker(workflows outbound.ReviewPublicationRecoveryRepo
 		reconcileTimeout:  90 * time.Second,
 		batchSize:         10,
 		invalidationLimit: 10,
+		publications: reviewpublication.New(reviewpublication.Dependencies{
+			Publisher: publisher,
+			Receipts:  workflows,
+			Clock:     clock,
+			Logger:    logger,
+		}),
 	}
 }
 
@@ -210,41 +218,11 @@ func (w *ReviewPublicationWorker) reconcileRun(ctx context.Context, run reviewwo
 }
 
 func (w *ReviewPublicationWorker) publishPreparedPublication(ctx context.Context, target pullrequest.Target, runID uint64, leaseToken string, prepared reviewworkflow.ReviewPublication) error {
-	if prepared.Status == reviewworkflow.ReviewPublicationStatusCompleted {
-		return nil
-	}
-	if prepared.Status != reviewworkflow.ReviewPublicationStatusPrepared {
-		return errors.New("게시할 수 없는 리뷰 publication 상태입니다")
-	}
-	reviewID, submitErr := w.publisher.SubmitReview(ctx, target, prepared.Marker, prepared.Payload.Body, prepared.Payload.Comments)
-	if submitErr == nil {
-		return w.completeReviewPublication(ctx, runID, leaseToken, prepared.Marker, reviewworkflow.ReviewPublicationChannelReview, reviewID, prepared.ExpiresAt)
-	}
-	if errors.Is(submitErr, publication.ErrTargetChanged) {
-		return submitErr
-	}
-	published, reconcileErr := w.publisher.PublicationExists(ctx, target, prepared.Marker)
-	if reconcileErr != nil {
-		return errors.Join(submitErr, reconcileErr)
-	}
-	if published {
-		return w.completeReviewPublication(ctx, runID, leaseToken, prepared.Marker, reviewworkflow.ReviewPublicationChannelReconciled, 0, prepared.ExpiresAt)
-	}
-	w.logger.Warn("저장된 리뷰를 제출하지 못해 canonical fallback 코멘트로 대신합니다", "target", target.Reference(), "error", submitErr)
-	commentID, commentErr := w.publisher.CreateComment(ctx, target, prepared.Payload.FallbackBody)
-	if commentErr == nil {
-		return w.completeReviewPublication(ctx, runID, leaseToken, prepared.Marker, reviewworkflow.ReviewPublicationChannelComment, commentID, prepared.ExpiresAt)
-	}
-	published, reconcileErr = w.publisher.PublicationExists(ctx, target, prepared.Marker)
-	if reconcileErr == nil && published {
-		return w.completeReviewPublication(ctx, runID, leaseToken, prepared.Marker, reviewworkflow.ReviewPublicationChannelReconciled, 0, prepared.ExpiresAt)
-	}
-	return errors.Join(submitErr, commentErr, reconcileErr)
+	return w.publications.Publish(ctx, target, runID, leaseToken, prepared)
 }
 
 func (w *ReviewPublicationWorker) completeReviewPublication(ctx context.Context, runID uint64, leaseToken string, marker string, channel string, externalID int64, expiresAt time.Time) error {
-	completedAt := w.clock.Now()
-	return w.workflows.CompleteReviewPublication(ctx, runID, leaseToken, marker, channel, externalID, completedAt, expiresAt)
+	return w.publications.Complete(ctx, runID, leaseToken, marker, channel, externalID, expiresAt)
 }
 
 func (w *ReviewPublicationWorker) resolveUnverified(ctx context.Context, run reviewworkflow.Run, leaseToken string, cause error) error {
