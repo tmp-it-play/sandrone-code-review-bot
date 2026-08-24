@@ -397,6 +397,8 @@ Summary와 thread reply도 operation marker, lease, canonical result checkpoint�
 
 배포는 중단을 허용하는 bounded stop/remove → start → health 절차다. 구·신 worker를 동시에 운영하거나 이전 container를 자동 복구하지 않는다.
 
+전체 원격 배포는 Ubuntu runner의 2,100초 제한과 job 45분 제한 안에서 실행한다. 배포 서버에는 별도 timeout 도구나 watchdog process를 요구하지 않는다.
+
 1. main push가 gofmt, go test, go vet와 build gate를 통과한다.
 2. ARM64 commit-SHA image를 build하고 GHCR에 push한다.
 3. 배포 서버가 새 image를 먼저 pull한다.
