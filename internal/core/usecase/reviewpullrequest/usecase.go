@@ -756,25 +756,14 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	attribution := attributionOf(response)
 	style := review.Style{Emoji: config.Emoji, Tone: string(config.Tone)}
 	view := review.SummaryView{
-		Summary:                 placed.Summary,
-		Fallback:                placed.Fallback(),
-		InlineCount:             len(placed.Inline()),
-		Attribution:             attribution,
-		Style:                   style,
-		Trigger:                 task.Trigger,
-		Incremental:             incremental,
-		SkippedDup:              duplicates,
-		OmittedFindings:         omittedFindings,
-		VerificationUnavailable: verificationUnavailable,
-		Coverage: review.CoverageView{
-			Total:    coverageSummary.Total,
-			Reviewed: coverageSummary.Reviewed,
-			Failed:   coverageSummary.Failed,
-			Deferred: coverageSummary.Deferred,
-			Skipped:  coverageSummary.Skipped,
-			Pending:  coverageSummary.Pending,
-			Status:   string(runStatus),
-		},
+		Summary:         placed.Summary,
+		Fallback:        placed.Fallback(),
+		InlineCount:     len(placed.Inline()),
+		Attribution:     attribution,
+		Style:           style,
+		Trigger:         task.Trigger,
+		Incremental:     incremental,
+		OmittedFindings: omittedFindings,
 	}
 	heartbeatAt := u.deps.Clock.Now()
 	if leaseErr := u.deps.Workflows.RenewRun(ctx, run.ID, runLease, heartbeatAt, heartbeatAt.Add(reviewRunLease)); leaseErr != nil {
@@ -971,7 +960,7 @@ func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, task jo
 
 func (u *UseCase) fail(ctx context.Context, task job.ReviewJob, startedAt time.Time, message string, cause error, runID uint64, recordFailure bool, response llm.Response) error {
 	u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
-	if notice, announce := failureNotice(task.Attempt, task.FinalAttempt, message); announce {
+	if notice, announce := failureNotice(task.Attempt, task.FinalAttempt); announce {
 		u.announce(ctx, task.Target, notice)
 	}
 	if task.FinalAttempt && recordFailure {
@@ -986,12 +975,12 @@ func (u *UseCase) announce(ctx context.Context, target pullrequest.Target, notic
 	}
 }
 
-func failureNotice(attempt int, final bool, message string) (review.Notice, bool) {
+func failureNotice(attempt int, final bool) (review.Notice, bool) {
 	switch {
 	case final:
-		return review.Notice{Kind: review.NoticeFailed, Message: message + " 재시도했지만 해결되지 않아 중단합니다."}, true
+		return review.Notice{Kind: review.NoticeFailed, Message: "리뷰를 완료하지 못했습니다. 재시도했지만 해결되지 않아 중단합니다."}, true
 	case attempt == 0:
-		return review.Notice{Kind: review.NoticeRetrying, Message: message + " 잠시 후 다시 시도합니다."}, true
+		return review.Notice{Kind: review.NoticeRetrying, Message: "리뷰를 완료하지 못했습니다. 잠시 후 다시 시도합니다."}, true
 	default:
 		return review.Notice{}, false
 	}

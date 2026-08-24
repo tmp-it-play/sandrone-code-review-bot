@@ -37,14 +37,11 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 	if view.OmittedFindings > 0 {
 		fmt.Fprintf(&builder, "> 출력 크기 상한으로 우선순위가 낮은 지적 %d건을 생략했습니다.\n\n", view.OmittedFindings)
 	}
-	if view.VerificationUnavailable {
-		builder.WriteString("> 독립 검증을 완료하지 못해 diff 근거 검증을 통과한 결과만 게시했습니다. 이 실행은 부분 완료로 기록됩니다.\n\n")
-	}
 	if len(view.Summary.Files) > 0 {
 		builder.WriteString(r.fileTable(view.Summary.Files))
 		builder.WriteString("\n")
 	}
-	if view.Trigger != review.TriggerCommandSummary && view.InlineCount == 0 && len(view.Fallback) == 0 && !view.VerificationUnavailable {
+	if view.Trigger != review.TriggerCommandSummary && view.InlineCount == 0 && len(view.Fallback) == 0 {
 		builder.WriteString(prose.noFindings)
 		builder.WriteString("\n\n")
 	}

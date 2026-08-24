@@ -182,7 +182,7 @@ Coverage 상태:
 
 Complete는 모든 eligible coverage가 reviewed 또는 deep_reviewed일 때만 가능하다. 일부만 성공하면 partial, 성공한 coverage가 없으면 failed다. 분석 대상 denominator가 0이고 모든 제외 사유가 명시된 경우만 skipped다. Complete와 정상 zero-denominator skipped만 complete watermark를 전진시킨다.
 
-Coverage ledger와 total, reviewed, failed, deferred, skipped 같은 내부 카운터 및 다루지 못한 파일 목록은 상태 판정과 retry에만 사용하고 공개 Review 본문에는 표시하지 않는다.
+Coverage ledger, complete 또는 partial 같은 run 상태, independent verifier 가용성, total, reviewed, failed, deferred, skipped 같은 내부 카운터와 다루지 못한 파일 목록은 상태 판정과 retry에만 사용한다. 공개 Review projection에는 이 필드를 전달하지 않고 본문에도 표시하지 않는다. 외부 게시 경계는 배포 전에 저장된 canonical payload에서도 이 내부 상태 표현을 제거하며 실패 안내에는 내부 단계명을 사용하지 않는다.
 
 Complete는 eligible coverage의 분석 완료를 뜻하며 모든 candidate finding의 공개를 뜻하지 않는다. 분석을 끝낸 뒤 verifier와 publication의 25건 예산에서 제외된 하위 후보 수는 omitted로 표시하지만 coverage를 partial로 바꾸거나 complete watermark를 막지 않는다. 분석 coverage와 공개 코멘트 예산을 결합해 같은 코드를 반복 호출하지 않는다.
 
