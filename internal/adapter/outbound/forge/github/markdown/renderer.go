@@ -2,7 +2,6 @@ package markdown
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
@@ -39,7 +38,7 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 		fmt.Fprintf(&builder, "> 출력 크기 상한으로 우선순위가 낮은 지적 %d건을 생략했습니다.\n\n", view.OmittedFindings)
 	}
 	if view.VerificationUnavailable {
-		builder.WriteString("> 독립 검증을 완료하지 못해 후보 지적을 게시하지 않았습니다. 이 실행은 부분 완료로 기록됩니다.\n\n")
+		builder.WriteString("> 독립 검증을 완료하지 못해 diff 근거 검증을 통과한 결과만 게시했습니다. 이 실행은 부분 완료로 기록됩니다.\n\n")
 	}
 	if len(view.Summary.Files) > 0 {
 		builder.WriteString(r.fileTable(view.Summary.Files))
@@ -51,10 +50,6 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 	}
 	if len(view.Fallback) > 0 {
 		builder.WriteString(r.fallbackSection(view.Fallback, view.Style))
-		builder.WriteString("\n")
-	}
-	if len(view.Unreviewed) > 0 {
-		builder.WriteString(r.unreviewedSection(view.Unreviewed, prose))
 		builder.WriteString("\n")
 	}
 	builder.WriteString(r.footer(view))
@@ -211,50 +206,6 @@ func appendOccurrenceLocations(builder *strings.Builder, finding review.Finding)
 	if omitted > 0 {
 		fmt.Fprintf(builder, " 외 %d곳", omitted)
 	}
-}
-
-func (r Renderer) unreviewedSection(files []review.UnreviewedFile, prose reviewProse) string {
-	var builder strings.Builder
-	fmt.Fprintf(&builder, "<details>\n<summary>이번 리뷰에서 다루지 못한 파일 %d개</summary>\n\n", len(files))
-	builder.WriteString(prose.unreviewedFiles)
-	builder.WriteString("\n\n")
-	byReason := map[string]unreviewedReasonSummary{}
-	for _, file := range files {
-		summary := byReason[file.Reason]
-		summary.files++
-		summary.additions += file.Additions
-		summary.deletions += file.Deletions
-		byReason[file.Reason] = summary
-	}
-	reasons := make([]string, 0, len(byReason))
-	for reason := range byReason {
-		reasons = append(reasons, reason)
-	}
-	sort.Strings(reasons)
-	builder.WriteString("| 사유 | 파일 수 | 변경 |\n| --- | ---: | ---: |\n")
-	for _, reason := range reasons {
-		summary := byReason[reason]
-		fmt.Fprintf(&builder, "| %s | %d | +%d / -%d |\n", reason, summary.files, summary.additions, summary.deletions)
-	}
-	preview := len(files)
-	if preview > 12 {
-		preview = 12
-	}
-	if preview > 0 {
-		builder.WriteString("\n예시: ")
-		for index, file := range files[:preview] {
-			if index > 0 {
-				builder.WriteString(", ")
-			}
-			fmt.Fprintf(&builder, "`%s`", file.Path)
-		}
-		if len(files) > preview {
-			fmt.Fprintf(&builder, " 외 %d개", len(files)-preview)
-		}
-		builder.WriteString("\n")
-	}
-	builder.WriteString("\n</details>\n")
-	return builder.String()
 }
 
 func (r Renderer) footer(view review.SummaryView) string {

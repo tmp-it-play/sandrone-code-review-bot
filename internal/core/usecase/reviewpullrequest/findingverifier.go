@@ -57,26 +57,26 @@ func (u *UseCase) verifyFindings(ctx context.Context, runID uint64, runLease str
 		return findings, checkpointResponse, 0, false, false, nil
 	}
 	if request.ExternalCallBudget == nil || request.ExternalCallBudget.Remaining() == 0 {
-		u.deps.Logger.Warn("독립 finding verifier 호출 예산이 없어 후보를 게시하지 않습니다")
-		return nil, checkpointResponse, len(findings), false, true, nil
+		u.deps.Logger.Warn("독립 finding verifier 호출 예산이 없어 결정론적 검증 결과를 사용합니다")
+		return findings, checkpointResponse, 0, false, true, nil
 	}
 	response, err := u.deps.Completer.Complete(ctx, request, nil)
 	response.Content = u.deps.Masker.Mask(response.Content)
 	if err != nil {
-		u.deps.Logger.Warn("독립 finding verifier를 완료하지 못해 후보를 게시하지 않습니다", "error", u.deps.Masker.Mask(err.Error()))
+		u.deps.Logger.Warn("독립 finding verifier를 완료하지 못해 결정론적 검증 결과를 사용합니다", "error", u.deps.Masker.Mask(err.Error()))
 		aggregate, recordErr := u.recordVerificationAttempt(ctx, runID, runLease, inputHash, response)
-		return nil, aggregate, len(findings), true, true, recordErr
+		return findings, aggregate, 0, true, true, recordErr
 	}
 	if !response.Completed() {
-		u.deps.Logger.Warn("독립 finding verifier 응답이 완료되지 않아 후보를 게시하지 않습니다", "finish_reason", response.FinishReason)
+		u.deps.Logger.Warn("독립 finding verifier 응답이 완료되지 않아 결정론적 검증 결과를 사용합니다", "finish_reason", response.FinishReason)
 		aggregate, recordErr := u.recordVerificationAttempt(ctx, runID, runLease, inputHash, response)
-		return nil, aggregate, len(findings), true, true, recordErr
+		return findings, aggregate, 0, true, true, recordErr
 	}
 	decisions, err := (findingverification.Parser{}).Parse(response.Content, findings)
 	if err != nil {
-		u.deps.Logger.Warn("독립 finding verifier 응답이 유효하지 않아 후보를 게시하지 않습니다", "error", err)
+		u.deps.Logger.Warn("독립 finding verifier 응답이 유효하지 않아 결정론적 검증 결과를 사용합니다", "error", err)
 		aggregate, recordErr := u.recordVerificationAttempt(ctx, runID, runLease, inputHash, response)
-		return nil, aggregate, len(findings), true, true, recordErr
+		return findings, aggregate, 0, true, true, recordErr
 	}
 	supported := decisions.Supported(findings)
 	supportedIDs, err := verificationOccurrenceIDs(supported)

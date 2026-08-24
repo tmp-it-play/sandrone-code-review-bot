@@ -376,6 +376,7 @@ func (r *ReviewWorkflowRepository) StartUnit(ctx context.Context, runID uint64, 
 			Where("status IN ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?))", []string{
 				string(reviewworkflow.UnitStatusPending),
 				string(reviewworkflow.UnitStatusFailed),
+				string(reviewworkflow.UnitStatusDeferred),
 			}, string(reviewworkflow.UnitStatusRunning), leaseNow).
 			Updates(updates)
 		if result.Error != nil {
@@ -385,10 +386,14 @@ func (r *ReviewWorkflowRepository) StartUnit(ctx context.Context, runID uint64, 
 			return errors.New("unit을 실행 가능한 상태로 전이하지 못했습니다")
 		}
 		return transaction.Model(&model.CoverageItem{}).
-			Where("review_run_id = ? AND review_unit_id = ? AND status = ?", runID, unit.ID, string(reviewworkflow.CoverageStatusFailed)).Updates(map[string]any{
-			"status":      string(reviewworkflow.CoverageStatusPlanned),
-			"reviewed_at": nil,
-		}).Error
+			Where("review_run_id = ? AND review_unit_id = ? AND status IN ?", runID, unit.ID, []string{
+				string(reviewworkflow.CoverageStatusFailed),
+				string(reviewworkflow.CoverageStatusDeferred),
+			}).Updates(map[string]any{
+				"status":      string(reviewworkflow.CoverageStatusPlanned),
+				"reason":      "",
+				"reviewed_at": nil,
+			}).Error
 	})
 	if err != nil {
 		return reviewworkflow.UnitClaim{}, fmt.Errorf("리뷰 unit을 시작하지 못했습니다: %w", err)
@@ -453,13 +458,19 @@ func (r *ReviewWorkflowRepository) FinishUnit(ctx context.Context, runID uint64,
 		if result.Status == reviewworkflow.UnitStatusSucceeded {
 			coverageStatus = reviewworkflow.CoverageStatusReviewed
 			reviewedAt = &result.FinishedAt
+		} else if result.Status == reviewworkflow.UnitStatusDeferred {
+			coverageStatus = reviewworkflow.CoverageStatusDeferred
+		}
+		coverageUpdates := map[string]any{
+			"status":      string(coverageStatus),
+			"reviewed_at": reviewedAt,
+		}
+		if result.Status == reviewworkflow.UnitStatusDeferred {
+			coverageUpdates["reason"] = "call_budget_exhausted"
 		}
 		return transaction.Model(&model.CoverageItem{}).
 			Where("review_run_id = ? AND review_unit_id = ? AND status = ?", runID, unit.ID, string(reviewworkflow.CoverageStatusPlanned)).
-			Updates(map[string]any{
-				"status":      string(coverageStatus),
-				"reviewed_at": reviewedAt,
-			}).Error
+			Updates(coverageUpdates).Error
 	})
 	if err != nil {
 		return fmt.Errorf("리뷰 unit 결과를 저장하지 못했습니다: %w", err)

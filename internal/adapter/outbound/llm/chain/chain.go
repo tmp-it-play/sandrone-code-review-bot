@@ -136,6 +136,11 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			continue
 		}
 		usedBefore := request.ExternalCallBudget.Used()
+		if reserveErr := request.ExternalCallBudget.Reserve(); reserveErr != nil {
+			lastResponse.Usage = usage
+			lastResponse.ToolExecutions = toolExecutions
+			return lastResponse, reserveErr
+		}
 		response, observedUsage, attemptErr := c.attemptWithRetry(ctx, candidate, request, executor)
 		invoked := request.ExternalCallBudget.Used() > usedBefore
 		usage = usage.Add(response.Usage)
@@ -168,11 +173,15 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			c.observe(ctx, candidate, response.Model, request.TaskRole, "succeeded", 0, observedUsage)
 			return response, nil
 		}
-		if errors.Is(attemptErr, ErrExternalCallBudgetExhausted) {
+		if errors.Is(attemptErr, llm.ErrExternalCallBudgetExhausted) || errors.Is(attemptErr, llm.ErrExternalCallBudgetUnavailable) {
 			lastResponse.Usage = usage
 			lastResponse.ToolExecutions = toolExecutions
 			if invoked {
-				c.observe(ctx, candidate, candidate.Model(), request.TaskRole, "budget_exhausted", 0, observedUsage)
+				budgetOutcome := "budget_exhausted"
+				if errors.Is(attemptErr, llm.ErrExternalCallBudgetUnavailable) {
+					budgetOutcome = "budget_unavailable"
+				}
+				c.observe(ctx, candidate, candidate.Model(), request.TaskRole, budgetOutcome, 0, observedUsage)
 			}
 			return lastResponse, attemptErr
 		}
@@ -295,9 +304,6 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 			ToolCalls: response.ToolCalls,
 		})
 		for _, call := range response.ToolCalls {
-			if !request.ExternalCallBudget.Take() {
-				return llm.Response{Usage: accumulated, ToolExecutions: toolExecutions}, ErrExternalCallBudgetExhausted
-			}
 			toolExecutions++
 			result, execErr := executor.Execute(ctx, call)
 			if execErr != nil {
@@ -335,9 +341,6 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 }
 
 func (c *Chain) invoke(ctx context.Context, candidate outbound.Provider, request llm.Request) (llm.Response, error) {
-	if !request.ExternalCallBudget.Take() {
-		return llm.Response{}, ErrExternalCallBudgetExhausted
-	}
 	return candidate.Complete(ctx, request)
 }
 

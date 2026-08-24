@@ -1,54 +1,92 @@
 package llm
 
 import (
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 )
 
+var ErrExternalCallBudgetExhausted = errors.New("공유 외부 호출 예산을 모두 사용했습니다")
+
+var ErrExternalCallBudgetUnavailable = errors.New("공유 외부 호출 예산을 예약하지 못했습니다")
+
 type ExternalCallBudget struct {
-	limit   int64
-	used    atomic.Int64
-	reserve func() bool
-	mutex   sync.Mutex
+	limit     int64
+	takeLimit int64
+	used      atomic.Int64
+	reserve   func() error
+	mutex     sync.Mutex
 }
 
 func NewExternalCallBudget(limit int) *ExternalCallBudget {
 	if limit < 1 {
 		limit = 1
 	}
-	return &ExternalCallBudget{limit: int64(limit)}
+	return &ExternalCallBudget{limit: int64(limit), takeLimit: int64(limit)}
 }
 
 func NewDurableExternalCallBudget(limit int, reserve func() bool) *ExternalCallBudget {
+	return NewScopedDurableExternalCallBudget(limit, 0, limit, func() error {
+		if reserve == nil || !reserve() {
+			return ErrExternalCallBudgetExhausted
+		}
+		return nil
+	})
+}
+
+func NewScopedDurableExternalCallBudget(limit int, used int, takeLimit int, reserve func() error) *ExternalCallBudget {
 	budget := NewExternalCallBudget(limit)
+	if used < 0 {
+		used = 0
+	}
+	if used > budget.Limit() {
+		used = budget.Limit()
+	}
+	if takeLimit < used {
+		takeLimit = used
+	}
+	if takeLimit > budget.Limit() {
+		takeLimit = budget.Limit()
+	}
+	budget.takeLimit = int64(takeLimit)
+	budget.used.Store(int64(used))
 	budget.reserve = reserve
 	return budget
 }
 
 func (b *ExternalCallBudget) Take() bool {
+	return b.Reserve() == nil
+}
+
+func (b *ExternalCallBudget) Reserve() error {
 	if b == nil {
-		return false
+		return ErrExternalCallBudgetExhausted
 	}
 	if b.reserve != nil {
 		b.mutex.Lock()
 		defer b.mutex.Unlock()
 		used := b.used.Load()
-		if used >= b.limit {
-			return false
+		if used >= b.takeLimit {
+			return ErrExternalCallBudgetExhausted
 		}
-		if !b.reserve() {
-			return false
+		if err := b.reserve(); err != nil {
+			if errors.Is(err, ErrExternalCallBudgetExhausted) {
+				b.used.Store(b.takeLimit)
+				return ErrExternalCallBudgetExhausted
+			}
+			return fmt.Errorf("%w: %w", ErrExternalCallBudgetUnavailable, err)
 		}
 		b.used.Store(used + 1)
-		return true
+		return nil
 	}
 	for {
 		used := b.used.Load()
-		if used >= b.limit {
-			return false
+		if used >= b.takeLimit {
+			return ErrExternalCallBudgetExhausted
 		}
 		if b.used.CompareAndSwap(used, used+1) {
-			return true
+			return nil
 		}
 	}
 }
@@ -68,7 +106,10 @@ func (b *ExternalCallBudget) Used() int {
 }
 
 func (b *ExternalCallBudget) Remaining() int {
-	remaining := b.Limit() - b.Used()
+	if b == nil {
+		return 0
+	}
+	remaining := int(b.takeLimit) - b.Used()
 	if remaining < 0 {
 		return 0
 	}
