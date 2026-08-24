@@ -17,13 +17,14 @@ import (
 )
 
 type summaryPromptPlan struct {
-	Messages     []llm.Message
-	Unreviewed   []review.UnreviewedFile
-	Coverage     review.CoverageView
-	ResultPolicy string
+	Messages      []llm.Message
+	RequiredPaths []string
+	Unreviewed    []review.UnreviewedFile
+	Coverage      review.CoverageView
+	ResultPolicy  string
 }
 
-func (u *UseCase) buildSummaryPromptPlan(request pullrequest.PullRequest, selected []pullrequest.ChangedFile, chosen selection.Selection, instructions instruction.Collection, config setting.RepoConfig, extra string, completionRequest llm.Request) (summaryPromptPlan, error) {
+func (u *UseCase) buildSummaryPromptPlan(request pullrequest.PullRequest, selected []pullrequest.ChangedFile, chosen selection.Selection, instructions instruction.Collection, config setting.RepoConfig, extra string, completionRequest llm.Request, paths *summaryPromptPathMap) (summaryPromptPlan, error) {
 	budget := u.deps.Completer.PromptBudgetFor(completionRequest)
 	if budget <= 0 {
 		return summaryPromptPlan{}, fmt.Errorf("요약에 사용할 수 있는 LLM 입력 한도가 없습니다")
@@ -31,7 +32,7 @@ func (u *UseCase) buildSummaryPromptPlan(request pullrequest.PullRequest, select
 	if config.MaxPromptChars > 0 && config.MaxPromptChars < budget {
 		budget = config.MaxPromptChars
 	}
-	extra, err := u.fitSummaryExtra(request, config, extra, budget)
+	extra, err := u.fitSummaryExtra(request, config, extra, budget, paths)
 	if err != nil {
 		return summaryPromptPlan{}, err
 	}
@@ -39,7 +40,7 @@ func (u *UseCase) buildSummaryPromptPlan(request pullrequest.PullRequest, select
 	states := map[string]string{}
 	for _, file := range selected {
 		candidate := append(append([]pullrequest.ChangedFile{}, included...), file)
-		if u.summaryMessagesFit(request, candidate, instruction.Collection{}, config, extra, budget) {
+		if u.summaryMessagesFit(request, candidate, instruction.Collection{}, config, extra, budget, paths) {
 			included = candidate
 			if file.PatchTruncated {
 				states[file.Path] = "파일별 입력 한도로 diff 일부 생략"
@@ -48,7 +49,7 @@ func (u *UseCase) buildSummaryPromptPlan(request pullrequest.PullRequest, select
 			}
 			continue
 		}
-		partial, fits := u.fitSummaryFile(request, included, file, config, extra, budget)
+		partial, fits := u.fitSummaryFile(request, included, file, config, extra, budget, paths)
 		if fits {
 			included = append(included, partial)
 			states[file.Path] = "전체 입력 한도로 diff 일부 생략"
@@ -62,12 +63,16 @@ func (u *UseCase) buildSummaryPromptPlan(request pullrequest.PullRequest, select
 			states[file.Path] = "전체 입력 한도로 파일 diff 생략"
 		}
 	}
-	fittedInstructions := u.fitSummaryInstructions(request, included, instructions, config, extra, budget)
-	messages := u.summaryMessages(request, included, fittedInstructions, config, extra)
+	fittedInstructions := u.fitSummaryInstructions(request, included, instructions, config, extra, budget, paths)
+	messages := u.summaryMessages(request, included, fittedInstructions, config, extra, paths)
 	if llm.MessagesSize(messages) > budget {
 		return summaryPromptPlan{}, fmt.Errorf("요약 프롬프트가 입력 한도 %d자를 넘었습니다", budget)
 	}
-	plan := summaryPromptPlan{Messages: messages}
+	plan := summaryPromptPlan{Messages: messages, RequiredPaths: make([]string, 0, len(included))}
+	for _, file := range included {
+		plan.RequiredPaths = append(plan.RequiredPaths, paths.PromptPath(file.Path))
+	}
+	sort.Strings(plan.RequiredPaths)
 	plan.Coverage.Total = len(selected) + len(chosen.Skipped) + len(chosen.Excluded)
 	for _, file := range selected {
 		reason := states[file.Path]
@@ -107,11 +112,11 @@ func (u *UseCase) buildSummaryPromptPlan(request pullrequest.PullRequest, select
 	return plan, nil
 }
 
-func (u *UseCase) summaryMessages(request pullrequest.PullRequest, files []pullrequest.ChangedFile, instructions instruction.Collection, config setting.RepoConfig, extra string) []llm.Message {
+func (u *UseCase) summaryMessages(request pullrequest.PullRequest, files []pullrequest.ChangedFile, instructions instruction.Collection, config setting.RepoConfig, extra string, paths *summaryPromptPathMap) []llm.Message {
 	messages := prompt.SummaryPrompt{
 		Context: prompt.Context{
 			PullRequest:  request,
-			Files:        files,
+			Files:        paths.PromptFiles(files, u.deps.Masker.Mask),
 			Instructions: instructions,
 			Config:       config,
 		},
@@ -120,15 +125,15 @@ func (u *UseCase) summaryMessages(request pullrequest.PullRequest, files []pullr
 	return llm.MaskMessages(messages, u.deps.Masker.Mask)
 }
 
-func (u *UseCase) summaryMessagesFit(request pullrequest.PullRequest, files []pullrequest.ChangedFile, instructions instruction.Collection, config setting.RepoConfig, extra string, budget int) bool {
-	return llm.MessagesSize(u.summaryMessages(request, files, instructions, config, extra)) <= budget
+func (u *UseCase) summaryMessagesFit(request pullrequest.PullRequest, files []pullrequest.ChangedFile, instructions instruction.Collection, config setting.RepoConfig, extra string, budget int, paths *summaryPromptPathMap) bool {
+	return llm.MessagesSize(u.summaryMessages(request, files, instructions, config, extra, paths)) <= budget
 }
 
-func (u *UseCase) fitSummaryExtra(request pullrequest.PullRequest, config setting.RepoConfig, extra string, budget int) (string, error) {
-	if u.summaryMessagesFit(request, nil, instruction.Collection{}, config, extra, budget) {
+func (u *UseCase) fitSummaryExtra(request pullrequest.PullRequest, config setting.RepoConfig, extra string, budget int, paths *summaryPromptPathMap) (string, error) {
+	if u.summaryMessagesFit(request, nil, instruction.Collection{}, config, extra, budget, paths) {
 		return extra, nil
 	}
-	if !u.summaryMessagesFit(request, nil, instruction.Collection{}, config, "", budget) {
+	if !u.summaryMessagesFit(request, nil, instruction.Collection{}, config, "", budget, paths) {
 		return "", fmt.Errorf("PR 기본 정보가 요약 입력 한도 %d자를 넘었습니다", budget)
 	}
 	low := 0
@@ -140,7 +145,7 @@ func (u *UseCase) fitSummaryExtra(request pullrequest.PullRequest, config settin
 		if candidate != "" {
 			candidate += "\n[추가 요청 일부 생략]"
 		}
-		if u.summaryMessagesFit(request, nil, instruction.Collection{}, config, candidate, budget) {
+		if u.summaryMessagesFit(request, nil, instruction.Collection{}, config, candidate, budget, paths) {
 			best = candidate
 			low = middle + 1
 		} else {
@@ -150,7 +155,7 @@ func (u *UseCase) fitSummaryExtra(request pullrequest.PullRequest, config settin
 	return best, nil
 }
 
-func (u *UseCase) fitSummaryFile(request pullrequest.PullRequest, included []pullrequest.ChangedFile, file pullrequest.ChangedFile, config setting.RepoConfig, extra string, budget int) (pullrequest.ChangedFile, bool) {
+func (u *UseCase) fitSummaryFile(request pullrequest.PullRequest, included []pullrequest.ChangedFile, file pullrequest.ChangedFile, config setting.RepoConfig, extra string, budget int, paths *summaryPromptPathMap) (pullrequest.ChangedFile, bool) {
 	const notice = "\n[전체 입력 한도로 diff 이후 내용 생략]"
 	low := 0
 	high := len(file.Patch)
@@ -165,7 +170,7 @@ func (u *UseCase) fitSummaryFile(request pullrequest.PullRequest, included []pul
 		}
 		candidate.PatchTruncated = true
 		files := append(append([]pullrequest.ChangedFile{}, included...), candidate)
-		if u.summaryMessagesFit(request, files, instruction.Collection{}, config, extra, budget) {
+		if u.summaryMessagesFit(request, files, instruction.Collection{}, config, extra, budget, paths) {
 			best = candidate
 			found = candidate.Patch != ""
 			low = middle + 1
@@ -176,8 +181,8 @@ func (u *UseCase) fitSummaryFile(request pullrequest.PullRequest, included []pul
 	return best, found
 }
 
-func (u *UseCase) fitSummaryInstructions(request pullrequest.PullRequest, files []pullrequest.ChangedFile, source instruction.Collection, config setting.RepoConfig, extra string, budget int) instruction.Collection {
-	if u.summaryMessagesFit(request, files, source, config, extra, budget) {
+func (u *UseCase) fitSummaryInstructions(request pullrequest.PullRequest, files []pullrequest.ChangedFile, source instruction.Collection, config setting.RepoConfig, extra string, budget int, paths *summaryPromptPathMap) instruction.Collection {
+	if u.summaryMessagesFit(request, files, source, config, extra, budget, paths) {
 		return source
 	}
 	result := instruction.Collection{}
@@ -185,7 +190,7 @@ func (u *UseCase) fitSummaryInstructions(request pullrequest.PullRequest, files 
 	for index, document := range source.Documents {
 		candidate := result
 		candidate.Documents = append(append([]instruction.Document{}, result.Documents...), document)
-		if u.summaryMessagesFit(request, files, candidate, config, extra, budget) {
+		if u.summaryMessagesFit(request, files, candidate, config, extra, budget, paths) {
 			result = candidate
 			continue
 		}
@@ -200,7 +205,7 @@ func (u *UseCase) fitSummaryInstructions(request pullrequest.PullRequest, files 
 			partial.Truncated = true
 			candidate = result
 			candidate.Documents = append(append([]instruction.Document{}, result.Documents...), partial)
-			if partial.Content != "" && u.summaryMessagesFit(request, files, candidate, config, extra, budget) {
+			if partial.Content != "" && u.summaryMessagesFit(request, files, candidate, config, extra, budget, paths) {
 				best = partial
 				found = true
 				low = middle + 1
@@ -219,7 +224,7 @@ func (u *UseCase) fitSummaryInstructions(request pullrequest.PullRequest, files 
 	for _, path := range omitted {
 		candidate := result
 		candidate.Omitted = append(append([]string{}, result.Omitted...), path)
-		if !u.summaryMessagesFit(request, files, candidate, config, extra, budget) {
+		if !u.summaryMessagesFit(request, files, candidate, config, extra, budget, paths) {
 			break
 		}
 		result = candidate

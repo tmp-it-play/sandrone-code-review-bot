@@ -127,6 +127,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		return nil
 	}
 	selected := u.trim(chosen.Files, config)
+	pathMap := newSummaryPromptPathMap(selected, u.deps.Masker.Mask)
 
 	instructions, err := u.deps.Settings.Instructions(ctx, target, config)
 	if err != nil {
@@ -152,10 +153,11 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		RequireCompletePrompt: true,
 		ResponseValidation:    llm.ResponseValidation{Policy: llm.ResponseValidationSummaryResult},
 	}
-	plan, err := u.buildSummaryPromptPlan(request, selected, chosen, instructions, config, task.Instruction, completionRequest)
+	plan, err := u.buildSummaryPromptPlan(request, selected, chosen, instructions, config, task.Instruction, completionRequest, pathMap)
 	if err != nil {
 		return u.fail(ctx, task, startedAt, "요약 모델 입력을 안전한 크기로 만들지 못했습니다", err)
 	}
+	completionRequest.ResponseValidation.RequiredPaths = plan.RequiredPaths
 	callBudget := llm.NewDurableExternalCallBudget(maxCalls, func() bool {
 		reserved, reserveErr := u.deps.Publications.ReserveSummaryExternalCall(ctx, target, task.OperationKey, publicationLease, maxCalls)
 		if reserveErr != nil {
@@ -206,7 +208,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 			resultErr := errors.Join(errors.New("빈 요약"), recordErr)
 			return u.fail(ctx, task, startedAt, "모델이 요약을 만들지 못했습니다", resultErr, response)
 		}
-		summary = result.Summary
+		summary = pathMap.RestoreSummary(result.Summary)
 		canonicalContent, canonicalErr := canonicalSummaryContent(summary)
 		if canonicalErr != nil {
 			var recordErr error

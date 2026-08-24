@@ -15,7 +15,7 @@ func validateSemanticResponse(validation llm.ResponseValidation, content string)
 	case llm.ResponseValidationReviewResult:
 		err = (parsing.ReviewResponseValidator{RequiredPaths: validation.RequiredPaths}).Validate(content)
 	case llm.ResponseValidationSummaryResult:
-		err = (parsing.SummaryResponseValidator{}).Validate(content)
+		err = (parsing.SummaryResponseValidator{RequiredPaths: validation.RequiredPaths}).Validate(content)
 	default:
 		err = fmt.Errorf("알 수 없는 결과 검증 정책: %s", validation.Policy)
 	}
