@@ -18,7 +18,6 @@ on:
       - .agents/**
       - .github/ISSUE_TEMPLATE/**
       - .github/PULL_REQUEST_TEMPLATE/**
-  workflow_dispatch:
 
 concurrency:
   group: cd-${{ github.ref }}
@@ -26,7 +25,6 @@ concurrency:
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
-  PACKAGE_NAME: sandrone-code-review-bot
   CONTAINER_NAME: sandrone
   DOCKER_NETWORK: readygsm-net
   HOST_PORT: "10105"
@@ -35,9 +33,38 @@ env:
   DASHBOARD_USERNAME: admin
 
 jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./cmd/sandrone
+
   deploy:
     name: Build and deploy
+    needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -46,48 +73,48 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Check required secrets
-        id: preflight
         env:
           APP_ID: ${{ secrets.SANDRONE_APP_ID }}
           APP_PRIVATE_KEY: ${{ secrets.SANDRONE_APP_PRIVATE_KEY }}
           WEBHOOK_SECRET: ${{ secrets.SANDRONE_WEBHOOK_SECRET }}
           MYSQL_DSN: ${{ secrets.SANDRONE_MYSQL_DSN }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+          DASHBOARD_SESSION_SECRET: ${{ secrets.DASHBOARD_SESSION_SECRET }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          missing=""
-          for name in APP_ID APP_PRIVATE_KEY WEBHOOK_SECRET MYSQL_DSN DEPLOY_HOST DEPLOY_PASSWORD; do
-            eval "value=\${$name:-}"
-            if [ -z "$value" ]; then
-              missing="$missing $name"
+          set -euo pipefail
+          missing=()
+          required=(APP_ID APP_PRIVATE_KEY WEBHOOK_SECRET MYSQL_DSN DEPLOY_HOST DEPLOY_USER DEPLOY_PASSWORD DASHBOARD_PASSWORD DASHBOARD_SESSION_SECRET GEMINI_API_KEY GROQ_API_KEY OPENROUTER_API_KEY NVIDIA_API_KEY MISTRAL_API_KEY CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID)
+          for name in "${required[@]}"; do
+            value="${!name:-}"
+            if [ -z "${value//[[:space:]]/}" ]; then
+              missing+=("$name")
             fi
           done
-          if [ -z "${GEMINI_API_KEY:-}${GROQ_API_KEY:-}${OPENROUTER_API_KEY:-}${NVIDIA_API_KEY:-}" ]; then
-            missing="$missing (at-least-one-LLM-API-key)"
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf '::error::Missing required GitHub Actions secrets: %s\n' "${missing[*]}"
+            exit 1
           fi
-          if [ -n "$missing" ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Skipping deploy, missing secrets:$missing"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
+          echo "All required deployment secrets are configured"
 
       - name: Set up QEMU
-        if: steps.preflight.outputs.ready == 'true'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
 
       - name: Set up Buildx
-        if: steps.preflight.outputs.ready == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to ghcr.io
-        if: steps.preflight.outputs.ready == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -95,7 +122,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
-        if: steps.preflight.outputs.ready == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -107,7 +133,6 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Generate deploy env files
-        if: steps.preflight.outputs.ready == 'true'
         env:
           APP_ID: ${{ secrets.SANDRONE_APP_ID }}
           APP_PRIVATE_KEY: ${{ secrets.SANDRONE_APP_PRIVATE_KEY }}
@@ -118,6 +143,10 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PRIVATE_CODE_PROVIDERS: ${{ vars.SANDRONE_PRIVATE_CODE_PROVIDERS }}
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
           DASHBOARD_SESSION_SECRET: ${{ secrets.DASHBOARD_SESSION_SECRET }}
           METRICS_TOKEN: ${{ secrets.SANDRONE_METRICS_TOKEN }}
@@ -127,6 +156,10 @@ jobs:
           umask 077
 
           write() {
+            if [[ "${2:-}" == *$'\n'* || "${2:-}" == *$'\r'* ]]; then
+              printf '::error::%s must be a single-line value\n' "$1"
+              exit 1
+            fi
             [ -n "${2:-}" ] && printf '%s=%s\n' "$1" "$2" >> deploy/sandrone.env || true
           }
 
@@ -139,10 +172,21 @@ jobs:
           write MYSQL_DSN "$MYSQL_DSN"
           write REDIS_ADDR "$REDIS_ADDR"
           write REDIS_PASSWORD "$REDIS_PASSWORD"
+          write REDIS_DB "0"
+          write SANDRONE_WORKER_CONCURRENCY "2"
           write GEMINI_API_KEY "$GEMINI_API_KEY"
           write GROQ_API_KEY "$GROQ_API_KEY"
           write OPENROUTER_API_KEY "$OPENROUTER_API_KEY"
           write NVIDIA_API_KEY "$NVIDIA_API_KEY"
+          write MISTRAL_API_KEY "$MISTRAL_API_KEY"
+          write CLOUDFLARE_API_TOKEN "$CLOUDFLARE_API_TOKEN"
+          write CLOUDFLARE_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID"
+          write SANDRONE_PRIVATE_CODE_PROVIDERS "$PRIVATE_CODE_PROVIDERS"
+          write SANDRONE_PROVIDER_COOLDOWN "15m"
+          write SANDRONE_REQUEST_TIMEOUT "5m"
+          write SANDRONE_LLM_MAX_CALLS_PER_OPERATION "12"
+          write SANDRONE_REVIEW_RETENTION "4320h"
+          write SANDRONE_DELIVERY_RETENTION "96h"
           write DASHBOARD_USERNAME "$DASHBOARD_USERNAME"
           write DASHBOARD_PASSWORD "$DASHBOARD_PASSWORD"
           write DASHBOARD_SESSION_SECRET "$DASHBOARD_SESSION_SECRET"
@@ -156,41 +200,61 @@ jobs:
             printf 'DOCKER_NETWORK=%s\n' "$DOCKER_NETWORK"
             printf 'HOST_PORT=%s\n' "$HOST_PORT"
             printf 'BASE_PATH=%s\n' "$BASE_PATH"
+            printf 'STOP_TIMEOUT=%s\n' "180"
             printf 'GHCR_USER=%s\n' "$GITHUB_ACTOR"
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } > deploy/deploy.env
 
           echo "Wrote $(wc -l < deploy/sandrone.env) lines to deploy/sandrone.env"
 
+      - name: Install SSH password client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sshpass
+
       - name: Deploy to server
-        if: steps.preflight.outputs.ready == 'true'
-        uses: 8G4B/GSM-SV-Deploy@v1.2.1
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          port: '22'
-          user: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
-          source_path: deploy
-          target_path: /tmp/sandrone-deploy
-          deployspec_path: deploy/deployspec.yml
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          SSHPASS: ${{ secrets.DEPLOY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          remote_script='set -euo pipefail
+          deploy_root=/tmp/sandrone-deploy
+          cleanup() {
+            status="$?"
+            trap - EXIT HUP INT TERM
+            if [ "$deploy_root" = "/tmp/sandrone-deploy" ]; then
+              rm -rf -- "$deploy_root"
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap "exit 124" HUP INT TERM
+          if [ "$deploy_root" != "/tmp/sandrone-deploy" ]; then
+            exit 1
+          fi
+          rm -rf -- "$deploy_root"
+          umask 077
+          mkdir -m 0700 -- "$deploy_root"
+          tar -xzf - -C "$deploy_root"
+          chmod 0700 "$deploy_root"
+          chmod 0755 "$deploy_root"/scripts/*.sh
+          chmod 0600 "$deploy_root"/*.env
+          bash "$deploy_root/scripts/pull_image.sh"
+          bash "$deploy_root/scripts/start_application.sh"'
+          encoded_script="$(printf '%s' "$remote_script" | base64 -w 0)"
+          tar -C deploy -czf - . | timeout --signal=TERM --kill-after=30s 2100s sshpass -e ssh \
+            -p 22 \
+            -o BatchMode=no \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=3 \
+            -o StrictHostKeyChecking=accept-new \
+            -o "UserKnownHostsFile=$RUNNER_TEMP/sandrone-known-hosts" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "bash -c \"\$(printf %s '$encoded_script' | base64 -d)\""
 
       - name: Remove local env files
         if: always()
         run: rm -f deploy/sandrone.env deploy/deploy.env
-
-      - name: Delete ghcr package
-        if: always() && steps.preflight.outputs.ready == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GHCR_CLEANUP_TOKEN }}
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::warning::GHCR_CLEANUP_TOKEN is not set, leaving the ghcr package in place"
-            exit 0
-          fi
-          if gh api --method DELETE "/orgs/${OWNER}/packages/container/${PACKAGE_NAME}" --silent; then
-            echo "Deleted the ghcr package"
-          else
-            echo "::warning::Failed to delete the ghcr package"
-          fi
