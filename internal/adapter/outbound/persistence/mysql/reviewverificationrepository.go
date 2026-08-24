@@ -172,6 +172,10 @@ func verificationCheckpointFromEntry(entry model.ReviewVerification, supported [
 	if entry.ResultCompletedAt != nil {
 		completedAt = *entry.ResultCompletedAt
 	}
+	finishedAt := time.Time{}
+	if entry.FinishedAt != nil {
+		finishedAt = *entry.FinishedAt
+	}
 	return reviewworkflow.VerificationCheckpoint{
 		RunID:                  entry.ReviewRunID,
 		InputHash:              entry.InputHash,
@@ -190,7 +194,7 @@ func verificationCheckpointFromEntry(entry model.ReviewVerification, supported [
 		LastAttemptInputHash: entry.LastAttemptInputHash,
 		LastAttemptSucceeded: entry.LastAttemptSucceeded,
 		CompletedAt:          completedAt,
-		FinishedAt:           entry.FinishedAt,
+		FinishedAt:           finishedAt,
 	}
 }
 

@@ -20,7 +20,7 @@ type ReviewVerification struct {
 	LastAttemptInputHash       string `gorm:"size:64;not null;default:''"`
 	LastAttemptSucceeded       bool   `gorm:"not null;default:false"`
 	ResultCompletedAt          *time.Time
-	FinishedAt                 time.Time
+	FinishedAt                 *time.Time
 	CreatedAt                  time.Time
 	UpdatedAt                  time.Time
 }
