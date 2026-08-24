@@ -119,7 +119,7 @@ func NewApplication(config Config) (*Application, error) {
 	)
 
 	reviews := mysql.NewReviewRepository(database)
-	reviewWorkflows := mysql.NewReviewWorkflowRepository(database)
+	reviewRuns := mysql.NewReviewRunStore(database)
 	reviewPublicationStore := mysql.NewReviewPublicationStore(database)
 	reviewExecutionStore := mysql.NewReviewExecutionStore(database)
 	reviewVerificationStore := mysql.NewReviewVerificationStore(database)
@@ -150,7 +150,7 @@ func NewApplication(config Config) (*Application, error) {
 		Reactions:    reactions,
 		Renderer:     renderer,
 		Reviews:      reviews,
-		Runs:         reviewWorkflows,
+		Runs:         reviewRuns,
 		Execution:    reviewExecutionStore,
 		Verification: reviewVerificationStore,
 		Publications: reviewPublicationStore,
@@ -163,7 +163,7 @@ func NewApplication(config Config) (*Application, error) {
 		LLMMaxCalls:  config.LLMMaxCalls,
 	})
 	reviewRetention := maintenance.NewReviewRetentionWorker(reviewRetentionRepository, usageRepository, clock, logger, config.ReviewRetention)
-	reviewPublication := maintenance.NewReviewPublicationWorker(reviewWorkflows, reviewPublicationStore, reviewPublicationCandidates, publicationInvalidations, pullRequests, publisher, reviews, clock, logger, config.ReviewRetention)
+	reviewPublication := maintenance.NewReviewPublicationWorker(reviewRuns, reviewPublicationStore, reviewPublicationCandidates, publicationInvalidations, pullRequests, publisher, reviews, clock, logger, config.ReviewRetention)
 	occurrenceBootstrap := maintenance.NewFindingOccurrenceBootstrapWorker(occurrenceBootstrapRepository, logger)
 	summaryUseCase := summarizepullrequest.New(summarizepullrequest.Dependencies{
 		Source:       pullRequests,

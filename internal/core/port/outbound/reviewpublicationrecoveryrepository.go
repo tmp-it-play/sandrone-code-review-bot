@@ -1,8 +1,0 @@
-package outbound
-
-type ReviewPublicationRecoveryRepository interface {
-	ReviewRunLifecycleRepository
-	ReviewPublicationLifecycleRepository
-	ReviewPublicationCandidateRepository
-	ReviewPublicationInvalidationRepository
-}
