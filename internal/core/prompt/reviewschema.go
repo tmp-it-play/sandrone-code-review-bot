@@ -1,12 +1,18 @@
 package prompt
 
-const agenticReviewSchema = `출력은 아래 JSON 하나만 낸다. 코드 블록 표시, 인사, 감탄, 설명을 JSON 밖에 덧붙이지 않는다.
+func agenticReviewSchema(includeFileNotes bool) string {
+	files := ""
+	fileRule := ""
+	if includeFileNotes {
+		files = ",\n    \"files\": [{\"path\": \"파일 경로\", \"note\": \"이 파일에서 무엇이 바뀌었는지 한 문장\"}]"
+		fileRule = "\n변경 파일이 8개 이하이므로 summary.files에 이번 요청의 모든 파일 경로와 비어 있지 않은 note를 정확히 한 번씩 포함한다."
+	}
+	return `출력은 아래 JSON 하나만 낸다. 코드 블록 표시, 인사, 감탄, 설명을 JSON 밖에 덧붙이지 않는다.
 JSON 키, severity 값, 파일 경로는 번역하거나 문체에 맞게 바꾸지 않는다.
 
 {
   "summary": {
-    "overview": "변경 전체를 3~6문장으로 요약",
-    "files": [{"path": "파일 경로", "note": "이 파일에서 무엇이 바뀌었는지 한 문장"}]
+    "overview": "변경 전체를 3~6문장으로 요약"` + files + `
   },
   "findings": [
     {
@@ -22,8 +28,9 @@ JSON 키, severity 값, 파일 경로는 번역하거나 문체에 맞게 바꾸
     }
   ]
 }
-
+` + fileRule + `
 evidence는 line부터 endLine까지의 모든 줄이 실제 diff의 추가 줄일 때만 적는다. 한 줄이면 endLine은 0으로 둔다.
 삭제 줄, 문맥 줄, diff 밖의 줄은 finding으로 만들지 않는다. evidence가 실제 줄과 한 글자라도 다르면 finding을 만들지 않는다.
 같은 rootCause의 여러 발생 위치는 각각 finding으로 내되 rootCause 문자열을 정확히 같게 유지한다.
 변경을 끝까지 살펴본 뒤에도 남길 것이 정말 없을 때만 findings를 빈 배열로 둔다.`
+}

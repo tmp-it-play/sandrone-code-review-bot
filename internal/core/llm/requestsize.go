@@ -11,7 +11,7 @@ func MessagesSize(messages []Message) int {
 	for _, message := range messages {
 		total += len(message.Role) + len(message.Content) + len(message.ToolCallID) + messageEnvelopeReserve
 		for _, call := range message.ToolCalls {
-			total += len(call.ID) + len(call.Name) + len(call.Arguments) + toolCallEnvelopeReserve
+			total += len(call.ID) + len(call.Name) + len(call.Arguments) + len(call.ThoughtSignature) + toolCallEnvelopeReserve
 		}
 	}
 	return total

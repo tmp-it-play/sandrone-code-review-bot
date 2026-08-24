@@ -194,11 +194,17 @@ func toChatMessages(messages []llm.Message) []chatMessage {
 			ToolCallID: message.ToolCallID,
 		}
 		for _, call := range message.ToolCalls {
-			entry.ToolCalls = append(entry.ToolCalls, chatToolCall{
+			convertedCall := chatToolCall{
 				ID:       call.ID,
 				Type:     "function",
 				Function: chatFunctionCall{Name: call.Name, Arguments: call.Arguments},
-			})
+			}
+			if call.ThoughtSignature != "" {
+				convertedCall.ExtraContent = &chatToolCallExtraContent{
+					Google: &chatToolCallGoogle{ThoughtSignature: call.ThoughtSignature},
+				}
+			}
+			entry.ToolCalls = append(entry.ToolCalls, convertedCall)
 		}
 		converted = append(converted, entry)
 	}
@@ -229,10 +235,15 @@ func fromChatToolCalls(calls []chatToolCall) []llm.ToolCall {
 	}
 	converted := make([]llm.ToolCall, 0, len(calls))
 	for _, call := range calls {
+		thoughtSignature := ""
+		if call.ExtraContent != nil && call.ExtraContent.Google != nil {
+			thoughtSignature = call.ExtraContent.Google.ThoughtSignature
+		}
 		converted = append(converted, llm.ToolCall{
-			ID:        call.ID,
-			Name:      call.Function.Name,
-			Arguments: call.Function.Arguments,
+			ID:               call.ID,
+			Name:             call.Function.Name,
+			Arguments:        call.Function.Arguments,
+			ThoughtSignature: thoughtSignature,
 		})
 	}
 	return converted

@@ -29,7 +29,7 @@ func reviewUnitInputHash(repositoryScope string, configHash string, unitHash str
 		return definitions[left].Name < definitions[right].Name
 	})
 	return hashJSON(reviewUnitHashInput{
-		Version:         "review-unit-input-v4",
+		Version:         "review-unit-input-v5",
 		RepositoryScope: repositoryScope,
 		ConfigHash:      configHash,
 		UnitHash:        unitHash,
@@ -41,7 +41,7 @@ func reviewUnitInputHash(repositoryScope string, configHash string, unitHash str
 		MaxExtraReads:   maxExtraReads,
 		Tools:           definitions,
 		ToolContract:    "tool-contract-v1",
-		ResultPolicy:    "review-result-policy-v3",
+		ResultPolicy:    "review-result-policy-v4",
 		Validation:      request.ResponseValidation,
 	})
 }

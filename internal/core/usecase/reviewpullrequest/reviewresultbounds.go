@@ -3,6 +3,7 @@ package reviewpullrequest
 import (
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
@@ -10,30 +11,38 @@ import (
 
 const maxPublishedFindings = 25
 
-func boundedBatchResult(files []pullrequest.ChangedFile, result review.Result) review.Result {
+func boundedBatchResult(files []pullrequest.ChangedFile, result review.Result, includeFileNotes bool) review.Result {
 	allowed := make(map[string]struct{}, len(files))
 	for _, file := range files {
 		allowed[file.Path] = struct{}{}
 	}
 	result.Summary.Overview = boundedRunes(result.Summary.Overview, 2000)
 	notes := make([]review.FileNote, 0, len(result.Summary.Files))
-	seen := map[string]struct{}{}
-	for _, note := range result.Summary.Files {
-		if _, exists := allowed[note.Path]; !exists {
-			continue
+	if includeFileNotes {
+		seen := map[string]struct{}{}
+		for _, note := range result.Summary.Files {
+			if _, exists := allowed[note.Path]; !exists {
+				continue
+			}
+			if _, exists := seen[note.Path]; exists {
+				continue
+			}
+			seen[note.Path] = struct{}{}
+			note.Note = boundedRunes(note.Note, 300)
+			notes = append(notes, note)
 		}
-		if _, exists := seen[note.Path]; exists {
-			continue
-		}
-		seen[note.Path] = struct{}{}
-		note.Note = boundedRunes(note.Note, 300)
-		notes = append(notes, note)
 	}
 	result.Summary.Files = notes
 	for index := range result.Findings {
 		result.Findings[index].Title = boundedRunes(result.Findings[index].Title, 200)
 		result.Findings[index].Body = boundedRunes(result.Findings[index].Body, 800)
 		result.Findings[index].RootCause = boundedRunes(result.Findings[index].RootCause, 500)
+		if utf8.RuneCountInString(result.Findings[index].Suggestion) > 500 {
+			result.Findings[index].Suggestion = ""
+		}
+		if utf8.RuneCountInString(result.Findings[index].Evidence) > 1600 {
+			result.Findings[index].Evidence = ""
+		}
 	}
 	return result
 }

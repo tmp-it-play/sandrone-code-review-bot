@@ -1,6 +1,7 @@
 package parsing
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
@@ -14,17 +15,7 @@ type resultPayload struct {
 			Note string `json:"note"`
 		} `json:"files"`
 	} `json:"summary"`
-	Findings []struct {
-		File       string `json:"file"`
-		Line       int    `json:"line"`
-		EndLine    int    `json:"endLine"`
-		Severity   string `json:"severity"`
-		Title      string `json:"title"`
-		Body       string `json:"body"`
-		Suggestion string `json:"suggestion"`
-		Evidence   string `json:"evidence"`
-		RootCause  string `json:"rootCause"`
-	} `json:"findings"`
+	Findings []json.RawMessage `json:"findings"`
 }
 
 func (p resultPayload) toDomain() (review.Result, int) {
@@ -38,24 +29,14 @@ func (p resultPayload) toDomain() (review.Result, int) {
 		}
 		result.Summary.Files = append(result.Summary.Files, review.FileNote{Path: path, Note: strings.TrimSpace(file.Note)})
 	}
-	for _, entry := range p.Findings {
-		severity, ok := review.ParseSeverity(entry.Severity)
-		if !ok {
+	for _, raw := range p.Findings {
+		entry := findingPayload{}
+		if err := json.Unmarshal(raw, &entry); err != nil {
 			dropped++
 			continue
 		}
-		finding := review.Finding{
-			File:       strings.TrimSpace(entry.File),
-			Line:       entry.Line,
-			EndLine:    entry.EndLine,
-			Severity:   severity,
-			Title:      strings.TrimSpace(entry.Title),
-			Body:       strings.TrimSpace(entry.Body),
-			Suggestion: entry.Suggestion,
-			Evidence:   entry.Evidence,
-			RootCause:  strings.TrimSpace(entry.RootCause),
-		}
-		if !finding.IsValid() {
+		finding, valid := entry.toDomain()
+		if !valid {
 			dropped++
 			continue
 		}

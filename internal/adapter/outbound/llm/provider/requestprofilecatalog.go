@@ -14,8 +14,9 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 	switch normalizedProvider + "/" + baseModel {
 	case "gemini/gemini-3.7-flash":
 		return RequestProfile{
-			ReasoningEffort:  "medium",
-			OutputTokenLimit: 65536,
+			ReasoningEffort:    "medium",
+			OutputTokenLimit:   65536,
+			ForceJSONWithTools: true,
 		}
 	case "groq/openai/gpt-oss-120b":
 		return RequestProfile{

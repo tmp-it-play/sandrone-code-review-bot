@@ -65,7 +65,7 @@ func (c *Chain) PromptBudgetFor(request llm.Request) int {
 
 func (c *Chain) PolicyHashInputs(request llm.Request) llm.PolicyHashInputs {
 	identity := llm.PolicyHashInputs{
-		Version:               "llm-routing-v2",
+		Version:               "llm-routing-v3",
 		TaskRole:              request.TaskRole,
 		DataClassification:    request.DataClassification,
 		RequestedProviders:    normalizedNames(request.Providers),
@@ -196,10 +196,14 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 				c.markProviderCooldown(ctx, candidate, failure.RetryAfter)
 			}
 		}
+		reason := outcome
+		if errors.Is(attemptErr, ErrSemanticResponse) {
+			reason = semanticFailureReason(attemptErr)
+		}
 		if invoked {
 			c.observe(ctx, candidate, candidate.Model(), request.TaskRole, outcome, status, observedUsage)
 		}
-		c.logger.Warn("프로바이더 호출에 실패해 다음으로 넘어간다", "provider", candidate.Name(), "outcome", outcome, "status", status)
+		c.logger.Warn("프로바이더 호출에 실패해 다음으로 넘어간다", "provider", candidate.Name(), "outcome", outcome, "status", status, "reason", reason)
 	}
 	if !routed {
 		return llm.Response{}, ErrNoProviderAllowed

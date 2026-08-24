@@ -25,6 +25,8 @@ type reviewBatchPlanner struct {
 
 const toolPromptReserve = 3072
 
+const maximumDetailedFileSummaryChanges = 8
+
 func (p reviewBatchPlanner) Build(files []pullrequest.ChangedFile) (batching.Plan, setting.RepoConfig) {
 	config, limit := p.promptConfig()
 	plan := batching.Plan{}
@@ -68,8 +70,9 @@ func (p reviewBatchPlanner) Messages(files []pullrequest.ChangedFile, config set
 			Config:       config,
 			Incremental:  p.Incremental,
 		},
-		Extra:        p.Extra,
-		ToolsAllowed: p.ToolsAllowed,
+		Extra:            p.Extra,
+		ToolsAllowed:     p.ToolsAllowed,
+		IncludeFileNotes: p.includeFileNotes(),
 	}.Messages()
 }
 
@@ -97,12 +100,16 @@ func (p reviewBatchPlanner) promptConfig() (setting.RepoConfig, int) {
 
 func (p reviewBatchPlanner) fixedCost(config setting.RepoConfig) int {
 	context := prompt.Context{Config: config}
-	messages := prompt.ReviewPrompt{Context: context, Extra: p.Extra, ToolsAllowed: p.ToolsAllowed}.Messages()
+	messages := prompt.ReviewPrompt{Context: context, Extra: p.Extra, ToolsAllowed: p.ToolsAllowed, IncludeFileNotes: p.includeFileNotes()}.Messages()
 	fixed := messagesSize(messages) - len(context.Render())
 	if p.ToolsAllowed {
 		fixed += toolPromptReserve
 	}
 	return fixed
+}
+
+func (p reviewBatchPlanner) includeFileNotes() bool {
+	return len(p.Inventory) <= maximumDetailedFileSummaryChanges
 }
 
 func (p reviewBatchPlanner) fits(files []pullrequest.ChangedFile, config setting.RepoConfig, limit int) bool {

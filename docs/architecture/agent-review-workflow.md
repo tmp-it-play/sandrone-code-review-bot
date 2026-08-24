@@ -101,7 +101,8 @@ Webhook inbox → immutable ReviewRun → diff와 coverage 수집 → determinis
 - checkpoint JSON이 손상됐거나 input hash가 달라지면 해당 unit만 다시 실행한다.
 - 실패 unit은 coverage를 failed로 전환하고 다른 성공 unit 결과는 유지한다.
 - 각 unit은 별도 read_file executor를 받는다.
-- reviewer response는 JSON 문법뿐 아니라 필수 summary path와 Finding 필드까지 semantic validation을 통과해야 한다. malformed response는 같은 외부 호출 예산 안에서 다음 eligible provider로 넘어간다.
+- PR 전체 변경 파일이 8개 이하일 때만 summary.files 스키마와 파일별 요약 지시를 prompt에 포함한다. 9개 이상이면 해당 필드와 지시 자체를 넣지 않고 overview와 finding에 출력 예산을 사용하며, 실제 검토 범위는 model output이 아니라 coverage ledger로 판정한다.
+- reviewer response는 JSON 문법, 필수 overview와 Finding 필드 semantic validation을 통과해야 한다. 일부 malformed finding은 버리고 유효한 finding을 유지하며, 원래 finding이 있었지만 전부 malformed인 응답만 다음 eligible provider로 넘긴다.
 
 Cross-run candidate/result cache는 저장하거나 읽지 않는다.
 
@@ -193,6 +194,7 @@ max_files, max_batches 또는 prompt_limit로 deferred된 범위는 같은 head�
 | 선택 파일 | 최대 160 | 초과 파일은 max_files deferred |
 | Review unit | 1~8, 기본·상한 8 | 초과 unit은 max_batches deferred |
 | Repository 요청 output | 최대 8,192 tokens | provider profile이 더 작으면 provider 한도 우선 |
+| 파일별 변경 요약 | PR 전체 변경 파일 최대 8개 | 9개 이상이면 prompt에 요청하지 않고 coverage ledger 사용 |
 | Unit read_file | 최대 6회 | unit별 executor에 적용 |
 | Tool round | 최대 2회 | chain 내부 왕복 상한 |
 | Unit tool output | 합계 2,000 bytes | alias 복원과 masking 이후 누적 상한 |
@@ -253,7 +255,7 @@ CLOUDFLARE_API_TOKEN은 CLOUDFLARE_ACCOUNT_ID와 같은 account 범위의 [Worke
 
 Batch 계획은 첫 eligible provider의 cap과 repository config를 사용한다. Fallback provider마다 완성된 message와 tool definition 크기를 다시 검사하므로 Groq처럼 작은 cap의 provider는 큰 batch에서 호출 없이 건너뛴다. 전체 provider 가운데 가장 작은 cap으로 모든 batch를 축소하지 않는다.
 
-ForceJSON 요청에서 Mistral은 tool definition이 함께 있어도 [JSON mode](https://docs.mistral.ai/studio/conversations/structured-output/json_mode)를 유지한다. NVIDIA Gemma 4 31B는 tool calling을 끄고 provider의 [structured generation](https://docs.nvidia.com/nim/large-language-models/1.15.0/structured-generation.html)을 사용해 순수 JSON을 강제한다. 비 JSON 응답에는 [문서화된 빈 thought channel](https://docs.api.nvidia.com/nim/reference/google-gemma-4-31b-it)이 선두에 붙을 수 있어 해당 exact prefix만 client boundary에서 제거하며, 임의 prose나 Markdown fence에서 JSON을 추출하지 않는다. Provider의 Retry-After는 transient retry 대신 fallback에 반영하고 설정된 cooldown보다 길 때 최대 24시간까지 유지한다. 새 실패의 cooldown이 기존 deadline보다 짧으면 기존 값을 줄이지 않는다. 같은 credential과 quota를 쓰는 Cloudflare GLM과 Gemma는 하나의 failure domain으로 취급해 auth, quota 또는 rate-limit 실패 시 둘 다 cooldown한다.
+ForceJSON 요청에서 Gemini 3.7은 공식 [function calling과 structured output 조합](https://ai.google.dev/gemini-api/docs/function-calling#function_calling_with_structured_output)을 사용하고 Mistral도 tool definition이 함께 있는 JSON mode를 유지한다. Gemini 3 tool call의 [thought signature](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures#signatures-for-openai-compatibility)는 다음 assistant turn에 손실 없이 돌려보낸다. Mistral tool result가 빈 문자열이어도 필수 content 필드를 생략하지 않는다. NVIDIA Gemma 4 31B는 tool calling을 끄고 provider의 [structured generation](https://docs.nvidia.com/nim/large-language-models/1.15.0/structured-generation.html)을 사용해 순수 JSON을 강제한다. 비 JSON 응답에는 [문서화된 빈 thought channel](https://docs.api.nvidia.com/nim/reference/google-gemma-4-31b-it)이 선두에 붙을 수 있어 해당 exact prefix만 client boundary에서 제거하며, 임의 prose나 Markdown fence에서 JSON을 추출하지 않는다. Provider의 Retry-After는 transient retry 대신 fallback에 반영하고 설정된 cooldown보다 길 때 최대 24시간까지 유지한다. 새 실패의 cooldown이 기존 deadline보다 짧으면 기존 값을 줄이지 않는다. 같은 credential과 quota를 쓰는 Cloudflare GLM과 Gemma는 하나의 failure domain으로 취급해 auth, quota 또는 rate-limit 실패 시 둘 다 cooldown한다.
 
 관련 구현:
 

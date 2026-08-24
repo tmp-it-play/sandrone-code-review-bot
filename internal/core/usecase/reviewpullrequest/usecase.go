@@ -372,6 +372,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		Mask:             u.deps.Masker.Mask,
 		Paths:            pathMap,
 	}
+	includeFileNotes := planner.includeFileNotes()
 	plan, promptConfig := planner.Build(loaded)
 	units, coverage := (reviewworkflow.PlanBuilder{MaxFileChars: config.MaxFileChars, ExpectedFiles: expectedFiles}).Build(files, chosen, plan)
 	if _, planErr := u.deps.Workflows.SavePlan(ctx, run.ID, runLease, units, coverage, u.deps.Clock.Now()); planErr != nil {
@@ -404,11 +405,13 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		messages := llm.MaskMessages(planner.Messages(batch, promptConfig), u.deps.Masker.Mask)
 		batchRequest := reviewRequest.WithMessages(messages)
 		promptFiles := pathMap.PromptFiles(batch)
-		batchRequest.ResponseValidation.RequiredPaths = make([]string, 0, len(promptFiles))
-		for _, file := range promptFiles {
-			batchRequest.ResponseValidation.RequiredPaths = append(batchRequest.ResponseValidation.RequiredPaths, file.Path)
+		if includeFileNotes {
+			batchRequest.ResponseValidation.RequiredPaths = make([]string, 0, len(promptFiles))
+			for _, file := range promptFiles {
+				batchRequest.ResponseValidation.RequiredPaths = append(batchRequest.ResponseValidation.RequiredPaths, file.Path)
+			}
+			sort.Strings(batchRequest.ResponseValidation.RequiredPaths)
 		}
-		sort.Strings(batchRequest.ResponseValidation.RequiredPaths)
 		executor := u.executor(target, config, pathMap)
 		var toolDefinitions []llm.Tool
 		if executor != nil {
@@ -516,8 +519,8 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			batchResult = pathMap.RestoreResult(batchResult)
 		}
 		if parseErr == nil {
-			batchResult = boundedBatchResult(batch, batchResult)
-			parseErr = validateBatchResult(batch, batchResult, report)
+			batchResult = boundedBatchResult(batch, batchResult, includeFileNotes)
+			parseErr = validateBatchResult(batch, batchResult, report, includeFileNotes)
 		}
 		if parseErr != nil {
 			u.deps.Logger.Warn("일부 배치의 응답을 해석하지 못했습니다", "target", target.Reference(), "batch", index+1, "error", parseErr)
@@ -539,6 +542,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			failed = append(failed, batch...)
 			continue
 		}
+		evidenceDropped += report.Dropped
 		batchResult.Findings = (selection.SeverityFilter{Minimum: config.MinSeverity}).Apply(batchResult.Findings)
 		var dropped int
 		batchResult.Findings, dropped = (reviewanalysis.EvidenceVerifier{}).Verify(batchResult.Findings, batch)

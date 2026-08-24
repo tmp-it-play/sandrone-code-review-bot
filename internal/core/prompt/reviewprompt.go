@@ -9,9 +9,10 @@ import (
 )
 
 type ReviewPrompt struct {
-	Context      Context
-	Extra        string
-	ToolsAllowed bool
+	Context          Context
+	Extra            string
+	ToolsAllowed     bool
+	IncludeFileNotes bool
 }
 
 func (p ReviewPrompt) Messages() []llm.Message {
@@ -47,7 +48,7 @@ func (p ReviewPrompt) system() string {
 	builder.WriteString("- minor: 동작은 하지만 개선이 필요함\n")
 	builder.WriteString("- nit: 사소한 정리 제안\n\n")
 	builder.WriteString(suggestionGuide)
-	builder.WriteString(agenticReviewSchema)
+	builder.WriteString(agenticReviewSchema(p.IncludeFileNotes))
 	return builder.String()
 }
 

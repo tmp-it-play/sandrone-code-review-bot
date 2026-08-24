@@ -1,7 +1,6 @@
 package parsing
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -13,7 +12,7 @@ func (SummaryResponseValidator) Validate(content string) error {
 		return err
 	}
 	if !report.HasSummary || strings.TrimSpace(result.Summary.Overview) == "" {
-		return fmt.Errorf("요약이 없습니다")
+		return ErrSummaryMissing
 	}
 	return nil
 }
