@@ -14,17 +14,20 @@ type ReviewPublicationWorker struct {
 	reconciler *reviewpublication.Reconciler
 }
 
-func NewReviewPublicationWorker(workflows outbound.ReviewPublicationRecoveryRepository, source outbound.PullRequestSource, publisher outbound.ReviewPublisher, reviews outbound.ReviewRepository, clock outbound.Clock, logger *slog.Logger, retention time.Duration) *ReviewPublicationWorker {
+func NewReviewPublicationWorker(runs outbound.ReviewRunLifecycleRepository, publications outbound.ReviewPublicationLifecycleRepository, candidates outbound.ReviewPublicationCandidateRepository, invalidations outbound.ReviewPublicationInvalidationRepository, source outbound.PullRequestSource, publisher outbound.ReviewPublisher, reviews outbound.ReviewRepository, clock outbound.Clock, logger *slog.Logger, retention time.Duration) *ReviewPublicationWorker {
 	return &ReviewPublicationWorker{
 		interval: 10 * time.Minute,
 		reconciler: reviewpublication.NewReconciler(
 			reviewpublication.ReconcilerDependencies{
-				Workflows: workflows,
-				Source:    source,
-				Publisher: publisher,
-				Reviews:   reviews,
-				Clock:     clock,
-				Logger:    logger,
+				Runs:          runs,
+				Publications:  publications,
+				Candidates:    candidates,
+				Invalidations: invalidations,
+				Source:        source,
+				Publisher:     publisher,
+				Reviews:       reviews,
+				Clock:         clock,
+				Logger:        logger,
 			},
 			reviewpublication.ReconcilerConfig{
 				Retention:         retention,

@@ -8,7 +8,7 @@ import (
 )
 
 type reviewUnitExecutorDependencies struct {
-	workflows reviewUnitWorkflowRepository
+	execution outbound.ReviewExecutionRepository
 	completer outbound.Completer
 	tools     outbound.ToolExecutorFactory
 	masker    outbound.Masker

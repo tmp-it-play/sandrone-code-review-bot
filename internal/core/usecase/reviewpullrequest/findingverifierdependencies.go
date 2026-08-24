@@ -7,9 +7,9 @@ import (
 )
 
 type findingVerifierDependencies struct {
-	workflows reviewVerificationRepository
-	completer reviewVerificationCompleter
-	masker    outbound.Masker
-	clock     outbound.Clock
-	logger    *slog.Logger
+	verification outbound.ReviewVerificationRepository
+	completer    reviewVerificationCompleter
+	masker       outbound.Masker
+	clock        outbound.Clock
+	logger       *slog.Logger
 }

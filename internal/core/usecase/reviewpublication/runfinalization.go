@@ -27,7 +27,7 @@ func (r *Reconciler) resolveUnverified(ctx context.Context, run reviewworkflow.R
 func (r *Reconciler) releaseRun(ctx context.Context, runID uint64, leaseToken string) {
 	releaseContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := r.deps.Workflows.ReleaseRun(releaseContext, runID, leaseToken, r.deps.Clock.Now()); err != nil {
+	if err := r.deps.Runs.ReleaseRun(releaseContext, runID, leaseToken, r.deps.Clock.Now()); err != nil {
 		r.deps.Logger.Warn("게시 조정 run lease를 해제하지 못했습니다", "run", runID, "error", err)
 	}
 }
@@ -36,7 +36,7 @@ func (r *Reconciler) finishSuperseded(ctx context.Context, run reviewworkflow.Ru
 	now := r.deps.Clock.Now()
 	finishContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	_, err := r.deps.Workflows.FinishRun(finishContext, run.ID, reviewworkflow.RunResult{
+	_, err := r.deps.Runs.FinishRun(finishContext, run.ID, reviewworkflow.RunResult{
 		Status:                  reviewworkflow.RunStatusSuperseded,
 		Error:                   detail,
 		TerminalAt:              now,
@@ -49,7 +49,7 @@ func (r *Reconciler) finishSuperseded(ctx context.Context, run reviewworkflow.Ru
 func (r *Reconciler) finishWithLease(ctx context.Context, run reviewworkflow.Run, leaseToken string, status reviewworkflow.RunStatus, detail string, advanceWatermark bool, invalidation *reviewworkflow.PublicationInvalidation) error {
 	now := r.deps.Clock.Now()
 	finishContext, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	_, err := r.deps.Workflows.FinishRun(finishContext, run.ID, reviewworkflow.RunResult{
+	_, err := r.deps.Runs.FinishRun(finishContext, run.ID, reviewworkflow.RunResult{
 		Status:                  status,
 		Error:                   detail,
 		TerminalAt:              now,
@@ -74,7 +74,7 @@ func (r *Reconciler) finishWithLease(ctx context.Context, run reviewworkflow.Run
 			return invalidateErr
 		}
 		finalizeContext, finalizeCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		_, err = r.deps.Workflows.FinishRun(finalizeContext, run.ID, reviewworkflow.RunResult{
+		_, err = r.deps.Runs.FinishRun(finalizeContext, run.ID, reviewworkflow.RunResult{
 			Status:                  reviewworkflow.RunStatusSuperseded,
 			Error:                   detail,
 			TerminalAt:              now,

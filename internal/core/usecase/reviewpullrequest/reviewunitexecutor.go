@@ -53,7 +53,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 		result.errorMessage = message
 		return result, cause
 	}
-	if _, err := e.deps.workflows.SavePlan(ctx, input.runID, input.runLease, input.units, input.coverage, e.deps.clock.Now()); err != nil {
+	if _, err := e.deps.execution.SavePlan(ctx, input.runID, input.runLease, input.units, input.coverage, e.deps.clock.Now()); err != nil {
 		return fail("리뷰 실행 계획을 저장하지 못했습니다", err)
 	}
 	for index, batch := range input.plan.Batches {
@@ -79,7 +79,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			return fail("리뷰 unit 입력 hash를 만들지 못했습니다", err)
 		}
 		unitStartedAt := e.deps.clock.Now()
-		claim, err := e.deps.workflows.StartUnit(ctx, input.runID, input.runLease, unit.Hash, inputHash, unitStartedAt, unitStartedAt.Add(reviewUnitLease))
+		claim, err := e.deps.execution.StartUnit(ctx, input.runID, input.runLease, unit.Hash, inputHash, unitStartedAt, unitStartedAt.Add(reviewUnitLease))
 		if err != nil {
 			return fail("리뷰 unit을 시작하지 못했습니다", err)
 		}

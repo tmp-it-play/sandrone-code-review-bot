@@ -8,7 +8,7 @@ import (
 func (r *Reconciler) reconcileRuns(ctx context.Context) {
 	now := r.deps.Clock.Now()
 	if r.throughID == 0 {
-		highWatermark, err := r.deps.Workflows.PublicationCandidateHighWatermark(ctx, now)
+		highWatermark, err := r.deps.Candidates.PublicationCandidateHighWatermark(ctx, now)
 		if err != nil {
 			r.deps.Logger.Error("리뷰 게시 결과 조정 범위를 읽지 못했습니다", "error", err)
 			return
@@ -19,7 +19,7 @@ func (r *Reconciler) reconcileRuns(ctx context.Context) {
 		}
 		r.throughID = highWatermark
 	}
-	runs, err := r.deps.Workflows.PublicationCandidates(ctx, now, r.afterID, r.throughID, r.config.BatchSize)
+	runs, err := r.deps.Candidates.PublicationCandidates(ctx, now, r.afterID, r.throughID, r.config.BatchSize)
 	if err != nil {
 		r.deps.Logger.Error("리뷰 게시 결과 조정 대상을 읽지 못했습니다", "error", err)
 		return

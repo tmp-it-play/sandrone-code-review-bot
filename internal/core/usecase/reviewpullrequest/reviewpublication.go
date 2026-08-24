@@ -35,7 +35,7 @@ func (u *UseCase) prepareAndPublishReview(ctx context.Context, target pullreques
 		FallbackBody: u.deps.Renderer.SummaryBody(degraded) + "\n" + marker,
 	}
 	preparedAt := u.deps.Clock.Now()
-	prepared, err := u.deps.Workflows.PrepareReviewPublication(ctx, runID, runLease, marker, payload, finalization, preparedAt, preparedAt.Add(u.deps.Retention))
+	prepared, err := u.deps.Publications.PrepareReviewPublication(ctx, runID, runLease, marker, payload, finalization, preparedAt, preparedAt.Add(u.deps.Retention))
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func (u *UseCase) finalizePublishedReview(ctx context.Context, target pullreques
 		return u.supersedePublishedReview(ctx, target, marker, runID, runLease, "리뷰 게시 중 base 또는 head가 변경되었습니다")
 	}
 	publicationCheckedAt := u.deps.Clock.Now()
-	if err := u.deps.Workflows.RenewRun(ctx, runID, runLease, publicationCheckedAt, publicationCheckedAt.Add(reviewRunLease)); err != nil {
+	if err := u.deps.Runs.RenewRun(ctx, runID, runLease, publicationCheckedAt, publicationCheckedAt.Add(reviewRunLease)); err != nil {
 		if errors.Is(err, reviewworkflow.ErrRunSuperseded) {
 			return u.supersedePublishedReview(ctx, target, marker, runID, runLease, "리뷰 게시 중 더 최신인 실행이 확인되었습니다")
 		}

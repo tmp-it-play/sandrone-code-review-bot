@@ -13,7 +13,7 @@ func (u *UseCase) finishWorkflow(ctx context.Context, runID uint64, leaseToken s
 
 func (u *UseCase) finishWorkflowWithOutcome(ctx context.Context, runID uint64, leaseToken string, status reviewworkflow.RunStatus, outcome review.Outcome, detail string, advanceWatermark bool) (reviewworkflow.RunStatus, error) {
 	terminalAt := u.deps.Clock.Now()
-	return u.deps.Workflows.FinishRun(ctx, runID, reviewworkflow.RunResult{
+	return u.deps.Runs.FinishRun(ctx, runID, reviewworkflow.RunResult{
 		Status:           status,
 		ReviewOutcome:    outcome,
 		Error:            detail,

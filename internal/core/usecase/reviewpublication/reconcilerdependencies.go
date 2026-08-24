@@ -7,10 +7,13 @@ import (
 )
 
 type ReconcilerDependencies struct {
-	Workflows outbound.ReviewPublicationRecoveryRepository
-	Source    outbound.PullRequestSource
-	Publisher outbound.ReviewPublisher
-	Reviews   outbound.ReviewRepository
-	Clock     outbound.Clock
-	Logger    *slog.Logger
+	Runs          outbound.ReviewRunLifecycleRepository
+	Publications  outbound.ReviewPublicationLifecycleRepository
+	Candidates    outbound.ReviewPublicationCandidateRepository
+	Invalidations outbound.ReviewPublicationInvalidationRepository
+	Source        outbound.PullRequestSource
+	Publisher     outbound.ReviewPublisher
+	Reviews       outbound.ReviewRepository
+	Clock         outbound.Clock
+	Logger        *slog.Logger
 }

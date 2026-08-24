@@ -38,7 +38,7 @@ func (v *findingVerifier) verify(ctx context.Context, input findingVerification)
 		result.rejected = len(input.findings)
 		return result, fmt.Errorf("finding verifier 입력 hash를 만들지 못했습니다: %w", err)
 	}
-	checkpoint, checkpointFound, err := v.deps.workflows.ReviewVerification(ctx, input.runID, input.runLease, inputHash)
+	checkpoint, checkpointFound, err := v.deps.verification.ReviewVerification(ctx, input.runID, input.runLease, inputHash)
 	if err != nil {
 		result.rejected = len(input.findings)
 		return result, fmt.Errorf("저장된 finding verifier 결과를 읽지 못했습니다: %w", err)
@@ -114,7 +114,7 @@ func (v *findingVerifier) verify(ctx context.Context, input findingVerification)
 		FinishedAt:             v.deps.clock.Now(),
 	}
 	checkpointContext, checkpointCancel := durableCheckpointContext(ctx)
-	checkpoint, err = v.deps.workflows.SaveReviewVerification(checkpointContext, input.runID, input.runLease, checkpoint)
+	checkpoint, err = v.deps.verification.SaveReviewVerification(checkpointContext, input.runID, input.runLease, checkpoint)
 	checkpointCancel()
 	if err != nil {
 		result.response = response
@@ -146,7 +146,7 @@ func (v *findingVerifier) unavailableResult(ctx context.Context, input findingVe
 func (v *findingVerifier) recordAttempt(ctx context.Context, runID uint64, runLease string, inputHash string, response llm.Response) (llm.Response, error) {
 	checkpointContext, checkpointCancel := durableCheckpointContext(ctx)
 	defer checkpointCancel()
-	checkpoint, err := v.deps.workflows.RecordReviewVerificationAttempt(checkpointContext, runID, runLease, inputHash, response, v.deps.clock.Now())
+	checkpoint, err := v.deps.verification.RecordReviewVerificationAttempt(checkpointContext, runID, runLease, inputHash, response, v.deps.clock.Now())
 	if err != nil {
 		return response, err
 	}

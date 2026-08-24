@@ -34,22 +34,22 @@ type UseCase struct {
 
 func New(deps Dependencies) *UseCase {
 	verifier := newFindingVerifier(findingVerifierDependencies{
-		workflows: deps.Workflows,
-		completer: deps.Completer,
-		masker:    deps.Masker,
-		clock:     deps.Clock,
-		logger:    deps.Logger,
+		verification: deps.Verification,
+		completer:    deps.Completer,
+		masker:       deps.Masker,
+		clock:        deps.Clock,
+		logger:       deps.Logger,
 	})
 	return &UseCase{
 		deps: deps,
 		publications: reviewpublication.New(reviewpublication.Dependencies{
 			Publisher: deps.Publisher,
-			Receipts:  deps.Workflows,
+			Receipts:  deps.Publications,
 			Clock:     deps.Clock,
 			Logger:    deps.Logger,
 		}),
 		unitExecutor: newReviewUnitExecutor(reviewUnitExecutorDependencies{
-			workflows: deps.Workflows,
+			execution: deps.Execution,
 			completer: deps.Completer,
 			tools:     deps.Tools,
 			masker:    deps.Masker,
@@ -102,7 +102,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 				u.deps.Logger.Error("실패한 리뷰 실행을 종료하지 못했습니다", "run", activeRunID, "error", err)
 			}
 		}
-		if err := u.deps.Workflows.ReleaseRun(finishContext, activeRunID, activeRunLease, u.deps.Clock.Now()); err != nil {
+		if err := u.deps.Runs.ReleaseRun(finishContext, activeRunID, activeRunLease, u.deps.Clock.Now()); err != nil {
 			u.deps.Logger.Warn("리뷰 실행 lease를 해제하지 못했습니다", "run", activeRunID, "error", err)
 		}
 	}()
@@ -172,7 +172,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if err != nil {
 		return fail("리뷰 실행 식별자를 만들지 못했습니다", err)
 	}
-	run, err := u.deps.Workflows.CreateOrGetRun(ctx, runCandidate)
+	run, err := u.deps.Runs.CreateOrGetRun(ctx, runCandidate)
 	if err != nil {
 		return fail("리뷰 실행을 저장하지 못했습니다", err)
 	}
@@ -229,7 +229,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		*outcome = reviewOutcomeOf(actualStatus)
 		return nil
 	}
-	runLease, leaseErr := u.deps.Workflows.AcquireRun(ctx, run.ID, u.deps.Clock.Now(), u.deps.Clock.Now().Add(reviewRunLease))
+	runLease, leaseErr := u.deps.Runs.AcquireRun(ctx, run.ID, u.deps.Clock.Now(), u.deps.Clock.Now().Add(reviewRunLease))
 	if errors.Is(leaseErr, reviewworkflow.ErrRunSuperseded) {
 		detail := "더 최신인 리뷰 실행이 있어 중단했습니다"
 		var actualStatus reviewworkflow.RunStatus
@@ -259,7 +259,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	activeRunID = run.ID
 	activeRunLease = runLease
 	callBudget = llm.NewDurableExternalCallBudget(maxCalls, func() bool {
-		reserved, reserveErr := u.deps.Workflows.ReserveExternalCall(ctx, run.ID, runLease, maxCalls)
+		reserved, reserveErr := u.deps.Execution.ReserveExternalCall(ctx, run.ID, runLease, maxCalls)
 		if reserveErr != nil {
 			u.deps.Logger.Warn("리뷰 실행 외부 호출 예산을 예약하지 못했습니다", "run", run.ID, "error", reserveErr)
 			return false
@@ -269,7 +269,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	reviewRequest.ExternalCallBudget = callBudget
 	if resumePublishing {
 		marker := reviewworkflow.PublicationMarker(run.Key)
-		storedPublication, storedPublicationFound, storedPublicationErr := u.deps.Workflows.ReviewPublication(ctx, run.ID, runLease)
+		storedPublication, storedPublicationFound, storedPublicationErr := u.deps.Publications.ReviewPublication(ctx, run.ID, runLease)
 		if storedPublicationErr != nil {
 			return fail("저장된 리뷰 게시 payload를 읽지 못했습니다", storedPublicationErr)
 		}
@@ -289,7 +289,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 				return fail("게시 상태에 대응하는 내부 리뷰 이력을 찾지 못했습니다", fmt.Errorf("review run %d", run.ID))
 			}
 			claimedAt := u.deps.Clock.Now()
-			if claimErr := u.deps.Workflows.ClaimPublication(ctx, run.ID, runLease, claimedAt, claimedAt.Add(reviewPublicationLease)); claimErr != nil {
+			if claimErr := u.deps.Publications.ClaimPublication(ctx, run.ID, runLease, claimedAt, claimedAt.Add(reviewPublicationLease)); claimErr != nil {
 				return fail("기존 리뷰 게시 결과를 조정하지 못했습니다", claimErr)
 			}
 			if published {
@@ -328,7 +328,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			*outcome = reviewOutcomeOf(actualStatus)
 			return nil
 		}
-		if resumeErr := u.deps.Workflows.ResumeRun(ctx, run.ID, runLease, u.deps.Clock.Now()); resumeErr != nil {
+		if resumeErr := u.deps.Runs.ResumeRun(ctx, run.ID, runLease, u.deps.Clock.Now()); resumeErr != nil {
 			return fail("미게시 리뷰 실행을 다시 시작하지 못했습니다", resumeErr)
 		}
 		publicationAttempted = false
@@ -349,7 +349,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}.Select(files)
 	if chosen.IsEmpty() {
 		_, coverage := (reviewworkflow.PlanBuilder{MaxFileChars: config.MaxFileChars, ExpectedFiles: expectedFiles}).Build(files, chosen, batching.Plan{})
-		if _, planErr := u.deps.Workflows.SavePlan(ctx, run.ID, runLease, nil, coverage, u.deps.Clock.Now()); planErr != nil {
+		if _, planErr := u.deps.Execution.SavePlan(ctx, run.ID, runLease, nil, coverage, u.deps.Clock.Now()); planErr != nil {
 			return fail("빈 리뷰 계획을 저장하지 못했습니다", planErr)
 		}
 		summary := reviewworkflow.SummarizeCoverage(coverage)
@@ -482,7 +482,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	runStatus = finalizedResult.runStatus
 	verificationUnavailable := finalizedResult.verificationUnavailable
 	heartbeatAt := u.deps.Clock.Now()
-	if leaseErr := u.deps.Workflows.RenewRun(ctx, run.ID, runLease, heartbeatAt, heartbeatAt.Add(reviewRunLease)); leaseErr != nil {
+	if leaseErr := u.deps.Runs.RenewRun(ctx, run.ID, runLease, heartbeatAt, heartbeatAt.Add(reviewRunLease)); leaseErr != nil {
 		if errors.Is(leaseErr, reviewworkflow.ErrRunSuperseded) {
 			detail := "게시 전에 더 최신인 리뷰 실행이 확인되었습니다"
 			if _, finishErr := u.finishWorkflow(ctx, run.ID, runLease, reviewworkflow.RunStatusSuperseded, detail, false); finishErr != nil {
@@ -509,7 +509,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 
 	publicationClaimedAt := u.deps.Clock.Now()
-	if claimErr := u.deps.Workflows.ClaimPublication(ctx, run.ID, runLease, publicationClaimedAt, publicationClaimedAt.Add(reviewPublicationLease)); claimErr != nil {
+	if claimErr := u.deps.Publications.ClaimPublication(ctx, run.ID, runLease, publicationClaimedAt, publicationClaimedAt.Add(reviewPublicationLease)); claimErr != nil {
 		if errors.Is(claimErr, reviewworkflow.ErrRunSuperseded) {
 			detail := "게시 권한을 얻기 전에 더 최신인 리뷰 실행이 확인되었습니다"
 			if _, finishErr := u.finishWorkflow(ctx, run.ID, runLease, reviewworkflow.RunStatusSuperseded, detail, false); finishErr != nil {

@@ -20,7 +20,7 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 		HeadSHA:        run.HeadSHA,
 	}
 	now := r.deps.Clock.Now()
-	leaseToken, err := r.deps.Workflows.AcquireRun(ctx, run.ID, now, now.Add(r.config.RunLease))
+	leaseToken, err := r.deps.Runs.AcquireRun(ctx, run.ID, now, now.Add(r.config.RunLease))
 	if errors.Is(err, reviewworkflow.ErrRunLeased) || errors.Is(err, reviewworkflow.ErrPublicationLeased) {
 		return nil
 	}
@@ -39,7 +39,7 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 	}
 	defer r.releaseRun(ctx, run.ID, leaseToken)
 	claimedAt := r.deps.Clock.Now()
-	if err := r.deps.Workflows.ClaimPublication(ctx, run.ID, leaseToken, claimedAt, claimedAt.Add(r.config.PublicationLease)); err != nil {
+	if err := r.deps.Publications.ClaimPublication(ctx, run.ID, leaseToken, claimedAt, claimedAt.Add(r.config.PublicationLease)); err != nil {
 		return err
 	}
 	current, err := r.deps.Source.PullRequest(ctx, target)
@@ -54,7 +54,7 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 		return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "게시 조정 전에 base 또는 head가 변경되었습니다", false, invalidation)
 	}
 	marker := reviewworkflow.PublicationMarker(run.Key)
-	storedPublication, storedPublicationFound, err := r.deps.Workflows.ReviewPublication(ctx, run.ID, leaseToken)
+	storedPublication, storedPublicationFound, err := r.deps.Publications.ReviewPublication(ctx, run.ID, leaseToken)
 	if err != nil {
 		return r.resolveUnverified(ctx, run, leaseToken, err)
 	}

@@ -12,7 +12,7 @@ import (
 func (r *Reconciler) reconcileInvalidations(ctx context.Context) {
 	for processed := 0; processed < r.config.InvalidationLimit; processed++ {
 		now := r.deps.Clock.Now()
-		invalidations, err := r.deps.Workflows.ClaimPublicationInvalidations(ctx, now, now.Add(r.config.PublicationLease), 1)
+		invalidations, err := r.deps.Invalidations.ClaimPublicationInvalidations(ctx, now, now.Add(r.config.PublicationLease), 1)
 		if err != nil {
 			r.deps.Logger.Error("게시 무효화 재시도 대상을 claim하지 못했습니다", "error", err)
 			return
@@ -48,7 +48,7 @@ func (r *Reconciler) reconcileInvalidation(ctx context.Context, invalidation rev
 	storeContext, storeCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer storeCancel()
 	if err == nil {
-		if completeErr := r.deps.Workflows.CompletePublicationInvalidation(storeContext, invalidation.ID, invalidation.LeaseToken, now); completeErr != nil {
+		if completeErr := r.deps.Invalidations.CompletePublicationInvalidation(storeContext, invalidation.ID, invalidation.LeaseToken, now); completeErr != nil {
 			r.deps.Logger.Warn("게시 무효화 완료를 저장하지 못했습니다", "run", invalidation.RunID, "error", completeErr)
 		}
 		return
@@ -57,7 +57,7 @@ func (r *Reconciler) reconcileInvalidation(ctx context.Context, invalidation rev
 	if nextAttemptAt.After(invalidation.ExpiresAt) {
 		nextAttemptAt = invalidation.ExpiresAt
 	}
-	if retryErr := r.deps.Workflows.RetryPublicationInvalidation(storeContext, invalidation.ID, invalidation.LeaseToken, now, nextAttemptAt, err.Error()); retryErr != nil {
+	if retryErr := r.deps.Invalidations.RetryPublicationInvalidation(storeContext, invalidation.ID, invalidation.LeaseToken, now, nextAttemptAt, err.Error()); retryErr != nil {
 		r.deps.Logger.Warn("게시 무효화 재시도를 저장하지 못했습니다", "run", invalidation.RunID, "error", errors.Join(err, retryErr))
 		return
 	}

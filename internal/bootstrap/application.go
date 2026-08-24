@@ -136,26 +136,29 @@ func NewApplication(config Config) (*Application, error) {
 	parser := parsing.ResultParser{}
 
 	reviewUseCase := reviewpullrequest.New(reviewpullrequest.Dependencies{
-		Source:      pullRequests,
-		Settings:    settingSource,
-		Masker:      masker,
-		Completer:   completer,
-		Tools:       tools,
-		Publisher:   publisher,
-		Reactions:   reactions,
-		Renderer:    renderer,
-		Reviews:     reviews,
-		Workflows:   reviewWorkflows,
-		Findings:    findings,
-		State:       pullRequestState,
-		Clock:       clock,
-		Parser:      parser,
-		Logger:      logger,
-		Retention:   config.ReviewRetention,
-		LLMMaxCalls: config.LLMMaxCalls,
+		Source:       pullRequests,
+		Settings:     settingSource,
+		Masker:       masker,
+		Completer:    completer,
+		Tools:        tools,
+		Publisher:    publisher,
+		Reactions:    reactions,
+		Renderer:     renderer,
+		Reviews:      reviews,
+		Runs:         reviewWorkflows,
+		Execution:    reviewWorkflows,
+		Verification: reviewWorkflows,
+		Publications: reviewWorkflows,
+		Findings:     findings,
+		State:        pullRequestState,
+		Clock:        clock,
+		Parser:       parser,
+		Logger:       logger,
+		Retention:    config.ReviewRetention,
+		LLMMaxCalls:  config.LLMMaxCalls,
 	})
 	reviewRetention := maintenance.NewReviewRetentionWorker(reviewRetentionRepository, usageRepository, clock, logger, config.ReviewRetention)
-	reviewPublication := maintenance.NewReviewPublicationWorker(reviewWorkflows, pullRequests, publisher, reviews, clock, logger, config.ReviewRetention)
+	reviewPublication := maintenance.NewReviewPublicationWorker(reviewWorkflows, reviewWorkflows, reviewWorkflows, reviewWorkflows, pullRequests, publisher, reviews, clock, logger, config.ReviewRetention)
 	occurrenceBootstrap := maintenance.NewFindingOccurrenceBootstrapWorker(occurrenceBootstrapRepository, logger)
 	summaryUseCase := summarizepullrequest.New(summarizepullrequest.Dependencies{
 		Source:       pullRequests,
