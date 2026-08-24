@@ -58,7 +58,19 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 			UseMaxCompletionTokens: true,
 			UseRequestTemperature:  true,
 		}
+	case "local/hf.co/ibm-granite/granite-4.1-3b-gguf":
+		return RequestProfile{
+			Temperature:      float64Value(0.2),
+			TopP:             float64Value(0.95),
+			OutputTokenLimit: 512,
+		}
 	default:
+		if normalizedProvider == "local" {
+			return RequestProfile{
+				OutputTokenLimit:      512,
+				UseRequestTemperature: true,
+			}
+		}
 		return RequestProfile{UseRequestTemperature: true}
 	}
 }

@@ -13,5 +13,6 @@ type Provider interface {
 	Profile() llm.ProviderProfile
 	RequestPolicy(request llm.Request) llm.ProviderRequestPolicyIdentity
 	PromptLimit() int
+	MaxConcurrency() int
 	Complete(ctx context.Context, request llm.Request) (llm.Response, error)
 }

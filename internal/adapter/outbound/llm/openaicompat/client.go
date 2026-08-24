@@ -24,11 +24,12 @@ type Client struct {
 	profile        llm.ProviderProfile
 	requestProfile provider.RequestProfile
 	maxPromptChars int
+	maxConcurrency int
 	extraHeaders   map[string]string
 	httpClient     *http.Client
 }
 
-func NewClient(name string, model string, displayName string, baseURL string, apiKey string, capability llm.Capability, profile llm.ProviderProfile, requestProfile provider.RequestProfile, maxPromptChars int, extraHeaders map[string]string, timeout time.Duration) *Client {
+func NewClient(name string, model string, displayName string, baseURL string, apiKey string, capability llm.Capability, profile llm.ProviderProfile, requestProfile provider.RequestProfile, maxPromptChars int, maxConcurrency int, extraHeaders map[string]string, timeout time.Duration) *Client {
 	return &Client{
 		name:           name,
 		model:          model,
@@ -39,6 +40,7 @@ func NewClient(name string, model string, displayName string, baseURL string, ap
 		profile:        profile,
 		requestProfile: requestProfile,
 		maxPromptChars: maxPromptChars,
+		maxConcurrency: maxConcurrency,
 		extraHeaders:   extraHeaders,
 		httpClient:     &http.Client{Timeout: timeout},
 	}
@@ -66,6 +68,10 @@ func (c *Client) RequestPolicy(request llm.Request) llm.ProviderRequestPolicyIde
 
 func (c *Client) PromptLimit() int {
 	return c.maxPromptChars
+}
+
+func (c *Client) MaxConcurrency() int {
+	return c.maxConcurrency
 }
 
 func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Response, error) {

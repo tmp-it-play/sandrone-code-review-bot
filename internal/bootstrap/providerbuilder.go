@@ -18,7 +18,7 @@ func buildProviders(config Config) []outbound.Provider {
 		if !known {
 			continue
 		}
-		requestProfile := provider.RequestProfileFor(descriptor.Name, descriptor.Model)
+		requestProfile := provider.RequestProfileFor(descriptor.Name, entry.Model)
 		capability := descriptor.Capability
 		if override := requestProfile.Capability; override != nil {
 			capability = *override
@@ -27,7 +27,7 @@ func buildProviders(config Config) []outbound.Provider {
 		profile.PrivateCodeAllowed = entry.PrivateCodeAllowed
 		providers = append(providers, openaicompat.NewClient(
 			descriptor.Name,
-			descriptor.Model,
+			entry.Model,
 			descriptor.DisplayName,
 			entry.BaseURL,
 			entry.APIKey,
@@ -35,6 +35,7 @@ func buildProviders(config Config) []outbound.Provider {
 			profile,
 			requestProfile,
 			descriptor.MaxPromptChars,
+			descriptor.MaxConcurrency,
 			descriptor.Headers,
 			config.RequestTimeout,
 		))

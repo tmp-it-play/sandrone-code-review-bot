@@ -11,10 +11,15 @@ type Descriptor struct {
 	Model          string
 	DisplayName    string
 	BaseURL        string
+	APIKeyEnv      string
+	BaseURLEnv     string
+	ModelEnv       string
 	AccountIDEnv   string
+	Optional       bool
 	Capability     llm.Capability
 	Profile        llm.ProviderProfile
 	MaxPromptChars int
+	MaxConcurrency int
 	Headers        map[string]string
 }
 

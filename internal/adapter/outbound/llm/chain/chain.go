@@ -24,9 +24,16 @@ type Chain struct {
 	logger        *slog.Logger
 	cooldownFor   time.Duration
 	maxToolRounds int
+	providerSlots map[string]chan struct{}
 }
 
 func New(providers []outbound.Provider, cooldown outbound.Cooldown, usageRepository outbound.UsageRepository, metrics ProviderMetrics, clock outbound.Clock, logger *slog.Logger, cooldownFor time.Duration) *Chain {
+	providerSlots := map[string]chan struct{}{}
+	for _, candidate := range providers {
+		if limit := candidate.MaxConcurrency(); limit > 0 {
+			providerSlots[candidate.Name()] = make(chan struct{}, limit)
+		}
+	}
 	return &Chain{
 		providers:     providers,
 		cooldown:      cooldown,
@@ -36,6 +43,7 @@ func New(providers []outbound.Provider, cooldown outbound.Cooldown, usageReposit
 		logger:        logger,
 		cooldownFor:   cooldownFor,
 		maxToolRounds: 2,
+		providerSlots: providerSlots,
 	}
 }
 
@@ -114,13 +122,6 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			continue
 		}
 		routed = true
-		cooling, err := c.cooldown.Active(ctx, candidate.Name())
-		if err != nil {
-			c.logger.Warn("쿨다운 상태를 읽지 못했습니다", "provider", candidate.Name(), "error", err)
-		}
-		if cooling {
-			continue
-		}
 		var tools []llm.Tool
 		if executor != nil && candidate.Capability().ToolCalling {
 			tools = executor.Definitions()
@@ -132,6 +133,19 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		if !fits {
 			c.logger.Info("입력이 프로바이더 한도에 비해 너무 커서 건너뜁니다",
 				"provider", candidate.Name(), "limit", candidate.PromptLimit())
+			continue
+		}
+		release, acquired := c.acquireProvider(candidate)
+		if !acquired {
+			c.logger.Info("프로바이더 동시 실행 한도에 도달해 건너뜁니다", "provider", candidate.Name())
+			continue
+		}
+		cooling, err := c.cooldown.Active(ctx, candidate.Name())
+		if err != nil {
+			c.logger.Warn("쿨다운 상태를 읽지 못했습니다", "provider", candidate.Name(), "error", err)
+		}
+		if cooling {
+			release()
 			continue
 		}
 		usedBefore := request.ExternalCallBudget.Used()
@@ -165,6 +179,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 				response.ModelLabel = "복수 모델"
 			}
 			c.observe(ctx, candidate, response.Model, request.TaskRole, "succeeded", 0, observedUsage)
+			release()
 			return response, nil
 		}
 		if errors.Is(attemptErr, ErrExternalCallBudgetExhausted) {
@@ -173,6 +188,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			if invoked {
 				c.observe(ctx, candidate, candidate.Model(), request.TaskRole, "budget_exhausted", 0, observedUsage)
 			}
+			release()
 			return lastResponse, attemptErr
 		}
 		lastErr = attemptErr
@@ -203,6 +219,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			c.observe(ctx, candidate, candidate.Model(), request.TaskRole, outcome, status, observedUsage)
 		}
 		c.logger.Warn("프로바이더 호출에 실패해 다음으로 넘어간다", "provider", candidate.Name(), "outcome", outcome, "status", status, "reason", reason)
+		release()
 	}
 	if !routed {
 		return llm.Response{}, ErrNoProviderAllowed

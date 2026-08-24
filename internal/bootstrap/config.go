@@ -143,7 +143,8 @@ func providerConfigs(privateCodeProviders map[string]struct{}) (map[string]Provi
 		if !known {
 			continue
 		}
-		for _, environmentName := range []string{catalog.APIKeyEnv(name), descriptor.AccountIDEnv} {
+		environmentNames := []string{descriptor.APIKeyEnv, descriptor.BaseURLEnv, descriptor.ModelEnv, descriptor.AccountIDEnv}
+		for _, environmentName := range environmentNames {
 			if environmentName == "" {
 				continue
 			}
@@ -151,8 +152,21 @@ func providerConfigs(privateCodeProviders map[string]struct{}) (map[string]Provi
 				continue
 			}
 			environment[environmentName] = strings.TrimSpace(os.Getenv(environmentName))
-			if environment[environmentName] == "" {
+			if environment[environmentName] == "" && !descriptor.Optional {
 				missing[environmentName] = struct{}{}
+			}
+		}
+		if descriptor.Optional {
+			configured := false
+			for _, environmentName := range environmentNames {
+				configured = configured || environmentName != "" && environment[environmentName] != ""
+			}
+			if configured {
+				for _, environmentName := range environmentNames {
+					if environmentName != "" && environment[environmentName] == "" {
+						missing[environmentName] = struct{}{}
+					}
+				}
 			}
 		}
 	}
@@ -172,10 +186,19 @@ func providerConfigs(privateCodeProviders map[string]struct{}) (map[string]Provi
 			continue
 		}
 		_, privateCodeAllowed := privateCodeProviders[name]
+		model := descriptor.Model
+		if descriptor.ModelEnv != "" {
+			model = environment[descriptor.ModelEnv]
+		}
+		baseURL := descriptor.ResolvedBaseURL(environment[descriptor.AccountIDEnv])
+		if descriptor.BaseURLEnv != "" {
+			baseURL = environment[descriptor.BaseURLEnv]
+		}
 		candidate := ProviderConfig{
 			Name:               name,
-			APIKey:             environment[catalog.APIKeyEnv(name)],
-			BaseURL:            descriptor.ResolvedBaseURL(environment[descriptor.AccountIDEnv]),
+			Model:              model,
+			APIKey:             environment[descriptor.APIKeyEnv],
+			BaseURL:            baseURL,
 			PrivateCodeAllowed: privateCodeAllowed,
 		}
 		if candidate.Enabled() {
