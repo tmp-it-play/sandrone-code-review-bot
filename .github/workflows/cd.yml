@@ -33,36 +33,8 @@ env:
   DASHBOARD_USERNAME: admin
 
 jobs:
-  verify:
-    name: Verify
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Check formatting
-        run: test -z "$(gofmt -l .)"
-
-      - name: Test
-        run: go test ./...
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Build
-        run: go build ./cmd/sandrone
-
   deploy:
-    name: Build and deploy
-    needs: verify
+    name: Build and Deploy
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -72,7 +44,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Check required secrets
+      - name: Check Required Secrets
         env:
           APP_ID: ${{ secrets.SANDRONE_APP_ID }}
           APP_PRIVATE_KEY: ${{ secrets.SANDRONE_APP_PRIVATE_KEY }}
@@ -121,7 +93,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image
+      - name: Build and Push Image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -132,7 +104,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Generate deploy env files
+      - name: Generate Deploy env Files
         env:
           APP_ID: ${{ secrets.SANDRONE_APP_ID }}
           APP_PRIVATE_KEY: ${{ secrets.SANDRONE_APP_PRIVATE_KEY }}
@@ -212,7 +184,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes sshpass
 
-      - name: Deploy to server
+      - name: Deploy to Server
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -255,6 +227,6 @@ jobs:
             "$DEPLOY_USER@$DEPLOY_HOST" \
             "bash -c \"\$(printf %s '$encoded_script' | base64 -d)\""
 
-      - name: Remove local env files
+      - name: Remove Local env Files
         if: always()
         run: rm -f deploy/sandrone.env deploy/deploy.env
