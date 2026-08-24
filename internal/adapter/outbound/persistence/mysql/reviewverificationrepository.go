@@ -16,7 +16,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func (r *ReviewWorkflowRepository) ReviewVerification(ctx context.Context, runID uint64, runLeaseToken string, inputHash string) (reviewworkflow.VerificationCheckpoint, bool, error) {
+func (r *ReviewVerificationStore) ReviewVerification(ctx context.Context, runID uint64, runLeaseToken string, inputHash string) (reviewworkflow.VerificationCheckpoint, bool, error) {
 	checkpoint := reviewworkflow.VerificationCheckpoint{}
 	found := false
 	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
@@ -48,7 +48,7 @@ func (r *ReviewWorkflowRepository) ReviewVerification(ctx context.Context, runID
 	return checkpoint, found, nil
 }
 
-func (r *ReviewWorkflowRepository) RecordReviewVerificationAttempt(ctx context.Context, runID uint64, runLeaseToken string, inputHash string, response llm.Response, finishedAt time.Time) (reviewworkflow.VerificationCheckpoint, error) {
+func (r *ReviewVerificationStore) RecordReviewVerificationAttempt(ctx context.Context, runID uint64, runLeaseToken string, inputHash string, response llm.Response, finishedAt time.Time) (reviewworkflow.VerificationCheckpoint, error) {
 	if runID == 0 || !validVerificationHash(inputHash) || finishedAt.IsZero() || !validVerificationResponse(response) {
 		return reviewworkflow.VerificationCheckpoint{}, errors.New("finding verifier 시도 기록이 완전하지 않습니다")
 	}
@@ -73,7 +73,7 @@ func (r *ReviewWorkflowRepository) RecordReviewVerificationAttempt(ctx context.C
 	return aggregate, nil
 }
 
-func (r *ReviewWorkflowRepository) SaveReviewVerification(ctx context.Context, runID uint64, runLeaseToken string, checkpoint reviewworkflow.VerificationCheckpoint) (reviewworkflow.VerificationCheckpoint, error) {
+func (r *ReviewVerificationStore) SaveReviewVerification(ctx context.Context, runID uint64, runLeaseToken string, checkpoint reviewworkflow.VerificationCheckpoint) (reviewworkflow.VerificationCheckpoint, error) {
 	if checkpoint.RunID != runID || checkpoint.InputHash == "" || checkpoint.FinishedAt.IsZero() {
 		return reviewworkflow.VerificationCheckpoint{}, errors.New("finding verifier checkpoint가 완전하지 않습니다")
 	}

@@ -120,6 +120,8 @@ func NewApplication(config Config) (*Application, error) {
 
 	reviews := mysql.NewReviewRepository(database)
 	reviewWorkflows := mysql.NewReviewWorkflowRepository(database)
+	reviewExecutionStore := mysql.NewReviewExecutionStore(database)
+	reviewVerificationStore := mysql.NewReviewVerificationStore(database)
 	reviewRetentionRepository := mysql.NewReviewRetentionRepository(database)
 	summaryPublicationRepository := mysql.NewSummaryPublicationRepository(database)
 	replyPublicationRepository := mysql.NewReplyPublicationRepository(database)
@@ -146,8 +148,8 @@ func NewApplication(config Config) (*Application, error) {
 		Renderer:     renderer,
 		Reviews:      reviews,
 		Runs:         reviewWorkflows,
-		Execution:    reviewWorkflows,
-		Verification: reviewWorkflows,
+		Execution:    reviewExecutionStore,
+		Verification: reviewVerificationStore,
 		Publications: reviewWorkflows,
 		Findings:     findings,
 		State:        pullRequestState,

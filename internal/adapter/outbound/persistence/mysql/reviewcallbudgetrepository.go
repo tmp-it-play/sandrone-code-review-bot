@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func (r *ReviewWorkflowRepository) ReserveExternalCall(ctx context.Context, runID uint64, runLeaseToken string, limit int) (bool, error) {
+func (r *ReviewExecutionStore) ReserveExternalCall(ctx context.Context, runID uint64, runLeaseToken string, limit int) (bool, error) {
 	if limit < 1 {
 		return false, nil
 	}
