@@ -121,26 +121,14 @@ func (f *reviewResultFinalizer) finalize(ctx context.Context, input reviewResult
 	attribution := attributionOf(response)
 	style := review.Style{Emoji: input.config.Emoji, Tone: string(input.config.Tone)}
 	view := review.SummaryView{
-		Summary:                 draft.Summary,
-		Fallback:                draft.Fallback(),
-		InlineCount:             len(draft.Inline()),
-		Attribution:             attribution,
-		Style:                   style,
-		Trigger:                 input.trigger,
-		Incremental:             input.incremental,
-		SkippedDup:              duplicates,
-		OmittedFindings:         omittedFindings,
-		VerificationUnavailable: verification.unavailable,
-		Unreviewed:              unreviewedOf(input.selection.Skipped, input.plan.Overflow, input.plan.Oversized, input.execution.failed, input.coverage),
-		Coverage: review.CoverageView{
-			Total:    input.coverageSummary.Total,
-			Reviewed: input.coverageSummary.Reviewed,
-			Failed:   input.coverageSummary.Failed,
-			Deferred: input.coverageSummary.Deferred,
-			Skipped:  input.coverageSummary.Skipped,
-			Pending:  input.coverageSummary.Pending,
-			Status:   string(result.runStatus),
-		},
+		Summary:         draft.Summary,
+		Fallback:        draft.Fallback(),
+		InlineCount:     len(draft.Inline()),
+		Attribution:     attribution,
+		Style:           style,
+		Trigger:         input.trigger,
+		Incremental:     input.incremental,
+		OmittedFindings: omittedFindings,
 	}
 	result.draft = draft
 	result.view = view

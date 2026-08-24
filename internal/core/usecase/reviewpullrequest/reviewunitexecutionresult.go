@@ -19,5 +19,7 @@ type reviewUnitExecutionResult struct {
 	evidenceReport    reviewanalysis.EvidenceReport
 	reusedFindings    int
 	reviewerProviders map[string]struct{}
+	externalCalls     int
+	budgetExhausted   bool
 	errorMessage      string
 }

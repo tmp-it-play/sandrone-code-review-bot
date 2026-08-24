@@ -37,6 +37,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 	usage := llm.Usage{}
 	response := llm.Response{}
 	toolExecutions := 0
+	externalCalls := input.externalCalls
 	batchResults := make([]review.Result, 0, len(input.plan.Batches))
 	captureResponse := func() {
 		response.Usage = usage
@@ -47,19 +48,47 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			response.ModelLabel = "복수 모델"
 		}
 		result.response = response
+		result.externalCalls = externalCalls
+		result.budgetExhausted = externalCalls >= input.reviewerCallLimit
 	}
 	fail := func(message string, cause error) (reviewUnitExecutionResult, error) {
 		captureResponse()
 		result.errorMessage = message
 		return result, cause
 	}
-	if _, err := e.deps.execution.SavePlan(ctx, input.runID, input.runLease, input.units, input.coverage, e.deps.clock.Now()); err != nil {
+	units, err := e.deps.execution.SavePlan(ctx, input.runID, input.runLease, input.units, input.coverage, e.deps.clock.Now())
+	if err != nil {
 		return fail("리뷰 실행 계획을 저장하지 못했습니다", err)
+	}
+	input.units = units
+	reserveExternalCall := func(limit int) func() error {
+		return func() error {
+			reserved, reserveErr := e.deps.execution.ReserveExternalCall(ctx, input.runID, input.runLease, limit)
+			if reserveErr != nil {
+				return reserveErr
+			}
+			if !reserved {
+				return llm.ErrExternalCallBudgetExhausted
+			}
+			return nil
+		}
 	}
 	for index, batch := range input.plan.Batches {
 		unit := input.units[index]
+		futureReviewCalls := 0
+		for futureIndex := index + 1; futureIndex < len(input.units); futureIndex++ {
+			if input.units[futureIndex].Status != reviewworkflow.UnitStatusSucceeded {
+				futureReviewCalls++
+			}
+		}
+		unitCallLimit := input.reviewerCallLimit - futureReviewCalls
+		if unitCallLimit < 0 {
+			unitCallLimit = 0
+		}
+		unitBudget := llm.NewScopedDurableExternalCallBudget(input.maxCalls, externalCalls, unitCallLimit, reserveExternalCall(unitCallLimit))
 		messages := llm.MaskMessages(input.planner.Messages(batch, input.promptConfig), e.deps.masker.Mask)
 		batchRequest := input.request.WithMessages(messages)
+		batchRequest.ExternalCallBudget = unitBudget
 		promptFiles := input.planner.maskedFiles(batch)
 		if input.includeFileNotes {
 			batchRequest.ResponseValidation.RequiredPaths = make([]string, 0, len(promptFiles))
@@ -127,7 +156,9 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 		captureResponse()
 
 		batchResponse, batchErr := e.deps.completer.Complete(ctx, batchRequest, executor)
+		externalCalls = unitBudget.Used()
 		if batchErr != nil {
+			deferredByBudget := errors.Is(batchErr, llm.ErrExternalCallBudgetExhausted) && batchResponse.Provider == ""
 			maskedBatchErr := errors.New(e.deps.masker.Mask(batchErr.Error()))
 			usage = usage.Add(batchResponse.Usage)
 			toolExecutions += batchResponse.ToolExecutions
@@ -139,8 +170,14 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			captureResponse()
 			e.deps.logger.Warn("일부 배치를 리뷰하지 못했습니다", "target", input.target.Reference(), "batch", index+1, "error", maskedBatchErr)
 			unitFinishedAt := e.deps.clock.Now()
+			unitStatus := reviewworkflow.UnitStatusFailed
+			coverageStatus := reviewworkflow.CoverageStatusFailed
+			if deferredByBudget {
+				unitStatus = reviewworkflow.UnitStatusDeferred
+				coverageStatus = reviewworkflow.CoverageStatusDeferred
+			}
 			if err := e.finishUnitCheckpoint(ctx, input.runID, input.runLease, unit.Hash, claim.LeaseToken, reviewworkflow.UnitResult{
-				Status:         reviewworkflow.UnitStatusFailed,
+				Status:         unitStatus,
 				InputHash:      inputHash,
 				Provider:       batchResponse.Provider,
 				Model:          batchResponse.Model,
@@ -152,8 +189,10 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			}); err != nil {
 				return fail("실패한 리뷰 unit을 저장하지 못했습니다", err)
 			}
-			transitionCoverage(input.coverage, unit.Hash, reviewworkflow.CoverageStatusFailed, nil)
-			result.failed = append(result.failed, batch...)
+			transitionCoverage(input.coverage, unit.Hash, coverageStatus, nil)
+			if !deferredByBudget {
+				result.failed = append(result.failed, batch...)
+			}
 			continue
 		}
 		usage = usage.Add(batchResponse.Usage)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -151,6 +150,11 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if maxCalls < 1 {
 		maxCalls = 12
 	}
+	verifierCallReserve := 0
+	if maxCalls > 1 {
+		verifierCallReserve = 1
+	}
+	reviewerCallLimit := maxCalls - verifierCallReserve
 	callBudget := llm.NewExternalCallBudget(maxCalls)
 	reviewRequest := llm.Request{
 		Temperature:           config.Temperature,
@@ -258,14 +262,26 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 	activeRunID = run.ID
 	activeRunLease = runLease
-	callBudget = llm.NewDurableExternalCallBudget(maxCalls, func() bool {
-		reserved, reserveErr := u.deps.Execution.ReserveExternalCall(ctx, run.ID, runLease, maxCalls)
-		if reserveErr != nil {
-			u.deps.Logger.Warn("리뷰 실행 외부 호출 예산을 예약하지 못했습니다", "run", run.ID, "error", reserveErr)
-			return false
+	externalCalls := run.ExternalCalls
+	if externalCalls < 0 {
+		externalCalls = 0
+	}
+	if externalCalls > maxCalls {
+		externalCalls = maxCalls
+	}
+	reserveExternalCall := func(limit int) func() error {
+		return func() error {
+			reserved, reserveErr := u.deps.Execution.ReserveExternalCall(ctx, run.ID, runLease, limit)
+			if reserveErr != nil {
+				return reserveErr
+			}
+			if !reserved {
+				return llm.ErrExternalCallBudgetExhausted
+			}
+			return nil
 		}
-		return reserved
-	})
+	}
+	callBudget = llm.NewScopedDurableExternalCallBudget(maxCalls, externalCalls, maxCalls, reserveExternalCall(maxCalls))
 	reviewRequest.ExternalCallBudget = callBudget
 	if resumePublishing {
 		marker := reviewworkflow.PublicationMarker(run.Key)
@@ -404,19 +420,22 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	plan, promptConfig := planner.Build(loaded)
 	units, coverage := (reviewworkflow.PlanBuilder{MaxFileChars: config.MaxFileChars, ExpectedFiles: expectedFiles}).Build(files, chosen, plan)
 	unitExecution, unitExecutionErr := u.unitExecutor.execute(ctx, reviewUnitExecution{
-		target:           target,
-		runID:            run.ID,
-		runConfigHash:    run.ConfigHash,
-		runLease:         runLease,
-		config:           config,
-		planner:          planner,
-		plan:             plan,
-		promptConfig:     promptConfig,
-		units:            units,
-		coverage:         coverage,
-		request:          reviewRequest,
-		paths:            pathMap,
-		includeFileNotes: includeFileNotes,
+		target:            target,
+		runID:             run.ID,
+		runConfigHash:     run.ConfigHash,
+		runLease:          runLease,
+		config:            config,
+		planner:           planner,
+		plan:              plan,
+		promptConfig:      promptConfig,
+		units:             units,
+		coverage:          coverage,
+		request:           reviewRequest,
+		paths:             pathMap,
+		includeFileNotes:  includeFileNotes,
+		maxCalls:          maxCalls,
+		reviewerCallLimit: reviewerCallLimit,
+		externalCalls:     externalCalls,
 	})
 	failureResponse = unitExecution.response
 	if unitExecutionErr != nil {
@@ -425,7 +444,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	response := unitExecution.response
 	reviewed := unitExecution.reviewed
 	failed := unitExecution.failed
-	if len(failed) > 0 && !task.FinalAttempt {
+	if len(failed) > 0 && !task.FinalAttempt && !unitExecution.budgetExhausted {
 		return fail("일부 리뷰 unit을 완료하지 못했습니다", fmt.Errorf("%d개 파일이 다음 시도에 남았습니다", len(failed)))
 	}
 	coverageSummary := reviewworkflow.SummarizeCoverage(coverage)
@@ -451,24 +470,27 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			*outcome = reviewOutcomeOf(actualStatus)
 			return nil
 		}
+		if unitExecution.budgetExhausted {
+			u.notify(ctx, target, task, review.Notice{Kind: review.NoticeUnavailable, Message: "정해진 호출 예산 안에서 유효한 리뷰 결과를 만들지 못했습니다."})
+			u.save(ctx, task, startedAt, review.OutcomeFailed, detail, response, 0, 0, run.ID)
+			*outcome = review.OutcomeFailed
+			return nil
+		}
 		return fail("유효한 리뷰 결과를 만들지 못했습니다", fmt.Errorf("모든 리뷰 unit이 실패했습니다"))
 	}
 
+	reviewRequest.ExternalCallBudget = llm.NewScopedDurableExternalCallBudget(maxCalls, unitExecution.externalCalls, maxCalls, reserveExternalCall(maxCalls))
 	finalizedResult, finalizationErr := u.resultFinalizer.finalize(ctx, reviewResultFinalization{
-		target:          target,
-		runID:           run.ID,
-		runLease:        runLease,
-		config:          config,
-		execution:       unitExecution,
-		request:         reviewRequest,
-		paths:           pathMap,
-		trigger:         task.Trigger,
-		incremental:     incremental,
-		selection:       chosen,
-		plan:            plan,
-		coverage:        coverage,
-		coverageSummary: coverageSummary,
-		runStatus:       runStatus,
+		target:      target,
+		runID:       run.ID,
+		runLease:    runLease,
+		config:      config,
+		execution:   unitExecution,
+		request:     reviewRequest,
+		paths:       pathMap,
+		trigger:     task.Trigger,
+		incremental: incremental,
+		runStatus:   runStatus,
 	})
 	failureResponse = finalizedResult.failureResponse
 	if finalizationErr != nil {
@@ -664,7 +686,7 @@ func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, task jo
 
 func (u *UseCase) fail(ctx context.Context, task job.ReviewJob, startedAt time.Time, message string, cause error, runID uint64, recordFailure bool, response llm.Response) error {
 	u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
-	if notice, announce := failureNotice(task.Attempt, task.FinalAttempt, message); announce {
+	if notice, announce := failureNotice(task.Attempt, task.FinalAttempt); announce {
 		u.announce(ctx, task.Target, notice)
 	}
 	if task.FinalAttempt && recordFailure {
@@ -679,12 +701,12 @@ func (u *UseCase) announce(ctx context.Context, target pullrequest.Target, notic
 	}
 }
 
-func failureNotice(attempt int, final bool, message string) (review.Notice, bool) {
+func failureNotice(attempt int, final bool) (review.Notice, bool) {
 	switch {
 	case final:
-		return review.Notice{Kind: review.NoticeFailed, Message: message + " 재시도했지만 해결되지 않아 중단합니다."}, true
+		return review.Notice{Kind: review.NoticeFailed, Message: "리뷰를 완료하지 못했습니다. 재시도했지만 해결되지 않아 중단합니다."}, true
 	case attempt == 0:
-		return review.Notice{Kind: review.NoticeRetrying, Message: message + " 잠시 후 다시 시도합니다."}, true
+		return review.Notice{Kind: review.NoticeRetrying, Message: "리뷰를 완료하지 못했습니다. 잠시 후 다시 시도합니다."}, true
 	default:
 		return review.Notice{}, false
 	}
@@ -766,63 +788,4 @@ func inventoryOf(files []pullrequest.ChangedFile) []pullrequest.ChangedFile {
 		inventory = append(inventory, pullrequest.ChangedFile{Path: file.Path, Additions: file.Additions, Deletions: file.Deletions})
 	}
 	return inventory
-}
-
-func unreviewedOf(overCount []pullrequest.ChangedFile, overflow []pullrequest.ChangedFile, oversized []pullrequest.ChangedFile, failed []pullrequest.ChangedFile, coverage []reviewworkflow.CoverageItem) []review.UnreviewedFile {
-	groups := []struct {
-		files  []pullrequest.ChangedFile
-		reason string
-	}{
-		{overCount, "리뷰 대상 파일 수 상한 초과"},
-		{overflow, "리뷰 배치 수 상한 초과"},
-		{oversized, "모델 입력 한도 초과"},
-		{failed, "모델 호출 실패"},
-	}
-	unreviewed := make([]review.UnreviewedFile, 0)
-	seen := map[string]struct{}{}
-	for _, group := range groups {
-		for _, file := range group.files {
-			if _, found := seen[file.Path]; found {
-				continue
-			}
-			seen[file.Path] = struct{}{}
-			unreviewed = append(unreviewed, review.UnreviewedFile{
-				Path:      file.Path,
-				Additions: file.Additions,
-				Deletions: file.Deletions,
-				Reason:    group.reason,
-			})
-		}
-	}
-	coverageReasons := map[string]string{
-		"patch_unavailable":        "GitHub diff를 가져오지 못함",
-		"patch_truncated":          "파일 diff 분량 상한 초과",
-		"incomplete_hunk":          "완전한 diff hunk를 가져오지 못함",
-		"patch_incomplete":         "파일 diff 일부 누락",
-		"file_manifest_incomplete": "PR 변경 파일 목록 일부 누락",
-		"prompt_limit":             "모델 입력 한도 초과",
-		"unplanned":                "리뷰 unit에 배정되지 않음",
-	}
-	for _, item := range coverage {
-		if item.Status != reviewworkflow.CoverageStatusDeferred && item.Status != reviewworkflow.CoverageStatusFailed {
-			continue
-		}
-		reason, found := coverageReasons[item.Reason]
-		if !found {
-			continue
-		}
-		path := item.Path
-		if path == "" {
-			path = "PR diff manifest"
-		}
-		if _, found := seen[path]; found {
-			continue
-		}
-		seen[path] = struct{}{}
-		unreviewed = append(unreviewed, review.UnreviewedFile{Path: path, Reason: reason})
-	}
-	sort.SliceStable(unreviewed, func(left, right int) bool {
-		return unreviewed[left].Path < unreviewed[right].Path
-	})
-	return unreviewed
 }

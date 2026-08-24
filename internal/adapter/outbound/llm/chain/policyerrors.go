@@ -1,12 +1,16 @@
 package chain
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
+)
 
 var ErrRequestPolicyRequired = errors.New("LLM 요청에 유효한 역할과 데이터 분류가 필요합니다")
 
 var ErrExternalCallBudgetRequired = errors.New("LLM 요청에 공유 외부 호출 예산이 필요합니다")
 
-var ErrExternalCallBudgetExhausted = errors.New("공유 외부 호출 예산을 모두 사용했습니다")
+var ErrExternalCallBudgetExhausted = llm.ErrExternalCallBudgetExhausted
 
 var ErrNoProviderAllowed = errors.New("요청 역할과 데이터 분류에 허용된 LLM 프로바이더가 없습니다")
 

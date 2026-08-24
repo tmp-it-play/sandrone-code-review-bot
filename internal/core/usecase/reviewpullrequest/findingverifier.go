@@ -72,25 +72,25 @@ func (v *findingVerifier) verify(ctx context.Context, input findingVerification)
 		return result, nil
 	}
 	if request.ExternalCallBudget == nil || request.ExternalCallBudget.Remaining() == 0 {
-		v.deps.logger.Warn("독립 finding verifier 호출 예산이 없어 후보를 게시하지 않습니다")
+		v.deps.logger.Warn("독립 finding verifier 호출 예산이 없어 결정론적 검증 결과를 사용합니다")
+		result.findings = input.findings
 		result.response = checkpointResponse
-		result.rejected = len(input.findings)
 		result.unavailable = true
 		return result, nil
 	}
 	response, err := v.deps.completer.Complete(ctx, request, nil)
 	response.Content = v.deps.masker.Mask(response.Content)
 	if err != nil {
-		v.deps.logger.Warn("독립 finding verifier를 완료하지 못해 후보를 게시하지 않습니다", "error", v.deps.masker.Mask(err.Error()))
+		v.deps.logger.Warn("독립 finding verifier를 완료하지 못해 결정론적 검증 결과를 사용합니다", "error", v.deps.masker.Mask(err.Error()))
 		return v.unavailableResult(ctx, input, inputHash, response)
 	}
 	if !response.Completed() {
-		v.deps.logger.Warn("독립 finding verifier 응답이 완료되지 않아 후보를 게시하지 않습니다", "finish_reason", response.FinishReason)
+		v.deps.logger.Warn("독립 finding verifier 응답이 완료되지 않아 결정론적 검증 결과를 사용합니다", "finish_reason", response.FinishReason)
 		return v.unavailableResult(ctx, input, inputHash, response)
 	}
 	decisions, err := (findingverification.Parser{}).Parse(response.Content, input.findings)
 	if err != nil {
-		v.deps.logger.Warn("독립 finding verifier 응답이 유효하지 않아 후보를 게시하지 않습니다", "error", err)
+		v.deps.logger.Warn("독립 finding verifier 응답이 유효하지 않아 결정론적 검증 결과를 사용합니다", "error", err)
 		return v.unavailableResult(ctx, input, inputHash, response)
 	}
 	supported := decisions.Supported(input.findings)
@@ -132,8 +132,8 @@ func (v *findingVerifier) verify(ctx context.Context, input findingVerification)
 func (v *findingVerifier) unavailableResult(ctx context.Context, input findingVerification, inputHash string, response llm.Response) (findingVerificationResult, error) {
 	aggregate, err := v.recordAttempt(ctx, input.runID, input.runLease, inputHash, response)
 	result := findingVerificationResult{
+		findings: input.findings,
 		response: aggregate,
-		rejected: len(input.findings),
 		used:     true,
 	}
 	if err != nil {

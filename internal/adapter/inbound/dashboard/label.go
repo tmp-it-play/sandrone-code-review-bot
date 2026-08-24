@@ -38,12 +38,17 @@ var placementLabels = map[review.Placement]string{
 }
 
 var failureLabels = map[string]string{
-	"quota":        "한도 소진",
-	"rate_limited": "호출 제한",
-	"unavailable":  "서비스 불가",
-	"invalid":      "요청 오류",
-	"auth":         "인증 오류",
-	"failed":       "알 수 없는 오류",
+	"quota":                     "한도 소진",
+	"rate_limited":              "호출 제한",
+	"unavailable":               "서비스 불가",
+	"invalid":                   "요청 오류",
+	"auth":                      "인증 오류",
+	"failed":                    "알 수 없는 오류",
+	"incomplete":                "불완전 응답",
+	"invalid_json":              "JSON 형식 오류",
+	"invalid_semantic_response": "근거·결과 검증 실패",
+	"budget_exhausted":          "호출 예산 소진",
+	"budget_unavailable":        "호출 예산 확인 오류",
 }
 
 func failureLabel(kind string, status int) string {

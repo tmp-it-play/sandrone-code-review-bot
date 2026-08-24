@@ -241,10 +241,8 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 			CompletionTokens: response.Usage.CompletionTokens,
 			TotalTokens:      response.Usage.TotalTokens,
 		},
-		Style:      review.Style{Emoji: config.Emoji, Tone: string(config.Tone)},
-		Trigger:    task.Trigger,
-		Unreviewed: plan.Unreviewed,
-		Coverage:   plan.Coverage,
+		Style:   review.Style{Emoji: config.Emoji, Tone: string(config.Tone)},
+		Trigger: task.Trigger,
 	}), u.deps.Renderer.Marker(), publicationMarker)
 	if renewErr := u.renewPublication(ctx, target, task.OperationKey, publicationLease); renewErr != nil {
 		return renewErr

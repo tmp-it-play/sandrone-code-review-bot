@@ -56,7 +56,7 @@ func (p *ReviewPublisher) SubmitReview(ctx context.Context, target pullrequest.T
 		drafts = append(drafts, draft)
 	}
 	request := &gh.PullRequestReviewRequest{
-		Body:     gh.Ptr(body),
+		Body:     gh.Ptr(review.SanitizePublicBody(body)),
 		Event:    gh.Ptr("COMMENT"),
 		Comments: drafts,
 	}
@@ -135,7 +135,7 @@ func (p *ReviewPublisher) CreateComment(ctx context.Context, target pullrequest.
 	if err != nil {
 		return 0, err
 	}
-	comment, _, err := client.Issues.CreateComment(ctx, target.Owner, target.Repository, target.Number, &gh.IssueComment{Body: gh.Ptr(body)})
+	comment, _, err := client.Issues.CreateComment(ctx, target.Owner, target.Repository, target.Number, &gh.IssueComment{Body: gh.Ptr(review.SanitizePublicBody(body))})
 	if err != nil {
 		return 0, fmt.Errorf("코멘트를 남기지 못했습니다: %w", err)
 	}
@@ -147,7 +147,7 @@ func (p *ReviewPublisher) UpdateComment(ctx context.Context, target pullrequest.
 	if err != nil {
 		return err
 	}
-	if _, _, err := client.Issues.EditComment(ctx, target.Owner, target.Repository, commentID, &gh.IssueComment{Body: gh.Ptr(body)}); err != nil {
+	if _, _, err := client.Issues.EditComment(ctx, target.Owner, target.Repository, commentID, &gh.IssueComment{Body: gh.Ptr(review.SanitizePublicBody(body))}); err != nil {
 		return fmt.Errorf("코멘트를 수정하지 못했습니다: %w", err)
 	}
 	return nil
@@ -249,7 +249,7 @@ func (p *ReviewPublisher) UpdatePullRequestBody(ctx context.Context, target pull
 	if err != nil {
 		return fmt.Errorf("PR 본문을 읽지 못했습니다: %w", err)
 	}
-	updated := replaceSection(current.GetBody(), marker, section)
+	updated := replaceSection(current.GetBody(), marker, review.SanitizePublicBody(section))
 	if _, _, err := client.PullRequests.Edit(ctx, target.Owner, target.Repository, target.Number, &gh.PullRequest{Body: gh.Ptr(updated)}); err != nil {
 		return fmt.Errorf("PR 본문을 수정하지 못했습니다: %w", err)
 	}
