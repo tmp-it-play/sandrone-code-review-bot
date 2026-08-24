@@ -25,10 +25,3 @@ func isFinalAttempt(ctx context.Context) bool {
 	}
 	return retried >= maximum
 }
-
-func outcomeLabel(err error) string {
-	if err != nil {
-		return "failed"
-	}
-	return "succeeded"
-}
