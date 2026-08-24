@@ -2,8 +2,6 @@ package mysql
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -884,30 +882,6 @@ func updateWatermark(transaction *gorm.DB, stateID uint64, run model.ReviewRun, 
 	}).Error
 }
 
-func updateReviewProjection(transaction *gorm.DB, run model.ReviewRun, outcome review.Outcome, detail string, finishedAt time.Time) error {
-	runID := run.ID
-	entry := model.Review{
-		ReviewRunID: &runID,
-		Owner:       run.Owner,
-		Repository:  run.Repository,
-		Number:      run.Number,
-		HeadSHA:     run.HeadSHA,
-		Trigger:     run.Trigger,
-		Outcome:     string(outcome),
-		Detail:      strings.TrimSpace(detail),
-		StartedAt:   run.StartedAt,
-		FinishedAt:  finishedAt,
-	}
-	return transaction.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "review_run_id"}},
-		DoUpdates: clause.Assignments(map[string]any{
-			"outcome":     entry.Outcome,
-			"detail":      entry.Detail,
-			"finished_at": entry.FinishedAt,
-		}),
-	}).Create(&entry).Error
-}
-
 func reviewOutcomeForRunStatus(status reviewworkflow.RunStatus) review.Outcome {
 	switch status {
 	case reviewworkflow.RunStatusComplete:
@@ -922,101 +896,6 @@ func reviewOutcomeForRunStatus(status reviewworkflow.RunStatus) review.Outcome {
 		return review.OutcomeFailed
 	default:
 		return review.OutcomeUnavailable
-	}
-}
-
-func requireRunLease(transaction *gorm.DB, runID uint64, leaseToken string) error {
-	var run model.ReviewRun
-	if err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).First(&run, runID).Error; err != nil {
-		return err
-	}
-	if err := validateRunLease(transaction, run, leaseToken); err != nil {
-		return err
-	}
-	_, err := requireLatestRun(transaction, run)
-	return err
-}
-
-func validateRunLease(transaction *gorm.DB, run model.ReviewRun, leaseToken string) error {
-	if reviewworkflow.RunStatus(run.Status).IsTerminal() || run.LeaseToken == "" || run.LeaseToken != leaseToken || run.LeaseExpiresAt == nil {
-		return reviewworkflow.ErrRunLeased
-	}
-	now, err := databaseTime(transaction)
-	if err != nil {
-		return err
-	}
-	if !run.LeaseExpiresAt.After(now) {
-		return reviewworkflow.ErrRunLeased
-	}
-	return nil
-}
-
-func databaseTime(transaction *gorm.DB) (time.Time, error) {
-	var now time.Time
-	if err := transaction.Raw("SELECT CURRENT_TIMESTAMP(6)").Scan(&now).Error; err != nil {
-		return time.Time{}, err
-	}
-	return now, nil
-}
-
-func requireLatestRun(transaction *gorm.DB, run model.ReviewRun) (model.PullRequestState, error) {
-	var state model.PullRequestState
-	if err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).Where("owner = ? AND repository = ? AND number = ?", run.Owner, run.Repository, run.Number).First(&state).Error; err != nil {
-		return model.PullRequestState{}, err
-	}
-	if state.LatestRunID != run.ID || state.LatestHeadSHA != run.HeadSHA {
-		return model.PullRequestState{}, reviewworkflow.ErrRunSuperseded
-	}
-	return state, nil
-}
-
-func clearPublicationClaim(transaction *gorm.DB, stateID uint64, runID uint64, leaseToken string) error {
-	result := transaction.Model(&model.PullRequestState{}).
-		Where("id = ? AND publishing_run_id = ? AND publishing_lease_token = ?", stateID, runID, leaseToken).
-		UpdateColumns(publicationClaimClearValues())
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected != 1 {
-		return reviewworkflow.ErrPublicationLeased
-	}
-	return nil
-}
-
-func publicationClaimClearValues() map[string]any {
-	return map[string]any{
-		"publishing_run_id":           0,
-		"publishing_head_sha":         "",
-		"publishing_lease_token":      "",
-		"publishing_lease_expires_at": nil,
-	}
-}
-
-func boundedText(value string, limit int) string {
-	trimmed := strings.TrimSpace(value)
-	runes := []rune(trimmed)
-	if len(runes) <= limit {
-		return trimmed
-	}
-	return string(runes[:limit])
-}
-
-func newLeaseToken() (string, error) {
-	value := make([]byte, 16)
-	if _, err := rand.Read(value); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(value), nil
-}
-
-func terminalRunStatuses() []string {
-	return []string{
-		string(reviewworkflow.RunStatusComplete),
-		string(reviewworkflow.RunStatusPartial),
-		string(reviewworkflow.RunStatusFailed),
-		string(reviewworkflow.RunStatusSuperseded),
-		string(reviewworkflow.RunStatusCancelled),
-		string(reviewworkflow.RunStatusSkipped),
 	}
 }
 
