@@ -2,6 +2,8 @@ package dashboard
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/command"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
@@ -41,6 +43,7 @@ var failureLabels = map[string]string{
 	"quota":                     "한도 소진",
 	"rate_limited":              "호출 제한",
 	"unavailable":               "서비스 불가",
+	"aborted":                   "요청 중단",
 	"invalid":                   "요청 오류",
 	"auth":                      "인증 오류",
 	"failed":                    "알 수 없는 오류",
@@ -51,15 +54,25 @@ var failureLabels = map[string]string{
 	"budget_unavailable":        "호출 예산 확인 오류",
 }
 
-func failureLabel(kind string, status int) string {
+func failureLabel(kind string, status int, providerErrorCode string, requestElapsedMilliseconds int64) string {
 	if kind == "" {
 		return ""
 	}
 	label := lookup(failureLabels, kind, kind)
+	details := make([]string, 0, 3)
 	if status > 0 {
-		return fmt.Sprintf("%s (%d)", label, status)
+		details = append(details, fmt.Sprintf("HTTP %d", status))
 	}
-	return label
+	if providerErrorCode != "" {
+		details = append(details, "code "+providerErrorCode)
+	}
+	if requestElapsedMilliseconds > 0 {
+		details = append(details, "요청 "+(time.Duration(requestElapsedMilliseconds)*time.Millisecond).String())
+	}
+	if len(details) == 0 {
+		return label
+	}
+	return fmt.Sprintf("%s (%s)", label, strings.Join(details, ", "))
 }
 
 func triggerLabel(trigger review.Trigger) string {

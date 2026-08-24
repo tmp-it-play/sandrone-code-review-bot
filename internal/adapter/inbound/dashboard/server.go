@@ -259,7 +259,12 @@ func (s *Server) providerViews(ctx context.Context) []ProviderView {
 			Failed:       snapshot.Failed,
 			QuotaBlocked: snapshot.QuotaBlocked,
 			LastUsedAt:   formatTime(snapshot.LastUsedAt),
-			LastFailure:  failureLabel(snapshot.LastFailureKind, snapshot.LastFailureStatus),
+			LastFailure: failureLabel(
+				snapshot.LastFailureKind,
+				snapshot.LastFailureStatus,
+				snapshot.LastFailureProviderErrorCode,
+				snapshot.LastFailureRequestElapsedMilliseconds,
+			),
 		}
 		if !snapshot.LastFailureAt.IsZero() {
 			view.LastFailureAt = formatTime(snapshot.LastFailureAt)
