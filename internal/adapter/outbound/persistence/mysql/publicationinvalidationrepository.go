@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func (r *ReviewWorkflowRepository) ClaimPublicationInvalidations(ctx context.Context, claimedAt time.Time, leaseExpiresAt time.Time, limit int) ([]reviewworkflow.PublicationInvalidation, error) {
+func (s *PublicationInvalidationStore) ClaimPublicationInvalidations(ctx context.Context, claimedAt time.Time, leaseExpiresAt time.Time, limit int) ([]reviewworkflow.PublicationInvalidation, error) {
 	if claimedAt.IsZero() || !leaseExpiresAt.After(claimedAt) {
 		return nil, fmt.Errorf("게시 무효화 claim 시간이 올바르지 않습니다")
 	}
@@ -20,7 +20,7 @@ func (r *ReviewWorkflowRepository) ClaimPublicationInvalidations(ctx context.Con
 		limit = 100
 	}
 	entries := make([]model.PublicationInvalidation, 0, limit)
-	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+	err := s.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
 		if err := transaction.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Where("resolved_at IS NULL AND expires_at > ? AND next_attempt_at <= ?", claimedAt, claimedAt).
 			Where("lease_token = '' OR lease_expires_at IS NULL OR lease_expires_at <= ?", claimedAt).
@@ -61,8 +61,8 @@ func (r *ReviewWorkflowRepository) ClaimPublicationInvalidations(ctx context.Con
 	return invalidations, nil
 }
 
-func (r *ReviewWorkflowRepository) CompletePublicationInvalidation(ctx context.Context, invalidationID uint64, leaseToken string, resolvedAt time.Time) error {
-	updated := r.database.WithContext(ctx).Model(&model.PublicationInvalidation{}).
+func (s *PublicationInvalidationStore) CompletePublicationInvalidation(ctx context.Context, invalidationID uint64, leaseToken string, resolvedAt time.Time) error {
+	updated := s.database.WithContext(ctx).Model(&model.PublicationInvalidation{}).
 		Where("id = ? AND lease_token = ? AND resolved_at IS NULL", invalidationID, leaseToken).
 		Updates(map[string]any{
 			"lease_token":      "",
@@ -80,8 +80,8 @@ func (r *ReviewWorkflowRepository) CompletePublicationInvalidation(ctx context.C
 	return nil
 }
 
-func (r *ReviewWorkflowRepository) RetryPublicationInvalidation(ctx context.Context, invalidationID uint64, leaseToken string, failedAt time.Time, nextAttemptAt time.Time, failure string) error {
-	updated := r.database.WithContext(ctx).Model(&model.PublicationInvalidation{}).
+func (s *PublicationInvalidationStore) RetryPublicationInvalidation(ctx context.Context, invalidationID uint64, leaseToken string, failedAt time.Time, nextAttemptAt time.Time, failure string) error {
+	updated := s.database.WithContext(ctx).Model(&model.PublicationInvalidation{}).
 		Where("id = ? AND lease_token = ? AND resolved_at IS NULL", invalidationID, leaseToken).
 		Updates(map[string]any{
 			"attempts":         gorm.Expr("attempts + 1"),

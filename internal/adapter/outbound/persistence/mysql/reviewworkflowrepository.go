@@ -485,34 +485,6 @@ func (r *ReviewWorkflowRepository) FinishRun(ctx context.Context, runID uint64, 
 	return status, nil
 }
 
-func (r *ReviewWorkflowRepository) PublicationCandidateHighWatermark(ctx context.Context, before time.Time) (uint64, error) {
-	var highWatermark uint64
-	row := r.database.WithContext(ctx).Model(&model.ReviewRun{}).
-		Where("status = ? AND heartbeat_at <= ?", string(reviewworkflow.RunStatusPublishing), before).
-		Select("COALESCE(MAX(id), 0)").Row()
-	if err := row.Scan(&highWatermark); err != nil {
-		return 0, fmt.Errorf("게시 조정 대상 high watermark를 읽지 못했습니다: %w", err)
-	}
-	return highWatermark, nil
-}
-
-func (r *ReviewWorkflowRepository) PublicationCandidates(ctx context.Context, before time.Time, afterID uint64, throughID uint64, limit int) ([]reviewworkflow.Run, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-	var entries []model.ReviewRun
-	if err := r.database.WithContext(ctx).
-		Where("id > ? AND id <= ? AND status = ? AND heartbeat_at <= ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?)", afterID, throughID, string(reviewworkflow.RunStatusPublishing), before, before).
-		Order("id ASC").Limit(limit).Find(&entries).Error; err != nil {
-		return nil, fmt.Errorf("게시 조정 대상 리뷰 실행을 읽지 못했습니다: %w", err)
-	}
-	runs := make([]reviewworkflow.Run, 0, len(entries))
-	for _, entry := range entries {
-		runs = append(runs, mapper.ToReviewRun(entry))
-	}
-	return runs, nil
-}
-
 func registerLatestRun(transaction *gorm.DB, run model.ReviewRun, registeredAt time.Time) (bool, bool, error) {
 	var snapshotObservedAt *time.Time
 	if !run.SnapshotObservedAt.IsZero() {
