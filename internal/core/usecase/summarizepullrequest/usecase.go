@@ -176,7 +176,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		return u.fail(ctx, task, startedAt, "기존 요약 모델 결과를 읽지 못했습니다", err)
 	}
 	response := checkpoint.MetadataResponse()
-	summary := review.Summary{}
+	var summary review.Summary
 	if cached {
 		summary, err = summaryFromCanonicalContent(checkpoint.CanonicalContent)
 		if err != nil {
