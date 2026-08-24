@@ -100,34 +100,48 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 		httpRequest.Header.Set(key, value)
 	}
 
+	startedAt := time.Now()
 	httpResponse, err := c.httpClient.Do(httpRequest)
 	if err != nil {
-		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureUnavailable, Cause: err}
+		if ctx.Err() != nil {
+			return llm.Response{}, ctx.Err()
+		}
+		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureUnavailable, Elapsed: time.Since(startedAt), Cause: err}
 	}
 	defer func() {
 		_ = httpResponse.Body.Close()
 	}()
 
 	raw, err := io.ReadAll(httpResponse.Body)
+	elapsed := time.Since(startedAt)
 	if err != nil {
-		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureUnavailable, Cause: err}
+		if ctx.Err() != nil {
+			return llm.Response{}, ctx.Err()
+		}
+		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureUnavailable, Elapsed: elapsed, Cause: err}
 	}
 	if httpResponse.StatusCode >= 400 {
+		providerErrorCode, providerErrorMessage := parseAPIError(raw)
+		if providerErrorMessage == "" {
+			providerErrorMessage = "프로바이더가 오류 응답을 반환했습니다"
+		}
 		return llm.Response{}, &llm.Failure{
-			Provider:   c.name,
-			Kind:       classify(httpResponse.StatusCode, raw),
-			Status:     httpResponse.StatusCode,
-			RetryAfter: parseRetryAfter(httpResponse.Header.Get("Retry-After"), time.Now()),
-			Cause:      fmt.Errorf("%s", describe(raw)),
+			Provider:          c.name,
+			Kind:              classify(httpResponse.StatusCode, providerErrorCode, providerErrorMessage),
+			Status:            httpResponse.StatusCode,
+			ProviderErrorCode: providerErrorCode,
+			RetryAfter:        parseRetryAfter(httpResponse.Header.Get("Retry-After"), time.Now()),
+			Elapsed:           elapsed,
+			Cause:             fmt.Errorf("%s", providerErrorMessage),
 		}
 	}
 
 	var decoded chatResponse
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureInvalid, Status: httpResponse.StatusCode, Cause: err}
+		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureInvalid, Status: httpResponse.StatusCode, Elapsed: elapsed, Cause: err}
 	}
 	if len(decoded.Choices) == 0 {
-		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureInvalid, Status: httpResponse.StatusCode, Cause: fmt.Errorf("응답에 선택지가 없습니다")}
+		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureInvalid, Status: httpResponse.StatusCode, Elapsed: elapsed, Cause: fmt.Errorf("응답에 선택지가 없습니다")}
 	}
 	choice := decoded.Choices[0]
 	content := choice.Message.Content
@@ -255,8 +269,8 @@ func fromChatToolCalls(calls []chatToolCall) []llm.ToolCall {
 	return converted
 }
 
-func classify(status int, raw []byte) llm.FailureKind {
-	text := strings.ToLower(describe(raw))
+func classify(status int, providerErrorCode string, providerErrorMessage string) llm.FailureKind {
+	text := strings.ToLower(providerErrorMessage)
 	switch {
 	case status == 429:
 		if strings.Contains(text, "quota") || strings.Contains(text, "exceeded your current") {
@@ -267,22 +281,14 @@ func classify(status int, raw []byte) llm.FailureKind {
 		return llm.FailureAuth
 	case status == 402:
 		return llm.FailureQuota
+	case status == http.StatusRequestTimeout:
+		if providerErrorCode == "3008" {
+			return llm.FailureAborted
+		}
+		return llm.FailureUnavailable
 	case status >= 500:
 		return llm.FailureUnavailable
 	default:
 		return llm.FailureInvalid
 	}
-}
-
-func describe(raw []byte) string {
-	var decoded apiError
-	if err := json.Unmarshal(raw, &decoded); err == nil {
-		if text := decoded.text(); text != "" {
-			return text
-		}
-	}
-	if len(raw) > 400 {
-		return string(raw[:400])
-	}
-	return string(raw)
 }

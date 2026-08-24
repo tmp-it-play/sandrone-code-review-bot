@@ -72,7 +72,7 @@ func (c *Chain) PromptBudgetFor(request llm.Request) int {
 
 func (c *Chain) PolicyHashInputs(request llm.Request) llm.PolicyHashInputs {
 	identity := llm.PolicyHashInputs{
-		Version:               "llm-routing-v3",
+		Version:               "llm-routing-v4",
 		TaskRole:              request.TaskRole,
 		DataClassification:    request.DataClassification,
 		RequestedProviders:    normalizedNames(request.Providers),
@@ -118,6 +118,11 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 	invokedProviders := map[string]struct{}{}
 	lastResponse := llm.Response{}
 	for _, candidate := range c.providers {
+		if err := ctx.Err(); err != nil {
+			lastResponse.Usage = usage
+			lastResponse.ToolExecutions = toolExecutions
+			return lastResponse, err
+		}
 		if !routeAllowed(candidate, request) {
 			continue
 		}
@@ -142,6 +147,12 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		}
 		cooling, err := c.cooldown.Active(ctx, candidate.Name())
 		if err != nil {
+			if ctx.Err() != nil {
+				release()
+				lastResponse.Usage = usage
+				lastResponse.ToolExecutions = toolExecutions
+				return lastResponse, ctx.Err()
+			}
 			c.logger.Warn("쿨다운 상태를 읽지 못했습니다", "provider", candidate.Name(), "error", err)
 		}
 		if cooling {
@@ -153,6 +164,9 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			lastResponse.Usage = usage
 			lastResponse.ToolExecutions = toolExecutions
 			release()
+			if ctx.Err() != nil {
+				return lastResponse, ctx.Err()
+			}
 			return lastResponse, reserveErr
 		}
 		response, observedUsage, attemptErr := c.attemptWithRetry(ctx, candidate, request, executor)
@@ -169,6 +183,12 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			}
 			lastResponse = response
 		}
+		if attemptErr != nil && ctx.Err() != nil {
+			lastResponse.Usage = usage
+			lastResponse.ToolExecutions = toolExecutions
+			release()
+			return lastResponse, ctx.Err()
+		}
 		if attemptErr == nil && !response.Completed() {
 			attemptErr = ErrIncompleteResponse
 		}
@@ -184,19 +204,23 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			if len(invokedProviders) > 1 {
 				response.ModelLabel = "복수 모델"
 			}
-			c.observe(ctx, candidate, response.Model, request.TaskRole, "succeeded", 0, observedUsage)
+			c.observe(ctx, candidate, response.Model, request.TaskRole, "succeeded", 0, observedUsage, nil)
 			release()
 			return response, nil
 		}
 		if errors.Is(attemptErr, llm.ErrExternalCallBudgetExhausted) || errors.Is(attemptErr, llm.ErrExternalCallBudgetUnavailable) {
 			lastResponse.Usage = usage
 			lastResponse.ToolExecutions = toolExecutions
+			if ctx.Err() != nil {
+				release()
+				return lastResponse, ctx.Err()
+			}
 			if invoked {
 				budgetOutcome := "budget_exhausted"
 				if errors.Is(attemptErr, llm.ErrExternalCallBudgetUnavailable) {
 					budgetOutcome = "budget_unavailable"
 				}
-				c.observe(ctx, candidate, candidate.Model(), request.TaskRole, budgetOutcome, 0, observedUsage)
+				c.observe(ctx, candidate, candidate.Model(), request.TaskRole, budgetOutcome, 0, observedUsage, nil)
 			}
 			release()
 			return lastResponse, attemptErr
@@ -217,7 +241,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		if ok {
 			outcome = string(failure.Kind)
 			status = failure.Status
-			if failure.Kind.TriggersCooldown() || failure.RetryAfter > 0 {
+			if failure.Kind.TriggersCooldown() || (failure.Kind != llm.FailureAborted && failure.RetryAfter > 0) {
 				c.markProviderCooldown(ctx, candidate, failure.RetryAfter)
 			}
 		}
@@ -226,10 +250,17 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			reason = semanticFailureReason(attemptErr)
 		}
 		if invoked {
-			c.observe(ctx, candidate, candidate.Model(), request.TaskRole, outcome, status, observedUsage)
+			c.observe(ctx, candidate, candidate.Model(), request.TaskRole, outcome, status, observedUsage, failure)
 		}
-		c.logger.Warn("프로바이더 호출에 실패해 다음으로 넘어간다", "provider", candidate.Name(), "outcome", outcome, "status", status, "reason", reason)
+		logFields := []any{"provider", candidate.Name(), "outcome", outcome, "status", status, "reason", reason}
+		logFields = append(logFields, providerFailureLogFields(failure)...)
+		c.logger.Warn("프로바이더 호출에 실패해 다음으로 넘어간다", logFields...)
 		release()
+	}
+	if err := ctx.Err(); err != nil {
+		lastResponse.Usage = usage
+		lastResponse.ToolExecutions = toolExecutions
+		return lastResponse, err
 	}
 	if !routed {
 		return llm.Response{}, ErrNoProviderAllowed
@@ -267,14 +298,18 @@ func (c *Chain) attemptWithRetry(ctx context.Context, candidate outbound.Provide
 			response.ToolExecutions = toolExecutions
 			return response, lastAttemptUsage, nil
 		}
+		if ctx.Err() != nil {
+			return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, lastAttemptUsage, ctx.Err()
+		}
 		lastErr = err
 		failure, ok := llm.AsFailure(err)
 		if !ok || !failure.Kind.IsTransient() || failure.RetryAfter > 0 || tryIndex == transientRetries {
 			return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, lastAttemptUsage, err
 		}
-		c.observe(ctx, candidate, candidate.Model(), request.TaskRole, string(failure.Kind), failure.Status, lastAttemptUsage)
-		c.logger.Warn("일시적인 오류라 같은 프로바이더로 다시 시도합니다",
-			"provider", candidate.Name(), "status", failure.Status, "attempt", tryIndex+1)
+		c.observe(ctx, candidate, candidate.Model(), request.TaskRole, string(failure.Kind), failure.Status, lastAttemptUsage, failure)
+		logFields := []any{"provider", candidate.Name(), "status", failure.Status, "attempt", tryIndex + 1}
+		logFields = append(logFields, providerFailureLogFields(failure)...)
+		c.logger.Warn("일시적인 오류라 같은 프로바이더로 다시 시도합니다", logFields...)
 	}
 	return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, lastAttemptUsage, lastErr
 }
@@ -361,7 +396,7 @@ func (c *Chain) invoke(ctx context.Context, candidate outbound.Provider, request
 	return candidate.Complete(ctx, request)
 }
 
-func (c *Chain) observe(ctx context.Context, candidate outbound.Provider, model string, role llm.TaskRole, outcome string, status int, tokens llm.Usage) {
+func (c *Chain) observe(ctx context.Context, candidate outbound.Provider, model string, role llm.TaskRole, outcome string, status int, tokens llm.Usage, failure *llm.Failure) {
 	c.metrics.ObserveProvider(candidate.Name(), outcome)
 	event := usage.Event{
 		Provider:         candidate.Name(),
@@ -373,6 +408,10 @@ func (c *Chain) observe(ctx context.Context, candidate outbound.Provider, model 
 		CompletionTokens: tokens.CompletionTokens,
 		TotalTokens:      tokens.TotalTokens,
 		OccurredAt:       c.clock.Now(),
+	}
+	if failure != nil {
+		event.ProviderErrorCode = failure.ProviderErrorCode
+		event.RequestElapsedMilliseconds = failure.Elapsed.Milliseconds()
 	}
 	if err := c.usage.Record(ctx, event); err != nil {
 		c.logger.Warn("프로바이더 사용량을 기록하지 못했습니다", "provider", candidate.Name(), "error", err)

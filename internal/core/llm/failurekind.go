@@ -6,6 +6,7 @@ const (
 	FailureQuota       FailureKind = "quota"
 	FailureRateLimited FailureKind = "rate_limited"
 	FailureUnavailable FailureKind = "unavailable"
+	FailureAborted     FailureKind = "aborted"
 	FailureInvalid     FailureKind = "invalid"
 	FailureAuth        FailureKind = "auth"
 )

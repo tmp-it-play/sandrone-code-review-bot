@@ -7,11 +7,13 @@ import (
 )
 
 type Failure struct {
-	Provider   string
-	Kind       FailureKind
-	Status     int
-	RetryAfter time.Duration
-	Cause      error
+	Provider          string
+	Kind              FailureKind
+	Status            int
+	ProviderErrorCode string
+	RetryAfter        time.Duration
+	Elapsed           time.Duration
+	Cause             error
 }
 
 func (f *Failure) Error() string {
