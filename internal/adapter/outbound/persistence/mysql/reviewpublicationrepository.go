@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func (r *ReviewWorkflowRepository) ReviewPublication(ctx context.Context, runID uint64, runLeaseToken string) (reviewworkflow.ReviewPublication, bool, error) {
+func (r *ReviewPublicationStore) ReviewPublication(ctx context.Context, runID uint64, runLeaseToken string) (reviewworkflow.ReviewPublication, bool, error) {
 	publication := reviewworkflow.ReviewPublication{}
 	found := false
 	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
@@ -50,7 +50,7 @@ func (r *ReviewWorkflowRepository) ReviewPublication(ctx context.Context, runID 
 	return publication, found, nil
 }
 
-func (r *ReviewWorkflowRepository) PrepareReviewPublication(ctx context.Context, runID uint64, runLeaseToken string, marker string, payload reviewworkflow.ReviewPublicationPayload, finalization reviewworkflow.ReviewPublicationFinalization, preparedAt time.Time, expiresAt time.Time) (reviewworkflow.ReviewPublication, error) {
+func (r *ReviewPublicationStore) PrepareReviewPublication(ctx context.Context, runID uint64, runLeaseToken string, marker string, payload reviewworkflow.ReviewPublicationPayload, finalization reviewworkflow.ReviewPublicationFinalization, preparedAt time.Time, expiresAt time.Time) (reviewworkflow.ReviewPublication, error) {
 	payload = payload.Bounded(marker)
 	if err := payload.Validate(marker); err != nil {
 		return reviewworkflow.ReviewPublication{}, err
@@ -168,7 +168,7 @@ func (r *ReviewWorkflowRepository) PrepareReviewPublication(ctx context.Context,
 	return publication, nil
 }
 
-func (r *ReviewWorkflowRepository) CompleteReviewPublication(ctx context.Context, runID uint64, runLeaseToken string, marker string, channel string, externalID int64, completedAt time.Time, expiresAt time.Time) error {
+func (r *ReviewPublicationStore) CompleteReviewPublication(ctx context.Context, runID uint64, runLeaseToken string, marker string, channel string, externalID int64, completedAt time.Time, expiresAt time.Time) error {
 	if strings.TrimSpace(marker) == "" || completedAt.IsZero() || !expiresAt.After(completedAt) || !reviewworkflow.ValidReviewPublicationChannel(channel, externalID) {
 		return errors.New("리뷰 게시 receipt가 올바르지 않습니다")
 	}
