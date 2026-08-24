@@ -26,11 +26,4 @@ type ReviewWorkflowRepository interface {
 	PrepareReviewPublication(ctx context.Context, runID uint64, runLeaseToken string, marker string, payload reviewworkflow.ReviewPublicationPayload, finalization reviewworkflow.ReviewPublicationFinalization, preparedAt time.Time, expiresAt time.Time) (reviewworkflow.ReviewPublication, error)
 	CompleteReviewPublication(ctx context.Context, runID uint64, runLeaseToken string, marker string, channel string, externalID int64, completedAt time.Time, expiresAt time.Time) error
 	FinishRun(ctx context.Context, runID uint64, result reviewworkflow.RunResult) (reviewworkflow.RunStatus, error)
-	PublicationCandidateHighWatermark(ctx context.Context, before time.Time) (uint64, error)
-	PublicationCandidates(ctx context.Context, before time.Time, afterID uint64, throughID uint64, limit int) ([]reviewworkflow.Run, error)
-	ClaimPublicationInvalidations(ctx context.Context, claimedAt time.Time, leaseExpiresAt time.Time, limit int) ([]reviewworkflow.PublicationInvalidation, error)
-	CompletePublicationInvalidation(ctx context.Context, invalidationID uint64, leaseToken string, resolvedAt time.Time) error
-	RetryPublicationInvalidation(ctx context.Context, invalidationID uint64, leaseToken string, failedAt time.Time, nextAttemptAt time.Time, failure string) error
-	ReconcileOrphans(ctx context.Context, staleBefore time.Time, terminalAt time.Time, expiresAt time.Time, limit int) (reviewworkflow.OrphanReconciliation, error)
-	DeleteExpired(ctx context.Context, now time.Time, legacyCutoff time.Time, limit int) (reviewworkflow.CleanupResult, error)
 }

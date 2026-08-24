@@ -14,7 +14,7 @@ import (
 )
 
 type ReviewPublicationWorker struct {
-	workflows         outbound.ReviewWorkflowRepository
+	workflows         outbound.ReviewPublicationRecoveryRepository
 	source            outbound.PullRequestSource
 	publisher         outbound.ReviewPublisher
 	reviews           outbound.ReviewRepository
@@ -32,7 +32,7 @@ type ReviewPublicationWorker struct {
 	throughID         uint64
 }
 
-func NewReviewPublicationWorker(workflows outbound.ReviewWorkflowRepository, source outbound.PullRequestSource, publisher outbound.ReviewPublisher, reviews outbound.ReviewRepository, clock outbound.Clock, logger *slog.Logger, retention time.Duration) *ReviewPublicationWorker {
+func NewReviewPublicationWorker(workflows outbound.ReviewPublicationRecoveryRepository, source outbound.PullRequestSource, publisher outbound.ReviewPublisher, reviews outbound.ReviewRepository, clock outbound.Clock, logger *slog.Logger, retention time.Duration) *ReviewPublicationWorker {
 	return &ReviewPublicationWorker{
 		workflows:         workflows,
 		source:            source,

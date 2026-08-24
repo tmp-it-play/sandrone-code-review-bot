@@ -9,7 +9,7 @@ import (
 )
 
 type ReviewRetentionWorker struct {
-	repository  outbound.ReviewWorkflowRepository
+	repository  outbound.ReviewRetentionRepository
 	usage       outbound.UsageRepository
 	clock       outbound.Clock
 	logger      *slog.Logger
@@ -20,7 +20,7 @@ type ReviewRetentionWorker struct {
 	orphanAfter time.Duration
 }
 
-func NewReviewRetentionWorker(repository outbound.ReviewWorkflowRepository, usage outbound.UsageRepository, clock outbound.Clock, logger *slog.Logger, retention time.Duration) *ReviewRetentionWorker {
+func NewReviewRetentionWorker(repository outbound.ReviewRetentionRepository, usage outbound.UsageRepository, clock outbound.Clock, logger *slog.Logger, retention time.Duration) *ReviewRetentionWorker {
 	return &ReviewRetentionWorker{
 		repository:  repository,
 		usage:       usage,
