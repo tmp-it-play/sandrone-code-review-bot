@@ -44,7 +44,8 @@ func (r *FindingOccurrenceBootstrapRepository) BackfillBatch(ctx context.Context
 				return nil
 			}
 			updated := transaction.Model(&model.MigrationCheckpoint{}).
-				Where("name = ? AND cursor = ? AND completed_at IS NULL", findingOccurrenceBootstrapCheckpoint, checkpoint.Cursor).
+				Where(map[string]any{"name": findingOccurrenceBootstrapCheckpoint, "cursor": checkpoint.Cursor}).
+				Where("completed_at IS NULL").
 				Updates(map[string]any{"completed_at": now, "updated_at": now})
 			if updated.Error != nil {
 				return updated.Error
@@ -56,7 +57,7 @@ func (r *FindingOccurrenceBootstrapRepository) BackfillBatch(ctx context.Context
 			return nil
 		}
 		updated := transaction.Model(&model.MigrationCheckpoint{}).
-			Where("name = ? AND cursor = ?", findingOccurrenceBootstrapCheckpoint, checkpoint.Cursor).
+			Where(map[string]any{"name": findingOccurrenceBootstrapCheckpoint, "cursor": checkpoint.Cursor}).
 			Updates(map[string]any{"cursor": lastFindingID, "completed_at": nil, "updated_at": now})
 		if updated.Error != nil {
 			return updated.Error
