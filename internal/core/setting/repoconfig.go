@@ -5,6 +5,7 @@ import "github.com/it-play/sandrone-code-review-bot/internal/core/review"
 type RepoConfig struct {
 	Language          string
 	Tone              Tone
+	AllowStrongTone   bool
 	Emoji             bool
 	Temperature       float64
 	MaxOutputTokens   int
@@ -26,6 +27,7 @@ func DefaultRepoConfig() RepoConfig {
 	return RepoConfig{
 		Language:          "ko",
 		Tone:              ToneProfessional,
+		AllowStrongTone:   false,
 		Emoji:             false,
 		Temperature:       0.2,
 		MaxOutputTokens:   8192,

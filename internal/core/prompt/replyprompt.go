@@ -59,7 +59,7 @@ func (p ReplyPrompt) system() string {
 	builder.WriteString("- 스레드를 닫자고 요구하지 않는다. 판단은 사람이 한다.\n")
 	builder.WriteString("- 마크다운 평문으로 5문장 이내로 짧게 쓴다. JSON을 쓰지 않는다.\n")
 	fmt.Fprintf(&builder, "- %s로 작성한다.\n\n", languageName(p.Config.Language))
-	builder.WriteString(toneGuide(p.Config.Tone, p.Config.Language))
+	builder.WriteString(toneGuide(p.Config.Tone, p.Config.Language, p.Config.AllowStrongTone))
 	return builder.String()
 }
 

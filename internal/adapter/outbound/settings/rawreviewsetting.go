@@ -3,6 +3,7 @@ package settings
 type rawReviewSetting struct {
 	Language          *string   `yaml:"language"`
 	Tone              *string   `yaml:"tone"`
+	AllowStrongTone   *bool     `yaml:"allowStrongTone"`
 	Emoji             *bool     `yaml:"emoji"`
 	Temperature       *float64  `yaml:"temperature"`
 	MaxOutputTokens   *int      `yaml:"maxOutputTokens"`

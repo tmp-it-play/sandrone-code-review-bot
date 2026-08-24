@@ -14,7 +14,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/setting"
 )
 
-const reviewPromptVersion = "review-v4"
+const reviewPromptVersion = "review-v7"
 
 func newWorkflowRun(task job.ReviewJob, target pullrequest.Target, config setting.RepoConfig, modelPolicyHash string, startedAt time.Time, snapshotObservedAt time.Time) (reviewworkflow.Run, error) {
 	configHash, err := hashJSON(config)
