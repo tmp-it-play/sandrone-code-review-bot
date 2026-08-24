@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -107,25 +108,20 @@ func (r *UsageRepository) DeleteExpired(ctx context.Context, before time.Time, l
 }
 
 func (r *UsageRepository) attachLastFailure(ctx context.Context, byProvider map[string]*usage.Snapshot) error {
-	var rows []struct {
-		Provider   string
-		Outcome    string
-		Status     int
-		OccurredAt time.Time
-	}
-	err := r.database.WithContext(ctx).
-		Model(&model.ProviderUsage{}).
-		Select("provider, outcome, status, occurred_at").
-		Where("outcome <> ?", "succeeded").
-		Order("occurred_at DESC").
-		Limit(500).
-		Scan(&rows).Error
-	if err != nil {
-		return fmt.Errorf("최근 실패 기록을 읽지 못했습니다: %w", err)
-	}
-	for _, row := range rows {
-		snapshot, ok := byProvider[row.Provider]
-		if !ok || !snapshot.LastFailureAt.IsZero() {
+	for provider, snapshot := range byProvider {
+		var row model.ProviderUsage
+		err := r.database.WithContext(ctx).
+			Where("provider = ?", provider).
+			Order("occurred_at DESC").
+			Order("id DESC").
+			First(&row).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("최근 실패 기록을 읽지 못했습니다: %w", err)
+		}
+		if row.Outcome == "succeeded" {
 			continue
 		}
 		snapshot.LastFailureKind = row.Outcome

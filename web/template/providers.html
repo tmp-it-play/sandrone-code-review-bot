@@ -2,9 +2,9 @@
 {{template "nav" .}}
 <main>
   <h1>프로바이더</h1>
-  <p class="sub">위에서부터 순서대로 시도하고, 한도에 걸리면 다음으로 넘어간다. 수치는 설정된 120~180일 보존 기간 안에서 누적한다.</p>
+  <p class="sub">위에서부터 순서대로 시도하고, 한도에 걸리면 다음으로 넘어간다. 응답 수치는 설정된 120~180일 보존 기간 안에서 누적하고 최근 호출이 성공하면 실패 사유를 표시하지 않는다.</p>
   <table>
-    <thead><tr><th>순위</th><th>이름</th><th>성공</th><th>실패</th><th>한도 차단</th><th>최근 사용</th><th>최근 실패 사유</th><th>쿨다운</th></tr></thead>
+    <thead><tr><th>순위</th><th>이름</th><th>성공 응답</th><th>실패 응답</th><th>한도 차단</th><th>최근 사용</th><th>최근 호출 실패</th><th>쿨다운</th></tr></thead>
     <tbody>
     {{range .Providers}}
       <tr>
