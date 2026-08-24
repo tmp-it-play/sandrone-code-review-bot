@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -34,18 +35,21 @@ import (
 )
 
 const botName = "sandrone-code-review-bot"
+const asynqShutdownTimeout = 2 * time.Minute
 
 type Application struct {
-	logger            *slog.Logger
-	httpServer        *http.Server
-	asynqServer       *asynq.Server
-	asynqMux          *asynq.ServeMux
-	queueClient       *queueadapter.Client
-	inspector         *asynq.Inspector
-	cache             *redis.Client
-	reviewRetention   *maintenance.ReviewRetentionWorker
-	reviewPublication *maintenance.ReviewPublicationWorker
-	webhookInbox      *maintenance.WebhookInboxWorker
+	logger              *slog.Logger
+	httpServer          *http.Server
+	asynqServer         *asynq.Server
+	asynqMux            *asynq.ServeMux
+	queueClient         *queueadapter.Client
+	inspector           *asynq.Inspector
+	cache               *redis.Client
+	reviewRetention     *maintenance.ReviewRetentionWorker
+	reviewPublication   *maintenance.ReviewPublicationWorker
+	webhookInbox        *maintenance.WebhookInboxWorker
+	webhookRecovery     *maintenance.WebhookDeliveryRecoveryWorker
+	occurrenceBootstrap *maintenance.FindingOccurrenceBootstrapWorker
 }
 
 func NewApplication(config Config) (*Application, error) {
@@ -76,6 +80,7 @@ func NewApplication(config Config) (*Application, error) {
 		return nil, err
 	}
 	clients := githubadapter.NewClientFactory(tokens)
+	webhookDeliveryRecovery := githubadapter.NewAppWebhookDeliveryRecovery(tokens)
 	pullRequests := githubadapter.NewPullRequestSource(clients)
 	contents := githubadapter.NewRepositoryContent(clients)
 	publisher := githubadapter.NewReviewPublisher(clients)
@@ -87,12 +92,14 @@ func NewApplication(config Config) (*Application, error) {
 
 	settingSource := settings.NewSettingSource(
 		settings.NewConfigLoader(contents, logger),
-		settings.NewInstructionCollector(contents, logger),
+		settings.NewInstructionCollector(contents, masker, logger),
 	)
 
 	reviews := mysql.NewReviewRepository(database)
 	reviewWorkflows := mysql.NewReviewWorkflowRepository(database)
+	pullRequestState := mysql.NewPullRequestStateRepository(database)
 	findings := mysql.NewFindingRepository(database)
+	occurrenceBootstrapRepository := mysql.NewFindingOccurrenceBootstrapRepository(database)
 	installations := mysql.NewInstallationRepository(database)
 	usageRepository := mysql.NewUsageRepository(database)
 	commands := mysql.NewCommandRepository(database)
@@ -103,24 +110,27 @@ func NewApplication(config Config) (*Application, error) {
 	parser := parsing.ResultParser{}
 
 	reviewUseCase := reviewpullrequest.New(reviewpullrequest.Dependencies{
-		Source:    pullRequests,
-		Settings:  settingSource,
-		Masker:    masker,
-		Completer: completer,
-		Tools:     tools,
-		Publisher: publisher,
-		Reactions: reactions,
-		Renderer:  renderer,
-		Reviews:   reviews,
-		Workflows: reviewWorkflows,
-		Findings:  findings,
-		Clock:     clock,
-		Parser:    parser,
-		Logger:    logger,
-		Retention: config.ReviewRetention,
+		Source:      pullRequests,
+		Settings:    settingSource,
+		Masker:      masker,
+		Completer:   completer,
+		Tools:       tools,
+		Publisher:   publisher,
+		Reactions:   reactions,
+		Renderer:    renderer,
+		Reviews:     reviews,
+		Workflows:   reviewWorkflows,
+		Findings:    findings,
+		State:       pullRequestState,
+		Clock:       clock,
+		Parser:      parser,
+		Logger:      logger,
+		Retention:   config.ReviewRetention,
+		LLMMaxCalls: config.LLMMaxCalls,
 	})
 	reviewRetention := maintenance.NewReviewRetentionWorker(reviewWorkflows, clock, logger, config.ReviewRetention)
 	reviewPublication := maintenance.NewReviewPublicationWorker(reviewWorkflows, pullRequests, publisher, reviews, clock, logger, config.ReviewRetention)
+	occurrenceBootstrap := maintenance.NewFindingOccurrenceBootstrapWorker(occurrenceBootstrapRepository, logger)
 	summaryUseCase := summarizepullrequest.New(summarizepullrequest.Dependencies{
 		Source:       pullRequests,
 		Settings:     settingSource,
@@ -134,6 +144,7 @@ func NewApplication(config Config) (*Application, error) {
 		Parser:       parser,
 		Logger:       logger,
 		Retention:    config.ReviewRetention,
+		LLMMaxCalls:  config.LLMMaxCalls,
 	})
 	replyUseCase := replythread.New(replythread.Dependencies{
 		Source:       pullRequests,
@@ -146,6 +157,7 @@ func NewApplication(config Config) (*Application, error) {
 		Clock:        clock,
 		Logger:       logger,
 		Retention:    config.ReviewRetention,
+		LLMMaxCalls:  config.LLMMaxCalls,
 	})
 	commandUseCase := handlecommand.New(handlecommand.Dependencies{
 		Permissions: permissions,
@@ -161,6 +173,7 @@ func NewApplication(config Config) (*Application, error) {
 
 	router := webhook.NewEventRouter(queueClient, commandUseCase, inboundcommand.NewParser(botName), installations)
 	webhookInbox := maintenance.NewWebhookInboxWorker(webhookInboxRepository, router, clock, masker, metrics, logger, config.DeliveryRetention)
+	webhookRecovery := maintenance.NewWebhookDeliveryRecoveryWorker(webhookDeliveryRecovery, clock, logger)
 	webhookHandler := webhook.NewHandler(config.WebhookSecret, webhookInboxRepository, clock, logger)
 
 	dashboardServer, err := dashboard.NewServer(dashboard.Dependencies{
@@ -201,7 +214,8 @@ func NewApplication(config Config) (*Application, error) {
 	asynqMux.Handle(queueadapter.TaskReply, worker.NewReplyHandler(replyUseCase, metrics))
 
 	asynqServer := asynq.NewServer(redisOptions, asynq.Config{
-		Concurrency: config.WorkerConcurrency,
+		Concurrency:     config.WorkerConcurrency,
+		ShutdownTimeout: asynqShutdownTimeout,
 		RetryDelayFunc: asynq.RetryDelayFunc(func(attempt int, _ error, _ *asynq.Task) time.Duration {
 			return retryDelay(attempt)
 		}),
@@ -209,16 +223,18 @@ func NewApplication(config Config) (*Application, error) {
 	})
 
 	return &Application{
-		logger:            logger,
-		httpServer:        &http.Server{Addr: config.HTTPAddress, Handler: handler, ReadHeaderTimeout: 10 * time.Second},
-		asynqServer:       asynqServer,
-		asynqMux:          asynqMux,
-		queueClient:       queueClient,
-		inspector:         inspector,
-		cache:             cache,
-		reviewRetention:   reviewRetention,
-		reviewPublication: reviewPublication,
-		webhookInbox:      webhookInbox,
+		logger:              logger,
+		httpServer:          &http.Server{Addr: config.HTTPAddress, Handler: handler, ReadHeaderTimeout: 10 * time.Second},
+		asynqServer:         asynqServer,
+		asynqMux:            asynqMux,
+		queueClient:         queueClient,
+		inspector:           inspector,
+		cache:               cache,
+		reviewRetention:     reviewRetention,
+		reviewPublication:   reviewPublication,
+		webhookInbox:        webhookInbox,
+		webhookRecovery:     webhookRecovery,
+		occurrenceBootstrap: occurrenceBootstrap,
 	}, nil
 }
 
@@ -226,9 +242,6 @@ func (a *Application) Run(ctx context.Context) error {
 	if err := a.asynqServer.Start(a.asynqMux); err != nil {
 		return fmt.Errorf("워커를 시작하지 못했습니다: %w", err)
 	}
-	go a.reviewRetention.Run(ctx)
-	go a.reviewPublication.Run(ctx)
-	go a.webhookInbox.Run(ctx)
 	errs := make(chan error, 1)
 	go func() {
 		a.logger.Info("HTTP 서버를 시작합니다", "address", a.httpServer.Addr)
@@ -238,13 +251,32 @@ func (a *Application) Run(ctx context.Context) error {
 		}
 		errs <- nil
 	}()
+	maintenanceContext, stopMaintenance := context.WithCancel(ctx)
+	var maintenanceWorkers sync.WaitGroup
+	for _, run := range []func(context.Context){
+		a.reviewRetention.Run,
+		a.reviewPublication.Run,
+		a.webhookInbox.Run,
+		a.webhookRecovery.Run,
+		a.occurrenceBootstrap.Run,
+	} {
+		maintenanceWorkers.Add(1)
+		go func(run func(context.Context)) {
+			defer maintenanceWorkers.Done()
+			run(maintenanceContext)
+		}(run)
+	}
 
 	select {
 	case <-ctx.Done():
 	case err := <-errs:
+		stopMaintenance()
+		maintenanceWorkers.Wait()
 		a.shutdown()
 		return err
 	}
+	stopMaintenance()
+	maintenanceWorkers.Wait()
 	a.shutdown()
 	return nil
 }

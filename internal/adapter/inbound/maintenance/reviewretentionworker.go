@@ -66,10 +66,10 @@ func (w *ReviewRetentionWorker) cleanup(ctx context.Context) {
 			w.logger.Error("만료된 리뷰 데이터를 제거하지 못했습니다", "error", err)
 			return
 		}
-		if result.Runs+result.Reviews+result.Findings+result.States+result.Publications > 0 {
-			w.logger.Info("만료된 리뷰 데이터를 제거했습니다", "runs", result.Runs, "reviews", result.Reviews, "findings", result.Findings, "states", result.States, "publications", result.Publications)
+		if result.Runs+result.Reviews+result.Findings+result.Occurrences+result.States+result.Publications > 0 {
+			w.logger.Info("만료된 리뷰 데이터를 제거했습니다", "runs", result.Runs, "reviews", result.Reviews, "findings", result.Findings, "occurrences", result.Occurrences, "states", result.States, "publications", result.Publications)
 		}
-		if result.Runs < int64(w.batchSize) && result.Reviews < int64(w.batchSize) && result.Findings < int64(w.batchSize) && result.States < int64(w.batchSize) && result.Publications < int64(w.batchSize) {
+		if result.Runs < int64(w.batchSize) && result.Reviews < int64(w.batchSize) && result.Findings < int64(w.batchSize) && result.Occurrences < int64(w.batchSize) && result.States < int64(w.batchSize) && result.Publications < int64(w.batchSize) {
 			return
 		}
 	}

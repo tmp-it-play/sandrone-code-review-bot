@@ -22,6 +22,8 @@ type resultPayload struct {
 		Title      string `json:"title"`
 		Body       string `json:"body"`
 		Suggestion string `json:"suggestion"`
+		Evidence   string `json:"evidence"`
+		RootCause  string `json:"rootCause"`
 	} `json:"findings"`
 }
 
@@ -39,7 +41,8 @@ func (p resultPayload) toDomain() (review.Result, int) {
 	for _, entry := range p.Findings {
 		severity, ok := review.ParseSeverity(entry.Severity)
 		if !ok {
-			severity = review.SeverityMinor
+			dropped++
+			continue
 		}
 		finding := review.Finding{
 			File:       strings.TrimSpace(entry.File),
@@ -48,7 +51,9 @@ func (p resultPayload) toDomain() (review.Result, int) {
 			Severity:   severity,
 			Title:      strings.TrimSpace(entry.Title),
 			Body:       strings.TrimSpace(entry.Body),
-			Suggestion: strings.TrimSpace(entry.Suggestion),
+			Suggestion: entry.Suggestion,
+			Evidence:   entry.Evidence,
+			RootCause:  strings.TrimSpace(entry.RootCause),
 		}
 		if !finding.IsValid() {
 			dropped++

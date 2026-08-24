@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewanalysis"
 )
 
 type ReviewPrompt struct {
@@ -36,6 +37,7 @@ func (p ReviewPrompt) system() string {
 	builder.WriteString("- finding의 title은 감정, 경어, 캐릭터 표현 없이 문제를 짧게 요약한다. 선택한 문체는 summary와 finding의 자연어 설명에 적용한다.\n")
 	fmt.Fprintf(&builder, "- 모든 서술은 %s로 작성한다.\n\n", languageName(p.Context.Config.Language))
 	builder.WriteString(toneGuide(p.Context.Config.Tone, p.Context.Config.Language))
+	builder.WriteString((reviewanalysis.SpecialistRiskClassifier{}).Guidance(p.Context.Files))
 	if p.ToolsAllowed {
 		builder.WriteString("판단에 주변 코드가 더 필요하면 read_file 도구로 파일을 읽을 수 있다.\n\n")
 	}
@@ -45,7 +47,7 @@ func (p ReviewPrompt) system() string {
 	builder.WriteString("- minor: 동작은 하지만 개선이 필요함\n")
 	builder.WriteString("- nit: 사소한 정리 제안\n\n")
 	builder.WriteString(suggestionGuide)
-	builder.WriteString(reviewSchema)
+	builder.WriteString(agenticReviewSchema)
 	return builder.String()
 }
 

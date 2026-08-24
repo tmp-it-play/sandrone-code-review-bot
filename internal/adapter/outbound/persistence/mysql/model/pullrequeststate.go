@@ -28,6 +28,19 @@ type PullRequestState struct {
 	SummaryCompletedKey      string     `gorm:"size:64;not null;default:''"`
 	SummaryCompletedAt       *time.Time `gorm:"index"`
 	SummaryExpiresAt         *time.Time `gorm:"index"`
+	SummaryExternalCalls     int        `gorm:"not null;default:0"`
+	SummaryResultInputHash   string     `gorm:"size:64;not null;default:''"`
+	SummaryCanonicalContent  string     `gorm:"type:longtext"`
+	SummaryProvider          string     `gorm:"size:100;not null;default:''"`
+	SummaryModel             string     `gorm:"size:200;not null;default:''"`
+	SummaryModelLabel        string     `gorm:"size:200;not null;default:''"`
+	SummaryFinishReason      string     `gorm:"size:64;not null;default:''"`
+	SummaryMultipleModels    bool       `gorm:"not null;default:false"`
+	SummaryPromptTokens      int        `gorm:"not null;default:0"`
+	SummaryCompletionTokens  int        `gorm:"not null;default:0"`
+	SummaryTotalTokens       int        `gorm:"not null;default:0"`
+	SummaryToolExecutions    int        `gorm:"not null;default:0"`
+	SummaryResultCompletedAt *time.Time `gorm:"index"`
 	UpdatedAt                time.Time  `gorm:"index"`
 }
 

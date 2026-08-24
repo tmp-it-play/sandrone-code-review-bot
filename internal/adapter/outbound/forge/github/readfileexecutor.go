@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
@@ -65,7 +66,11 @@ func (e *ReadFileExecutor) Execute(ctx context.Context, call llm.ToolCall) (stri
 	}
 	body = e.masker.Mask(body)
 	if e.maxChars > 0 && len(body) > e.maxChars {
-		body = body[:e.maxChars] + "\n[분량 제한으로 이후 내용 생략]"
+		limit := e.maxChars
+		for limit > 0 && !utf8.RuneStart(body[limit]) {
+			limit--
+		}
+		body = body[:limit] + "\n[분량 제한으로 이후 내용 생략]"
 	}
 	return body, nil
 }

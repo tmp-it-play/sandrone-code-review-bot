@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	gh "github.com/google/go-github/v90/github"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
@@ -11,6 +12,8 @@ import (
 type PullRequestSource struct {
 	clients *ClientFactory
 }
+
+const compareFilesSafetyLimit = 300
 
 func NewPullRequestSource(clients *ClientFactory) *PullRequestSource {
 	return &PullRequestSource{clients: clients}
@@ -25,6 +28,8 @@ func (s *PullRequestSource) PullRequest(ctx context.Context, target pullrequest.
 	if err != nil {
 		return pullrequest.PullRequest{}, fmt.Errorf("PR %s를 읽지 못했습니다: %w", target.Reference(), err)
 	}
+	repository := found.GetBase().GetRepo()
+	visibility := strings.TrimSpace(repository.GetVisibility())
 	return pullrequest.PullRequest{
 		Number:       found.GetNumber(),
 		Title:        found.GetTitle(),
@@ -36,6 +41,7 @@ func (s *PullRequestSource) PullRequest(ctx context.Context, target pullrequest.
 		HeadSHA:      found.GetHead().GetSHA(),
 		State:        found.GetState(),
 		Draft:        found.GetDraft(),
+		Private:      repository.GetPrivate() || !strings.EqualFold(visibility, "public"),
 		ChangedFiles: found.GetChangedFiles(),
 		UpdatedAt:    found.GetUpdatedAt().Time,
 	}, nil
@@ -72,6 +78,9 @@ func (s *PullRequestSource) ChangedFilesBetween(ctx context.Context, target pull
 	comparison, _, err := client.Repositories.CompareCommits(ctx, target.Owner, target.Repository, baseSHA, headSHA, &gh.ListOptions{PerPage: 100})
 	if err != nil {
 		return nil, fmt.Errorf("커밋 비교에 실패했습니다: %w", err)
+	}
+	if len(comparison.Files) >= compareFilesSafetyLimit {
+		return nil, fmt.Errorf("커밋 비교 파일이 API 안전 상한 %d개에 도달했습니다", compareFilesSafetyLimit)
 	}
 	collected := make([]pullrequest.ChangedFile, 0, len(comparison.Files))
 	for _, file := range comparison.Files {

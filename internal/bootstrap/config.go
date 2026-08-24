@@ -2,7 +2,9 @@ package bootstrap
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +27,7 @@ type Config struct {
 	Providers         map[string]ProviderConfig
 	ProviderCooldown  time.Duration
 	RequestTimeout    time.Duration
+	LLMMaxCalls       int
 	DashboardUsername string
 	DashboardPassword string
 	DashboardSecret   string
@@ -44,9 +47,10 @@ func LoadConfig() (Config, error) {
 		RedisAddress:      env("REDIS_ADDR", "127.0.0.1:6379"),
 		RedisPassword:     os.Getenv("REDIS_PASSWORD"),
 		RedisDatabase:     number("REDIS_DB", 0),
-		WorkerConcurrency: number("SANDRONE_WORKER_CONCURRENCY", 4),
+		WorkerConcurrency: number("SANDRONE_WORKER_CONCURRENCY", 2),
 		ProviderCooldown:  duration("SANDRONE_PROVIDER_COOLDOWN", 15*time.Minute),
 		RequestTimeout:    duration("SANDRONE_REQUEST_TIMEOUT", 5*time.Minute),
+		LLMMaxCalls:       boundedNumber("SANDRONE_LLM_MAX_CALLS_PER_OPERATION", 12, 1, 12),
 		DashboardUsername: os.Getenv("DASHBOARD_USERNAME"),
 		DashboardPassword: os.Getenv("DASHBOARD_PASSWORD"),
 		DashboardSecret:   os.Getenv("DASHBOARD_SESSION_SECRET"),
@@ -82,7 +86,14 @@ func LoadConfig() (Config, error) {
 		return Config{}, errors.New("DASHBOARD_SESSION_SECRET이 필요하다")
 	}
 
-	config.Providers = providerConfigs()
+	privateCodeProviders, err := privateCodeProviderAllowlist()
+	if err != nil {
+		return Config{}, err
+	}
+	config.Providers, err = providerConfigs(privateCodeProviders)
+	if err != nil {
+		return Config{}, err
+	}
 	config.ProviderOrder = providerOrder(config.Providers)
 	if len(config.ProviderOrder) == 0 {
 		return Config{}, errors.New("사용 가능한 LLM 프로바이더가 하나도 설정되지 않았습니다")
@@ -123,16 +134,75 @@ func privateKey() ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-func providerConfigs() map[string]ProviderConfig {
+func providerConfigs(privateCodeProviders map[string]struct{}) (map[string]ProviderConfig, error) {
 	catalog := provider.NewCatalog()
+	environment := map[string]string{}
+	missing := map[string]struct{}{}
+	for _, name := range catalog.Order() {
+		descriptor, known := catalog.Descriptor(name)
+		if !known {
+			continue
+		}
+		for _, environmentName := range []string{catalog.APIKeyEnv(name), descriptor.AccountIDEnv} {
+			if environmentName == "" {
+				continue
+			}
+			if _, loaded := environment[environmentName]; loaded {
+				continue
+			}
+			environment[environmentName] = strings.TrimSpace(os.Getenv(environmentName))
+			if environment[environmentName] == "" {
+				missing[environmentName] = struct{}{}
+			}
+		}
+	}
+	if len(missing) > 0 {
+		missingNames := make([]string, 0, len(missing))
+		for name := range missing {
+			missingNames = append(missingNames, name)
+		}
+		sort.Strings(missingNames)
+		return nil, fmt.Errorf("필수 LLM 환경 변수가 누락되었습니다: %s", strings.Join(missingNames, ", "))
+	}
+
 	configured := map[string]ProviderConfig{}
 	for _, name := range catalog.Order() {
-		candidate := ProviderConfig{Name: name, APIKey: os.Getenv(catalog.APIKeyEnv(name))}
+		descriptor, known := catalog.Descriptor(name)
+		if !known {
+			continue
+		}
+		_, privateCodeAllowed := privateCodeProviders[name]
+		candidate := ProviderConfig{
+			Name:               name,
+			APIKey:             environment[catalog.APIKeyEnv(name)],
+			BaseURL:            descriptor.ResolvedBaseURL(environment[descriptor.AccountIDEnv]),
+			PrivateCodeAllowed: privateCodeAllowed,
+		}
 		if candidate.Enabled() {
 			configured[name] = candidate
 		}
 	}
-	return configured
+	return configured, nil
+}
+
+func privateCodeProviderAllowlist() (map[string]struct{}, error) {
+	catalog := provider.NewCatalog()
+	known := map[string]struct{}{}
+	for _, name := range catalog.Order() {
+		known[name] = struct{}{}
+	}
+	allowed := map[string]struct{}{}
+	for _, raw := range strings.Split(os.Getenv("SANDRONE_PRIVATE_CODE_PROVIDERS"), ",") {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		if _, exists := known[name]; !exists {
+			return nil, fmt.Errorf("SANDRONE_PRIVATE_CODE_PROVIDERS에 알 수 없는 프로바이더가 있습니다: %s", name)
+		}
+		allowed[name] = struct{}{}
+	}
+	return allowed, nil
 }
 
 func providerOrder(configured map[string]ProviderConfig) []string {
@@ -157,6 +227,17 @@ func number(key string, fallback int) int {
 	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(key)))
 	if err != nil || value <= 0 {
 		return fallback
+	}
+	return value
+}
+
+func boundedNumber(key string, fallback int, minimum int, maximum int) int {
+	value := number(key, fallback)
+	if value < minimum {
+		return minimum
+	}
+	if value > maximum {
+		return maximum
 	}
 	return value
 }

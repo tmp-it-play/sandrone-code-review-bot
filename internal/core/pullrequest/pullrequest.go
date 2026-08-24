@@ -13,6 +13,7 @@ type PullRequest struct {
 	HeadSHA      string
 	State        string
 	Draft        bool
+	Private      bool
 	ChangedFiles int
 	UpdatedAt    time.Time
 }

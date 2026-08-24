@@ -11,16 +11,16 @@ func (f DuplicateFilter) Apply(findings []review.Finding) ([]review.Finding, int
 	kept := make([]review.Finding, 0, len(findings))
 	skipped := 0
 	for _, finding := range findings {
-		key := review.NewFingerprint(finding).String()
-		if _, ok := f.Known[key]; ok {
+		occurrenceKey := review.NewOccurrenceFingerprint(finding).String()
+		if _, ok := f.Known[occurrenceKey]; ok {
 			skipped++
 			continue
 		}
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[occurrenceKey]; ok {
 			skipped++
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[occurrenceKey] = struct{}{}
 		kept = append(kept, finding)
 	}
 	return kept, skipped

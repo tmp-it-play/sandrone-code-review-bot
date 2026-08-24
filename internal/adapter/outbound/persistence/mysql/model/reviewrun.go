@@ -24,6 +24,7 @@ type ReviewRun struct {
 	FailedCoverage     int
 	DeferredCoverage   int
 	SkippedCoverage    int
+	ExternalCalls      int    `gorm:"not null;default:0"`
 	ErrorSummary       string `gorm:"size:1000"`
 	StartedAt          time.Time
 	HeartbeatAt        time.Time  `gorm:"index"`

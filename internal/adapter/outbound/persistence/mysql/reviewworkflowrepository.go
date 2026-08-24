@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/persistence/mysql/mapper"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/persistence/mysql/model"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 	"gorm.io/gorm"
@@ -30,13 +32,30 @@ func NewReviewWorkflowRepository(database *gorm.DB) *ReviewWorkflowRepository {
 }
 
 func (r *ReviewWorkflowRepository) CreateOrGetRun(ctx context.Context, run reviewworkflow.Run) (reviewworkflow.Run, error) {
-	entry := mapper.ToReviewRunModel(run)
-	if err := r.database.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&entry).Error; err != nil {
-		return reviewworkflow.Run{}, fmt.Errorf("리뷰 실행을 생성하지 못했습니다: %w", err)
-	}
-	entry = model.ReviewRun{}
-	if err := r.database.WithContext(ctx).Where("run_key = ?", run.Key).First(&entry).Error; err != nil {
-		return reviewworkflow.Run{}, fmt.Errorf("리뷰 실행을 읽지 못했습니다: %w", err)
+	entry := model.ReviewRun{}
+	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		candidate := mapper.ToReviewRunModel(run)
+		if err := transaction.Clauses(clause.OnConflict{DoNothing: true}).Create(&candidate).Error; err != nil {
+			return err
+		}
+		if err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).Where("run_key = ?", run.Key).First(&entry).Error; err != nil {
+			return err
+		}
+		currentAt, err := databaseTime(transaction)
+		if err != nil {
+			return err
+		}
+		if !reviewworkflow.RunStatus(entry.Status).IsTerminal() || entry.ExpiresAt == nil || entry.ExpiresAt.After(currentAt) {
+			return nil
+		}
+		if err := deleteExpiredRunLifecycle(transaction, entry.ID); err != nil {
+			return err
+		}
+		entry = mapper.ToReviewRunModel(run)
+		return transaction.Create(&entry).Error
+	})
+	if err != nil {
+		return reviewworkflow.Run{}, fmt.Errorf("리뷰 실행을 생성하거나 읽지 못했습니다: %w", err)
 	}
 	return mapper.ToReviewRun(entry), nil
 }
@@ -53,14 +72,18 @@ func (r *ReviewWorkflowRepository) AcquireRun(ctx context.Context, runID uint64,
 		if err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).First(&run, runID).Error; err != nil {
 			return err
 		}
+		leaseNow, err := databaseTime(transaction)
+		if err != nil {
+			return err
+		}
 		if reviewworkflow.RunStatus(run.Status).IsTerminal() {
 			leaseToken = ""
 			return nil
 		}
-		if run.LeaseToken != "" && run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(startedAt) {
+		if run.LeaseToken != "" && run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(leaseNow) {
 			return reviewworkflow.ErrRunLeased
 		}
-		registered, blockedByPublication, err := registerLatestRun(transaction, run, startedAt)
+		registered, blockedByPublication, err := registerLatestRun(transaction, run, leaseNow)
 		if err != nil {
 			return err
 		}
@@ -136,8 +159,8 @@ func (r *ReviewWorkflowRepository) RenewRun(ctx context.Context, runID uint64, l
 		if err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).First(&run, runID).Error; err != nil {
 			return err
 		}
-		if reviewworkflow.RunStatus(run.Status).IsTerminal() || run.LeaseToken == "" || run.LeaseToken != leaseToken {
-			return reviewworkflow.ErrRunLeased
+		if err := validateRunLease(transaction, run, leaseToken); err != nil {
+			return err
 		}
 		if _, err := requireLatestRun(transaction, run); err != nil {
 			return err
@@ -174,6 +197,11 @@ func (r *ReviewWorkflowRepository) ReleaseRun(ctx context.Context, runID uint64,
 		if reviewworkflow.RunStatus(run.Status).IsTerminal() || run.LeaseToken != leaseToken {
 			return nil
 		}
+		leaseNow, err := databaseTime(transaction)
+		if err != nil {
+			return err
+		}
+		leaseWasActive := run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(leaseNow)
 		updates := map[string]any{
 			"lease_token":      "",
 			"lease_expires_at": nil,
@@ -184,7 +212,7 @@ func (r *ReviewWorkflowRepository) ReleaseRun(ctx context.Context, runID uint64,
 		if err := transaction.Model(&model.ReviewRun{}).Where("id = ? AND lease_token = ?", runID, leaseToken).Updates(updates).Error; err != nil {
 			return err
 		}
-		if reviewworkflow.RunStatus(run.Status) != reviewworkflow.RunStatusPublishing {
+		if reviewworkflow.RunStatus(run.Status) != reviewworkflow.RunStatusPublishing || !leaseWasActive {
 			return nil
 		}
 		return transaction.Model(&model.PullRequestState{}).
@@ -274,13 +302,18 @@ func (r *ReviewWorkflowRepository) SavePlan(ctx context.Context, runID uint64, r
 	return stored, nil
 }
 
-func (r *ReviewWorkflowRepository) StartUnit(ctx context.Context, runID uint64, runLeaseToken string, unitHash string, startedAt time.Time, leaseExpiresAt time.Time) (string, error) {
+func (r *ReviewWorkflowRepository) StartUnit(ctx context.Context, runID uint64, runLeaseToken string, unitHash string, inputHash string, startedAt time.Time, leaseExpiresAt time.Time) (reviewworkflow.UnitClaim, error) {
 	leaseToken, err := newLeaseToken()
 	if err != nil {
-		return "", fmt.Errorf("unit lease를 만들지 못했습니다: %w", err)
+		return reviewworkflow.UnitClaim{}, fmt.Errorf("unit lease를 만들지 못했습니다: %w", err)
 	}
+	claim := reviewworkflow.UnitClaim{LeaseToken: leaseToken}
 	err = r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
 		if err := requireRunLease(transaction, runID, runLeaseToken); err != nil {
+			return err
+		}
+		leaseNow, err := databaseTime(transaction)
+		if err != nil {
 			return err
 		}
 		if err := transaction.Model(&model.ReviewRun{}).Where("id = ? AND lease_token = ?", runID, runLeaseToken).Updates(map[string]any{
@@ -289,23 +322,61 @@ func (r *ReviewWorkflowRepository) StartUnit(ctx context.Context, runID uint64, 
 		}).Error; err != nil {
 			return err
 		}
+		var unit model.ReviewUnit
+		if err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).Where("review_run_id = ? AND unit_hash = ?", runID, unitHash).First(&unit).Error; err != nil {
+			return err
+		}
+		if reviewworkflow.UnitStatus(unit.Status) == reviewworkflow.UnitStatusSucceeded {
+			if inputHash != "" && unit.InputHash == inputHash && unit.ResultJSON != "" {
+				stored, err := storedUnitResult(unit)
+				if err == nil {
+					claim = reviewworkflow.UnitClaim{Completed: true, Reused: unit.Reused, Result: stored}
+					return nil
+				}
+			}
+			if err := transaction.Model(&model.ReviewUnit{}).Where("id = ? AND status = ?", unit.ID, string(reviewworkflow.UnitStatusSucceeded)).Updates(map[string]any{
+				"status":           string(reviewworkflow.UnitStatusFailed),
+				"result_json":      "",
+				"reused":           false,
+				"error_summary":    "input_changed",
+				"lease_token":      "",
+				"lease_expires_at": nil,
+			}).Error; err != nil {
+				return err
+			}
+			if err := transaction.Model(&model.CoverageItem{}).
+				Where("review_run_id = ? AND review_unit_id = ? AND status IN ?", runID, unit.ID, []string{string(reviewworkflow.CoverageStatusReviewed), string(reviewworkflow.CoverageStatusFailed)}).
+				Updates(map[string]any{"status": string(reviewworkflow.CoverageStatusPlanned), "reviewed_at": nil}).Error; err != nil {
+				return err
+			}
+			unit.Status = string(reviewworkflow.UnitStatusFailed)
+		}
+		claim.Result = reviewworkflow.UnitResult{
+			Provider:       unit.Provider,
+			Model:          unit.Model,
+			MultipleModels: unit.MultipleModels,
+			Usage:          llm.Usage{PromptTokens: unit.PromptTokens, CompletionTokens: unit.CompletionTokens, TotalTokens: unit.TotalTokens},
+			ToolExecutions: unit.ToolExecutions,
+		}
 		updates := map[string]any{
 			"status":           string(reviewworkflow.UnitStatusRunning),
+			"input_hash":       inputHash,
 			"attempt_count":    gorm.Expr("attempt_count + 1"),
 			"started_at":       startedAt,
 			"finished_at":      nil,
 			"heartbeat_at":     startedAt,
+			"result_json":      "",
+			"reused":           false,
 			"error_summary":    "",
 			"lease_token":      leaseToken,
 			"lease_expires_at": leaseExpiresAt,
 		}
 		result := transaction.Model(&model.ReviewUnit{}).
-			Where("review_run_id = ? AND unit_hash = ?", runID, unitHash).
+			Where("id = ?", unit.ID).
 			Where("status IN ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?))", []string{
 				string(reviewworkflow.UnitStatusPending),
-				string(reviewworkflow.UnitStatusSucceeded),
 				string(reviewworkflow.UnitStatusFailed),
-			}, string(reviewworkflow.UnitStatusRunning), startedAt).
+			}, string(reviewworkflow.UnitStatusRunning), leaseNow).
 			Updates(updates)
 		if result.Error != nil {
 			return result.Error
@@ -313,46 +384,62 @@ func (r *ReviewWorkflowRepository) StartUnit(ctx context.Context, runID uint64, 
 		if result.RowsAffected != 1 {
 			return errors.New("unit을 실행 가능한 상태로 전이하지 못했습니다")
 		}
-		var unit model.ReviewUnit
-		if err := transaction.Where("review_run_id = ? AND unit_hash = ?", runID, unitHash).First(&unit).Error; err != nil {
-			return err
-		}
 		return transaction.Model(&model.CoverageItem{}).
-			Where("review_run_id = ? AND review_unit_id = ? AND status IN ?", runID, unit.ID, []string{
-				string(reviewworkflow.CoverageStatusReviewed),
-				string(reviewworkflow.CoverageStatusFailed),
-			}).Updates(map[string]any{
+			Where("review_run_id = ? AND review_unit_id = ? AND status = ?", runID, unit.ID, string(reviewworkflow.CoverageStatusFailed)).Updates(map[string]any{
 			"status":      string(reviewworkflow.CoverageStatusPlanned),
 			"reviewed_at": nil,
 		}).Error
 	})
 	if err != nil {
-		return "", fmt.Errorf("리뷰 unit을 시작하지 못했습니다: %w", err)
+		return reviewworkflow.UnitClaim{}, fmt.Errorf("리뷰 unit을 시작하지 못했습니다: %w", err)
 	}
-	return leaseToken, nil
+	return claim, nil
 }
 
 func (r *ReviewWorkflowRepository) FinishUnit(ctx context.Context, runID uint64, runLeaseToken string, unitHash string, leaseToken string, result reviewworkflow.UnitResult) error {
+	resultJSON := ""
+	if result.Status == reviewworkflow.UnitStatusSucceeded {
+		encoded, err := json.Marshal(result.Review)
+		if err != nil {
+			return fmt.Errorf("리뷰 unit 결과를 직렬화하지 못했습니다: %w", err)
+		}
+		resultJSON = string(encoded)
+	}
 	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
 		if err := requireRunLease(transaction, runID, runLeaseToken); err != nil {
 			return err
 		}
 		var unit model.ReviewUnit
-		if err := transaction.Where("review_run_id = ? AND unit_hash = ? AND lease_token = ?", runID, unitHash, leaseToken).First(&unit).Error; err != nil {
+		if err := transaction.Where("review_run_id = ? AND unit_hash = ? AND lease_token = ? AND lease_expires_at > CURRENT_TIMESTAMP(6)", runID, unitHash, leaseToken).First(&unit).Error; err != nil {
 			return err
 		}
+		provider := result.Provider
+		unitModel := result.Model
+		multipleModels := unit.MultipleModels || result.MultipleModels || result.Provider == "multiple" || result.Model == "multiple"
+		if result.Status != reviewworkflow.UnitStatusSucceeded {
+			provider, unitModel = mergedUnitIdentity(unit.Provider, unit.Model, result.Provider, result.Model)
+		}
+		if unit.Provider != "" && unit.Model != "" && result.Provider != "" && result.Model != "" && (unit.Provider != result.Provider || unit.Model != result.Model) {
+			multipleModels = true
+		}
 		updated := transaction.Model(&model.ReviewUnit{}).
-			Where("id = ? AND status = ? AND lease_token = ?", unit.ID, string(reviewworkflow.UnitStatusRunning), leaseToken).
+			Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > CURRENT_TIMESTAMP(6)", unit.ID, string(reviewworkflow.UnitStatusRunning), leaseToken).
 			Updates(map[string]any{
 				"status":            string(result.Status),
-				"provider":          result.Provider,
-				"model":             result.Model,
-				"prompt_tokens":     result.Usage.PromptTokens,
-				"completion_tokens": result.Usage.CompletionTokens,
-				"total_tokens":      result.Usage.TotalTokens,
+				"input_hash":        result.InputHash,
+				"provider":          provider,
+				"model":             unitModel,
+				"multiple_models":   multipleModels,
+				"prompt_tokens":     gorm.Expr("prompt_tokens + ?", result.Usage.PromptTokens),
+				"completion_tokens": gorm.Expr("completion_tokens + ?", result.Usage.CompletionTokens),
+				"total_tokens":      gorm.Expr("total_tokens + ?", result.Usage.TotalTokens),
+				"tool_executions":   gorm.Expr("tool_executions + ?", result.ToolExecutions),
+				"result_json":       resultJSON,
+				"reused":            result.Reused,
 				"error_summary":     boundedText(result.Error, 1000),
 				"finished_at":       result.FinishedAt,
 				"heartbeat_at":      result.FinishedAt,
+				"lease_token":       "",
 				"lease_expires_at":  nil,
 			})
 		if updated.Error != nil {
@@ -380,20 +467,37 @@ func (r *ReviewWorkflowRepository) FinishUnit(ctx context.Context, runID uint64,
 	return nil
 }
 
+func mergedUnitIdentity(previousProvider string, previousModel string, currentProvider string, currentModel string) (string, string) {
+	if currentProvider == "" && currentModel == "" {
+		return previousProvider, previousModel
+	}
+	if previousProvider == "" && previousModel == "" {
+		return currentProvider, currentModel
+	}
+	if previousProvider == currentProvider && previousModel == currentModel {
+		return currentProvider, currentModel
+	}
+	return "multiple", "multiple"
+}
+
 func (r *ReviewWorkflowRepository) ClaimPublication(ctx context.Context, runID uint64, runLeaseToken string, claimedAt time.Time, leaseExpiresAt time.Time) error {
 	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
 		var run model.ReviewRun
 		if err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).First(&run, runID).Error; err != nil {
 			return err
 		}
-		if reviewworkflow.RunStatus(run.Status).IsTerminal() || run.LeaseToken == "" || run.LeaseToken != runLeaseToken {
-			return reviewworkflow.ErrRunLeased
+		if err := validateRunLease(transaction, run, runLeaseToken); err != nil {
+			return err
 		}
 		state, err := requireLatestRun(transaction, run)
 		if err != nil {
 			return err
 		}
-		claimActive := state.PublishingRunID != 0 && state.PublishingLeaseExpiresAt != nil && state.PublishingLeaseExpiresAt.After(claimedAt)
+		leaseNow, err := databaseTime(transaction)
+		if err != nil {
+			return err
+		}
+		claimActive := state.PublishingRunID != 0 && state.PublishingLeaseExpiresAt != nil && state.PublishingLeaseExpiresAt.After(leaseNow)
 		claimOwned := state.PublishingRunID == run.ID && state.PublishingLeaseToken == runLeaseToken
 		if claimActive && !claimOwned {
 			return reviewworkflow.ErrPublicationLeased
@@ -442,13 +546,19 @@ func (r *ReviewWorkflowRepository) FinishRun(ctx context.Context, runID uint64, 
 			status = reviewworkflow.RunStatus(run.Status)
 			return nil
 		}
+		leaseNow, err := databaseTime(transaction)
+		if err != nil {
+			return err
+		}
 		finishLeaseToken := result.LeaseToken
-		expiredSupersede := result.Status == reviewworkflow.RunStatusSuperseded && result.LeaseToken == "" && (run.LeaseToken == "" || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(result.TerminalAt))
+		expiredSupersede := result.Status == reviewworkflow.RunStatusSuperseded && result.LeaseToken == "" && (run.LeaseToken == "" || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(leaseNow))
 		if run.LeaseToken != result.LeaseToken {
 			if !expiredSupersede {
 				return reviewworkflow.ErrRunLeased
 			}
 			finishLeaseToken = run.LeaseToken
+		} else if result.LeaseToken != "" && (run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(leaseNow)) {
+			return reviewworkflow.ErrRunLeased
 		}
 		status = result.Status
 		summary := reviewworkflow.CoverageSummary{}
@@ -460,7 +570,12 @@ func (r *ReviewWorkflowRepository) FinishRun(ctx context.Context, runID uint64, 
 				return summaryErr
 			}
 			summaryLoaded = true
-			status = summary.TerminalStatus()
+			coverageStatus := summary.TerminalStatus()
+			if result.Status == reviewworkflow.RunStatusPartial && coverageStatus == reviewworkflow.RunStatusComplete {
+				status = reviewworkflow.RunStatusPartial
+			} else {
+				status = coverageStatus
+			}
 		}
 		var state model.PullRequestState
 		stateErr := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).Where("owner = ? AND repository = ? AND number = ?", run.Owner, run.Repository, run.Number).First(&state).Error
@@ -469,6 +584,18 @@ func (r *ReviewWorkflowRepository) FinishRun(ctx context.Context, runID uint64, 
 		}
 		if errors.Is(stateErr, gorm.ErrRecordNotFound) && reviewworkflow.RunStatus(run.Status) == reviewworkflow.RunStatusPublishing {
 			return reviewworkflow.ErrPublicationLeased
+		}
+		if reviewworkflow.RunStatus(run.Status) == reviewworkflow.RunStatusPublishing && (result.Status == reviewworkflow.RunStatusComplete || result.Status == reviewworkflow.RunStatusPartial) {
+			publication, err := requireCompletedReviewPublication(transaction, runID, leaseNow)
+			if err != nil {
+				return err
+			}
+			if publication.PayloadHash != "" {
+				intended := publication.Finalization
+				if result.Status != intended.Status || result.Error != intended.Detail || result.AdvanceWatermark != intended.AdvanceWatermark {
+					return errors.New("리뷰 게시 완료 metadata가 canonical publication과 일치하지 않습니다")
+				}
+			}
 		}
 		if stateErr == nil {
 			latest := state.LatestRunID == run.ID && state.LatestHeadSHA == run.HeadSHA
@@ -739,6 +866,26 @@ func (r *ReviewWorkflowRepository) DeleteExpired(ctx context.Context, now time.T
 	}
 	cleaned := reviewworkflow.CleanupResult{}
 	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		var occurrenceIDs []uint64
+		if err := transaction.Model(&model.FindingOccurrence{}).
+			Where("expires_at <= CURRENT_TIMESTAMP(6)").
+			Order("id ASC").Limit(limit).Pluck("id", &occurrenceIDs).Error; err != nil {
+			return err
+		}
+		if len(occurrenceIDs) > 0 {
+			deletedOccurrences := transaction.Where("id IN ? AND expires_at <= CURRENT_TIMESTAMP(6)", occurrenceIDs).Delete(&model.FindingOccurrence{})
+			if deletedOccurrences.Error != nil {
+				return deletedOccurrences.Error
+			}
+			cleaned.Occurrences += deletedOccurrences.RowsAffected
+		}
+
+		deletedReviewPublications, err := deleteExpiredReviewPublications(transaction, now, limit)
+		if err != nil {
+			return err
+		}
+		cleaned.Publications += deletedReviewPublications
+
 		var invalidationIDs []uint64
 		if err := transaction.Model(&model.PublicationInvalidation{}).
 			Where("expires_at <= ?", now).
@@ -1085,11 +1232,33 @@ func requireRunLease(transaction *gorm.DB, runID uint64, leaseToken string) erro
 	if err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).First(&run, runID).Error; err != nil {
 		return err
 	}
-	if reviewworkflow.RunStatus(run.Status).IsTerminal() || run.LeaseToken == "" || run.LeaseToken != leaseToken {
-		return reviewworkflow.ErrRunLeased
+	if err := validateRunLease(transaction, run, leaseToken); err != nil {
+		return err
 	}
 	_, err := requireLatestRun(transaction, run)
 	return err
+}
+
+func validateRunLease(transaction *gorm.DB, run model.ReviewRun, leaseToken string) error {
+	if reviewworkflow.RunStatus(run.Status).IsTerminal() || run.LeaseToken == "" || run.LeaseToken != leaseToken || run.LeaseExpiresAt == nil {
+		return reviewworkflow.ErrRunLeased
+	}
+	now, err := databaseTime(transaction)
+	if err != nil {
+		return err
+	}
+	if !run.LeaseExpiresAt.After(now) {
+		return reviewworkflow.ErrRunLeased
+	}
+	return nil
+}
+
+func databaseTime(transaction *gorm.DB) (time.Time, error) {
+	var now time.Time
+	if err := transaction.Raw("SELECT CURRENT_TIMESTAMP(6)").Scan(&now).Error; err != nil {
+		return time.Time{}, err
+	}
+	return now, nil
 }
 
 func requireLatestRun(transaction *gorm.DB, run model.ReviewRun) (model.PullRequestState, error) {
@@ -1126,7 +1295,7 @@ func publicationClaimClearValues() map[string]any {
 }
 
 func summaryPublicationClearValues() map[string]any {
-	return map[string]any{
+	values := map[string]any{
 		"summary_operation_key":    "",
 		"summary_order_key":        "",
 		"summary_observed_at":      nil,
@@ -1136,7 +1305,10 @@ func summaryPublicationClearValues() map[string]any {
 		"summary_completed_key":    "",
 		"summary_completed_at":     nil,
 		"summary_expires_at":       nil,
+		"summary_external_calls":   0,
 	}
+	mergeValues(values, summaryCompletionResetValues())
+	return values
 }
 
 func expiredWatermarkStateIDs(transaction *gorm.DB, cutoff time.Time, limit int) ([]uint64, error) {

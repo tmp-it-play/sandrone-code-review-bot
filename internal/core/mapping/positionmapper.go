@@ -5,6 +5,7 @@ import (
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewanalysis"
 )
 
 type PositionMapper struct {
@@ -12,6 +13,7 @@ type PositionMapper struct {
 }
 
 func (m PositionMapper) Map(findings []review.Finding, files []pullrequest.ChangedFile) []review.Finding {
+	findings, _ = (reviewanalysis.EvidenceVerifier{}).Verify(findings, files)
 	lines := map[string]pullrequest.CommentableLines{}
 	for _, file := range files {
 		lines[file.Path] = pullrequest.ParseCommentableLines(file.Patch)
@@ -26,7 +28,6 @@ func (m PositionMapper) Map(findings []review.Finding, files []pullrequest.Chang
 	for _, finding := range ordered {
 		commentable, known := lines[finding.File]
 		if !known || commentable.IsEmpty() {
-			placed = append(placed, finding.WithPlacement(review.PlacementFallback))
 			continue
 		}
 		if m.MaxInline > 0 && inline >= m.MaxInline {
@@ -38,13 +39,6 @@ func (m PositionMapper) Map(findings []review.Finding, files []pullrequest.Chang
 			inline++
 			continue
 		}
-		snapped, ok := commentable.Nearest(finding.Line)
-		if !ok {
-			placed = append(placed, finding.WithPlacement(review.PlacementFallback))
-			continue
-		}
-		placed = append(placed, finding.WithLine(snapped).WithPlacement(review.PlacementInline))
-		inline++
 	}
 	return placed
 }

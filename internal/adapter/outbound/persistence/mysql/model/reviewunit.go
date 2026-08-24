@@ -7,15 +7,20 @@ type ReviewUnit struct {
 	ReviewRunID      uint64    `gorm:"not null;uniqueIndex:idx_review_unit_hash,priority:1;index"`
 	ReviewRun        ReviewRun `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 	UnitHash         string    `gorm:"size:64;uniqueIndex:idx_review_unit_hash,priority:2"`
+	InputHash        string    `gorm:"size:64;index"`
 	Ordinal          int
 	Kind             string `gorm:"size:40"`
 	Status           string `gorm:"size:20;index"`
 	AttemptCount     int
 	Provider         string `gorm:"size:40"`
 	Model            string `gorm:"size:120"`
+	MultipleModels   bool   `gorm:"not null;default:false"`
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+	ToolExecutions   int
+	ResultJSON       string `gorm:"type:mediumtext"`
+	Reused           bool
 	ErrorSummary     string `gorm:"size:1000"`
 	StartedAt        *time.Time
 	FinishedAt       *time.Time

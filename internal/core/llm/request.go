@@ -7,7 +7,12 @@ type Request struct {
 	Tools                 []Tool
 	ForceJSON             bool
 	Providers             []string
+	ExcludedProviders     []string
+	TaskRole              TaskRole
+	DataClassification    DataClassification
+	ExternalCallBudget    *ExternalCallBudget
 	RequireCompletePrompt bool
+	ResponseValidation    ResponseValidation
 }
 
 func (r Request) WithMessages(messages []Message) Request {

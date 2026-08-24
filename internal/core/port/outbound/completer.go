@@ -9,4 +9,6 @@ import (
 type Completer interface {
 	Complete(ctx context.Context, request llm.Request, executor ToolExecutor) (llm.Response, error)
 	PromptBudget(providers []string) int
+	PromptBudgetFor(request llm.Request) int
+	PolicyHashInputs(request llm.Request) llm.PolicyHashInputs
 }

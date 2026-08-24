@@ -17,11 +17,12 @@ import (
 
 type InstructionCollector struct {
 	content outbound.RepositoryContent
+	masker  outbound.Masker
 	logger  *slog.Logger
 }
 
-func NewInstructionCollector(content outbound.RepositoryContent, logger *slog.Logger) *InstructionCollector {
-	return &InstructionCollector{content: content, logger: logger}
+func NewInstructionCollector(content outbound.RepositoryContent, masker outbound.Masker, logger *slog.Logger) *InstructionCollector {
+	return &InstructionCollector{content: content, masker: masker, logger: logger}
 }
 
 func (c *InstructionCollector) Instructions(ctx context.Context, target pullrequest.Target, config setting.RepoConfig) (instruction.Collection, error) {
@@ -35,13 +36,14 @@ func (c *InstructionCollector) Instructions(ctx context.Context, target pullrequ
 	seen := map[string]struct{}{}
 	for _, path := range paths {
 		if budget.Exhausted() {
-			collection.Omitted = append(collection.Omitted, path)
+			collection.Omitted = append(collection.Omitted, c.masker.Mask(path))
 			continue
 		}
 		body, err := c.readFirst(ctx, target, path)
 		if err != nil {
 			continue
 		}
+		body = c.masker.Mask(body)
 		digest := fingerprint(body)
 		if _, duplicate := seen[digest]; duplicate {
 			continue
@@ -49,11 +51,11 @@ func (c *InstructionCollector) Instructions(ctx context.Context, target pullrequ
 		seen[digest] = struct{}{}
 		taken, truncated := budget.Take(body)
 		if strings.TrimSpace(taken) == "" {
-			collection.Omitted = append(collection.Omitted, path)
+			collection.Omitted = append(collection.Omitted, c.masker.Mask(path))
 			continue
 		}
 		collection.Documents = append(collection.Documents, instruction.Document{
-			Path:      path,
+			Path:      c.masker.Mask(path),
 			Content:   taken,
 			Truncated: truncated,
 		})
@@ -104,7 +106,7 @@ func fingerprint(body string) string {
 
 func (c *InstructionCollector) readFirst(ctx context.Context, target pullrequest.Target, path string) (string, error) {
 	var lastErr error
-	for _, ref := range target.ContentRefs() {
+	for _, ref := range target.PolicyRefs() {
 		body, err := c.content.File(ctx, target, path, ref)
 		if err == nil {
 			return body, nil
@@ -115,7 +117,7 @@ func (c *InstructionCollector) readFirst(ctx context.Context, target pullrequest
 }
 
 func (c *InstructionCollector) listFirst(ctx context.Context, target pullrequest.Target) []string {
-	for _, ref := range target.ContentRefs() {
+	for _, ref := range target.PolicyRefs() {
 		paths, err := c.content.Paths(ctx, target, ref)
 		if err == nil {
 			return paths

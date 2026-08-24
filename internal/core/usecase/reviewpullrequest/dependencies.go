@@ -9,19 +9,21 @@ import (
 )
 
 type Dependencies struct {
-	Source    outbound.PullRequestSource
-	Settings  outbound.SettingSource
-	Masker    outbound.Masker
-	Completer outbound.Completer
-	Tools     outbound.ToolExecutorFactory
-	Publisher outbound.ReviewPublisher
-	Reactions outbound.ReactionPublisher
-	Renderer  outbound.Renderer
-	Reviews   outbound.ReviewRepository
-	Workflows outbound.ReviewWorkflowRepository
-	Findings  outbound.FindingRepository
-	Clock     outbound.Clock
-	Parser    parsing.ResultParser
-	Logger    *slog.Logger
-	Retention time.Duration
+	Source      outbound.PullRequestSource
+	Settings    outbound.SettingSource
+	Masker      outbound.Masker
+	Completer   outbound.Completer
+	Tools       outbound.ToolExecutorFactory
+	Publisher   outbound.ReviewPublisher
+	Reactions   outbound.ReactionPublisher
+	Renderer    outbound.Renderer
+	Reviews     outbound.ReviewRepository
+	Workflows   outbound.ReviewWorkflowRepository
+	Findings    outbound.FindingRepository
+	State       outbound.PullRequestStateRepository
+	Clock       outbound.Clock
+	Parser      parsing.ResultParser
+	Logger      *slog.Logger
+	Retention   time.Duration
+	LLMMaxCalls int
 }

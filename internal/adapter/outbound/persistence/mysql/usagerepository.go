@@ -20,11 +20,15 @@ func NewUsageRepository(database *gorm.DB) *UsageRepository {
 
 func (r *UsageRepository) Record(ctx context.Context, event usage.Event) error {
 	entry := model.ProviderUsage{
-		Provider:   event.Provider,
-		Model:      event.Model,
-		Outcome:    event.Outcome,
-		Status:     event.Status,
-		OccurredAt: event.OccurredAt,
+		Provider:         event.Provider,
+		Model:            event.Model,
+		Role:             event.Role,
+		Outcome:          event.Outcome,
+		Status:           event.Status,
+		PromptTokens:     event.PromptTokens,
+		CompletionTokens: event.CompletionTokens,
+		TotalTokens:      event.TotalTokens,
+		OccurredAt:       event.OccurredAt,
 	}
 	if err := r.database.WithContext(ctx).Create(&entry).Error; err != nil {
 		return fmt.Errorf("사용량을 저장하지 못했습니다: %w", err)

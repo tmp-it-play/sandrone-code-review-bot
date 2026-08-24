@@ -3,41 +3,56 @@ package review
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 	"strings"
-	"unicode"
 )
 
 type Fingerprint string
 
 func NewFingerprint(finding Finding) Fingerprint {
-	seed := strings.Join([]string{
-		strings.ToLower(strings.TrimSpace(finding.File)),
-		string(finding.Severity),
+	return NewRootCauseFingerprint(finding)
+}
+
+func NewRootCauseFingerprint(finding Finding) Fingerprint {
+	rootCause := normalizeForFingerprint(finding.RootCause)
+	if rootCause != "" {
+		return fingerprintOf(rootCause)
+	}
+	return fingerprintOf(strings.Join([]string{
 		normalizeForFingerprint(finding.Title),
 		normalizeForFingerprint(finding.Body),
-	}, "\x1f")
-	sum := sha256.Sum256([]byte(seed))
-	return Fingerprint(hex.EncodeToString(sum[:]))
+	}, "\x1f"))
+}
+
+func NewOccurrenceFingerprint(finding Finding) Fingerprint {
+	return NewAnchoredOccurrenceFingerprint(
+		NewRootCauseFingerprint(finding),
+		finding.File,
+		finding.SpanStart(),
+		finding.SpanEnd(),
+		finding.Evidence,
+	)
+}
+
+func NewAnchoredOccurrenceFingerprint(root Fingerprint, path string, line int, endLine int, evidence string) Fingerprint {
+	return fingerprintOf(strings.Join([]string{
+		root.String(),
+		strings.TrimSpace(path),
+		strconv.Itoa(line),
+		strconv.Itoa(endLine),
+		evidence,
+	}, "\x1f"))
 }
 
 func (f Fingerprint) String() string {
 	return string(f)
 }
 
+func fingerprintOf(seed string) Fingerprint {
+	sum := sha256.Sum256([]byte(seed))
+	return Fingerprint(hex.EncodeToString(sum[:]))
+}
+
 func normalizeForFingerprint(text string) string {
-	var builder strings.Builder
-	previousSpace := false
-	for _, symbol := range strings.ToLower(text) {
-		switch {
-		case unicode.IsLetter(symbol) || unicode.IsDigit(symbol):
-			builder.WriteRune(symbol)
-			previousSpace = false
-		case unicode.IsSpace(symbol):
-			if !previousSpace && builder.Len() > 0 {
-				builder.WriteRune(' ')
-				previousSpace = true
-			}
-		}
-	}
-	return strings.TrimSpace(builder.String())
+	return strings.Join(strings.Fields(strings.ToLower(text)), " ")
 }

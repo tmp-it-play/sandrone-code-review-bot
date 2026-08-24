@@ -19,13 +19,17 @@ type reviewBatchPlanner struct {
 	ToolsAllowed     bool
 	ProviderLimit    int
 	MaxReviewBatches int
+	Mask             func(string) string
+	Paths            *promptPathMap
 }
+
+const toolPromptReserve = 3072
 
 func (p reviewBatchPlanner) Build(files []pullrequest.ChangedFile) (batching.Plan, setting.RepoConfig) {
 	config, limit := p.promptConfig()
 	plan := batching.Plan{}
 	current := make([]pullrequest.ChangedFile, 0, len(files))
-	for _, file := range files {
+	for _, file := range (semanticFilePlanner{}).Order(files) {
 		candidate := appendFile(current, file)
 		if p.fits(candidate, config, limit) {
 			current = candidate
@@ -35,8 +39,9 @@ func (p reviewBatchPlanner) Build(files []pullrequest.ChangedFile) (batching.Pla
 			plan.Batches = append(plan.Batches, current)
 			current = nil
 		}
-		if p.fits([]pullrequest.ChangedFile{file}, config, limit) {
-			current = []pullrequest.ChangedFile{file}
+		fittedFile, fits := p.fitSingle(file, config, limit)
+		if fits {
+			current = []pullrequest.ChangedFile{fittedFile}
 			continue
 		}
 		plan.Oversized = append(plan.Oversized, file)
@@ -57,8 +62,8 @@ func (p reviewBatchPlanner) Messages(files []pullrequest.ChangedFile, config set
 	return prompt.ReviewPrompt{
 		Context: prompt.Context{
 			PullRequest:  p.PullRequest,
-			Files:        files,
-			Inventory:    p.Inventory,
+			Files:        p.maskedFiles(files),
+			Inventory:    p.maskedFiles(p.Inventory),
 			Instructions: p.Instructions,
 			Config:       config,
 			Incremental:  p.Incremental,
@@ -93,11 +98,43 @@ func (p reviewBatchPlanner) promptConfig() (setting.RepoConfig, int) {
 func (p reviewBatchPlanner) fixedCost(config setting.RepoConfig) int {
 	context := prompt.Context{Config: config}
 	messages := prompt.ReviewPrompt{Context: context, Extra: p.Extra, ToolsAllowed: p.ToolsAllowed}.Messages()
-	return messagesSize(messages) - len(context.Render())
+	fixed := messagesSize(messages) - len(context.Render())
+	if p.ToolsAllowed {
+		fixed += toolPromptReserve
+	}
+	return fixed
 }
 
 func (p reviewBatchPlanner) fits(files []pullrequest.ChangedFile, config setting.RepoConfig, limit int) bool {
 	return limit <= 0 || messagesSize(p.Messages(files, config)) <= limit
+}
+
+func (p reviewBatchPlanner) fitSingle(file pullrequest.ChangedFile, config setting.RepoConfig, limit int) (pullrequest.ChangedFile, bool) {
+	if p.fits([]pullrequest.ChangedFile{file}, config, limit) {
+		return file, true
+	}
+	if file.Content == "" {
+		return file, false
+	}
+	file.Content = ""
+	file.Truncated = true
+	return file, p.fits([]pullrequest.ChangedFile{file}, config, limit)
+}
+
+func (p reviewBatchPlanner) maskedFiles(files []pullrequest.ChangedFile) []pullrequest.ChangedFile {
+	if p.Mask == nil {
+		return files
+	}
+	masked := make([]pullrequest.ChangedFile, len(files))
+	for index, file := range files {
+		file.Path = p.Paths.PromptPath(file.Path)
+		file.PreviousPath = p.Paths.PromptPath(file.PreviousPath)
+		file.Status = p.Mask(file.Status)
+		file.Patch = p.Mask(file.Patch)
+		file.Content = p.Mask(file.Content)
+		masked[index] = file
+	}
+	return masked
 }
 
 func appendFile(files []pullrequest.ChangedFile, file pullrequest.ChangedFile) []pullrequest.ChangedFile {
@@ -108,9 +145,5 @@ func appendFile(files []pullrequest.ChangedFile, file pullrequest.ChangedFile) [
 }
 
 func messagesSize(messages []llm.Message) int {
-	total := 0
-	for _, message := range messages {
-		total += len(message.Content)
-	}
-	return total
+	return llm.MessagesSize(messages)
 }

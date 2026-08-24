@@ -34,8 +34,8 @@ func (b PlanBuilder) Build(files []pullrequest.ChangedFile, chosen selection.Sel
 			}
 		}
 		sort.Strings(keys)
-		unitHash := hashParts(append([]string{"legacy-review-unit-v1"}, keys...)...)
-		units = append(units, Unit{Hash: unitHash, Ordinal: index + 1, Kind: "legacy_batch", Status: UnitStatusPending})
+		unitHash := hashParts(append([]string{"semantic-review-unit-v1"}, keys...)...)
+		units = append(units, Unit{Hash: unitHash, Ordinal: index + 1, Kind: "semantic_batch", Status: UnitStatusPending})
 		for _, file := range batch {
 			pathItems := itemsByPath[file.Path]
 			for itemIndex := range pathItems {

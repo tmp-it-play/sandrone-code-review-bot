@@ -1,6 +1,9 @@
 package prompt
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 const MaxBodyChars = 4000
 
@@ -10,6 +13,9 @@ func truncateBody(body string) (string, bool) {
 		return trimmed, false
 	}
 	cut := trimmed[:MaxBodyChars]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
 	if boundary := strings.LastIndex(cut, "\n"); boundary > MaxBodyChars/2 {
 		cut = cut[:boundary]
 	}

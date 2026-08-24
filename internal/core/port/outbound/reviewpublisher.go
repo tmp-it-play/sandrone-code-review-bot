@@ -8,7 +8,7 @@ import (
 )
 
 type ReviewPublisher interface {
-	SubmitReview(ctx context.Context, target pullrequest.Target, marker string, body string, comments []review.InlineComment) error
+	SubmitReview(ctx context.Context, target pullrequest.Target, marker string, body string, comments []review.InlineComment) (int64, error)
 	PublicationExists(ctx context.Context, target pullrequest.Target, marker string) (bool, error)
 	InvalidatePublication(ctx context.Context, target pullrequest.Target, marker string, reason string) error
 	CreateComment(ctx context.Context, target pullrequest.Target, body string) (int64, error)

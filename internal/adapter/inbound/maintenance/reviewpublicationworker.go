@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 )
@@ -146,11 +147,19 @@ func (w *ReviewPublicationWorker) reconcileRun(ctx context.Context, run reviewwo
 		}
 		return w.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "게시 조정 전에 base 또는 head가 변경되었습니다", false, invalidation)
 	}
-	published, err := w.publisher.PublicationExists(ctx, target, reviewworkflow.PublicationMarker(run.Key))
+	marker := reviewworkflow.PublicationMarker(run.Key)
+	storedPublication, storedPublicationFound, err := w.workflows.ReviewPublication(ctx, run.ID, leaseToken)
 	if err != nil {
 		return w.resolveUnverified(ctx, run, leaseToken, err)
 	}
-	if !published {
+	if storedPublicationFound && storedPublication.Marker != marker {
+		return w.resolveUnverified(ctx, run, leaseToken, fmt.Errorf("저장된 리뷰 게시 marker가 실행과 일치하지 않습니다"))
+	}
+	published, err := w.publisher.PublicationExists(ctx, target, marker)
+	if err != nil {
+		return w.resolveUnverified(ctx, run, leaseToken, err)
+	}
+	if !published && !storedPublicationFound {
 		if run.HeartbeatAt.After(w.clock.Now().Add(-w.orphanAfter)) {
 			return nil
 		}
@@ -163,7 +172,79 @@ func (w *ReviewPublicationWorker) reconcileRun(ctx context.Context, run reviewwo
 	if !found {
 		return w.resolveUnverified(ctx, run, leaseToken, fmt.Errorf("게시 marker는 있지만 내부 리뷰 이력이 없습니다"))
 	}
-	return w.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusComplete, "GitHub marker와 내부 이력으로 게시 결과를 조정했습니다", true, nil)
+	if published {
+		expiresAt := run.StartedAt.Add(w.retention)
+		if storedPublicationFound {
+			expiresAt = storedPublication.ExpiresAt
+		}
+		if err := w.completeReviewPublication(ctx, run.ID, leaseToken, marker, reviewworkflow.ReviewPublicationChannelReconciled, 0, expiresAt); err != nil {
+			return err
+		}
+	} else if storedPublication.Status == reviewworkflow.ReviewPublicationStatusPrepared {
+		if err := w.publishPreparedPublication(ctx, target, run.ID, leaseToken, storedPublication); errors.Is(err, publication.ErrTargetChanged) {
+			return w.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "저장된 리뷰 게시 payload 재개 직전에 base 또는 head가 변경되었습니다", false, nil)
+		} else if err != nil {
+			return w.resolveUnverified(ctx, run, leaseToken, err)
+		}
+	}
+	confirmed, err := w.source.PullRequest(ctx, target)
+	if err != nil {
+		return w.resolveUnverified(ctx, run, leaseToken, err)
+	}
+	if confirmed.BaseSHA != run.BaseSHA || confirmed.HeadSHA != run.HeadSHA {
+		invalidation, err := w.invalidatePublication(ctx, target, run, "리뷰 게시 재개 중 base 또는 head가 변경되었습니다")
+		if err != nil {
+			return err
+		}
+		return w.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "리뷰 게시 재개 중 base 또는 head가 변경되었습니다", false, invalidation)
+	}
+	finalization := reviewworkflow.ReviewPublicationFinalization{
+		Status:           reviewworkflow.RunStatusPartial,
+		Detail:           "legacy marker와 게시 receipt만 확인되어 보수적으로 부분 완료했습니다",
+		AdvanceWatermark: false,
+	}
+	if storedPublicationFound && storedPublication.PayloadHash != "" {
+		finalization = storedPublication.Finalization
+	}
+	return w.finishWithLease(ctx, run, leaseToken, finalization.Status, finalization.Detail, finalization.AdvanceWatermark, nil)
+}
+
+func (w *ReviewPublicationWorker) publishPreparedPublication(ctx context.Context, target pullrequest.Target, runID uint64, leaseToken string, prepared reviewworkflow.ReviewPublication) error {
+	if prepared.Status == reviewworkflow.ReviewPublicationStatusCompleted {
+		return nil
+	}
+	if prepared.Status != reviewworkflow.ReviewPublicationStatusPrepared {
+		return errors.New("게시할 수 없는 리뷰 publication 상태입니다")
+	}
+	reviewID, submitErr := w.publisher.SubmitReview(ctx, target, prepared.Marker, prepared.Payload.Body, prepared.Payload.Comments)
+	if submitErr == nil {
+		return w.completeReviewPublication(ctx, runID, leaseToken, prepared.Marker, reviewworkflow.ReviewPublicationChannelReview, reviewID, prepared.ExpiresAt)
+	}
+	if errors.Is(submitErr, publication.ErrTargetChanged) {
+		return submitErr
+	}
+	published, reconcileErr := w.publisher.PublicationExists(ctx, target, prepared.Marker)
+	if reconcileErr != nil {
+		return errors.Join(submitErr, reconcileErr)
+	}
+	if published {
+		return w.completeReviewPublication(ctx, runID, leaseToken, prepared.Marker, reviewworkflow.ReviewPublicationChannelReconciled, 0, prepared.ExpiresAt)
+	}
+	w.logger.Warn("저장된 리뷰를 제출하지 못해 canonical fallback 코멘트로 대신합니다", "target", target.Reference(), "error", submitErr)
+	commentID, commentErr := w.publisher.CreateComment(ctx, target, prepared.Payload.FallbackBody)
+	if commentErr == nil {
+		return w.completeReviewPublication(ctx, runID, leaseToken, prepared.Marker, reviewworkflow.ReviewPublicationChannelComment, commentID, prepared.ExpiresAt)
+	}
+	published, reconcileErr = w.publisher.PublicationExists(ctx, target, prepared.Marker)
+	if reconcileErr == nil && published {
+		return w.completeReviewPublication(ctx, runID, leaseToken, prepared.Marker, reviewworkflow.ReviewPublicationChannelReconciled, 0, prepared.ExpiresAt)
+	}
+	return errors.Join(submitErr, commentErr, reconcileErr)
+}
+
+func (w *ReviewPublicationWorker) completeReviewPublication(ctx context.Context, runID uint64, leaseToken string, marker string, channel string, externalID int64, expiresAt time.Time) error {
+	completedAt := w.clock.Now()
+	return w.workflows.CompleteReviewPublication(ctx, runID, leaseToken, marker, channel, externalID, completedAt, expiresAt)
 }
 
 func (w *ReviewPublicationWorker) resolveUnverified(ctx context.Context, run reviewworkflow.Run, leaseToken string, cause error) error {

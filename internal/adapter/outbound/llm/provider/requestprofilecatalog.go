@@ -43,6 +43,18 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 			ThinkingEnabled:  boolValue(false),
 			OutputTokenLimit: 32768,
 		}
+	case "mistral/mistral-small-2603":
+		return RequestProfile{
+			OutputTokenLimit:      8192,
+			UseRequestTemperature: true,
+		}
+	case "cloudflare-glm/@cf/zai-org/glm-4.7-flash", "cloudflare-gemma/@cf/google/gemma-4-26b-a4b-it":
+		return RequestProfile{
+			ParallelToolCalls:      boolValue(false),
+			OutputTokenLimit:       8192,
+			UseMaxCompletionTokens: true,
+			UseRequestTemperature:  true,
+		}
 	default:
 		return RequestProfile{UseRequestTemperature: true}
 	}

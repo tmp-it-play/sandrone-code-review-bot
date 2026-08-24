@@ -21,4 +21,5 @@ type Dependencies struct {
 	Parser       parsing.ResultParser
 	Logger       *slog.Logger
 	Retention    time.Duration
+	LLMMaxCalls  int
 }

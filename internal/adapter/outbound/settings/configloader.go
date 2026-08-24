@@ -29,7 +29,7 @@ func NewConfigLoader(content outbound.RepositoryContent, logger *slog.Logger) *C
 
 func (l *ConfigLoader) RepoConfig(ctx context.Context, target pullrequest.Target) (setting.RepoConfig, error) {
 	config := setting.DefaultRepoConfig()
-	for _, ref := range target.ContentRefs() {
+	for _, ref := range target.PolicyRefs() {
 		for _, candidate := range configCandidates {
 			body, err := l.content.File(ctx, target, candidate, ref)
 			if err != nil {
@@ -41,10 +41,10 @@ func (l *ConfigLoader) RepoConfig(ctx context.Context, target pullrequest.Target
 				return config, nil
 			}
 			l.logger.Info("저장소 설정을 읽었습니다", "target", target.FullName(), "path", candidate, "ref", refLabel(ref))
-			return merge(config, raw), nil
+			return boundRepoConfig(merge(config, raw)), nil
 		}
 	}
-	return config, nil
+	return boundRepoConfig(config), nil
 }
 
 func merge(config setting.RepoConfig, raw rawConfig) setting.RepoConfig {

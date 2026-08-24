@@ -60,14 +60,21 @@ func Migrate(database *gorm.DB) error {
 			&model.CommandInvocation{},
 			&model.ReviewRun{},
 			&model.ReviewUnit{},
+			&model.ReviewVerification{},
 			&model.CoverageItem{},
+			&model.ReviewPublication{},
 			&model.WebhookDelivery{},
 			&model.ReplyPublication{},
 			&model.PublicationInvalidation{},
+			&model.FindingOccurrence{},
+			&model.MigrationCheckpoint{},
 		); err != nil {
 			return fmt.Errorf("스키마를 반영하지 못했습니다: %w", err)
 		}
 		if err := backfillPullRequestStateReviewTimes(connection); err != nil {
+			return err
+		}
+		if err := backfillReviewVerificationCompletion(connection); err != nil {
 			return err
 		}
 		return nil

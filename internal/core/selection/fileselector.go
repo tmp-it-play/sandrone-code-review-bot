@@ -6,6 +6,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewanalysis"
 )
 
 type FileSelector struct {
@@ -33,6 +34,12 @@ func (s FileSelector) Select(files []pullrequest.ChangedFile) Selection {
 		kept = append(kept, file)
 	}
 	sort.SliceStable(kept, func(left, right int) bool {
+		classifier := reviewanalysis.SpecialistRiskClassifier{}
+		leftRisk := classifier.Score(kept[left])
+		rightRisk := classifier.Score(kept[right])
+		if leftRisk != rightRisk {
+			return leftRisk > rightRisk
+		}
 		return kept[left].ChangeSize() > kept[right].ChangeSize()
 	})
 	var skipped []pullrequest.ChangedFile

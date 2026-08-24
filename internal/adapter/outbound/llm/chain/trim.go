@@ -12,10 +12,7 @@ func trimMessages(messages []llm.Message, limit int) ([]llm.Message, bool) {
 	if limit <= 0 {
 		return messages, false
 	}
-	total := 0
-	for _, message := range messages {
-		total += len(message.Content)
-	}
+	total := llm.MessagesSize(messages)
 	excess := total - limit
 	if excess <= 0 {
 		return messages, false
@@ -42,16 +39,31 @@ func trimMessages(messages []llm.Message, limit int) ([]llm.Message, bool) {
 			break
 		}
 		content := trimmed[index].Content
-		keep := len(content) - excess - len(truncationNotice)
-		if keep < 0 {
-			keep = 0
+		target := len(content) - excess
+		if target <= 0 {
+			trimmed[index].Content = ""
+		} else if target <= len(truncationNotice) {
+			trimmed[index].Content = prefixBytes(truncationNotice, target)
+		} else {
+			trimmed[index].Content = prefixBytes(content, target-len(truncationNotice)) + truncationNotice
 		}
-		removed := len(content) - keep
-		trimmed[index].Content = content[:keep] + truncationNotice
-		excess -= removed - len(truncationNotice)
+		excess = llm.MessagesSize(trimmed) - limit
 		changed = true
 	}
 	return trimmed, changed
+}
+
+func prefixBytes(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if len(value) <= limit {
+		return value
+	}
+	for limit > 0 && value[limit]&0xc0 == 0x80 {
+		limit--
+	}
+	return value[:limit]
 }
 
 const maxTrimRatio = 4
@@ -60,10 +72,7 @@ func fitsWithinTrimBudget(messages []llm.Message, limit int) bool {
 	if limit <= 0 {
 		return true
 	}
-	total := 0
-	for _, message := range messages {
-		total += len(message.Content)
-	}
+	total := llm.MessagesSize(messages)
 	return total*3 <= limit*maxTrimRatio
 }
 
@@ -71,9 +80,9 @@ func messagesFit(messages []llm.Message, limit int) bool {
 	if limit <= 0 {
 		return true
 	}
-	total := 0
-	for _, message := range messages {
-		total += len(message.Content)
-	}
-	return total <= limit
+	return llm.MessagesSize(messages) <= limit
+}
+
+func requestFits(messages []llm.Message, tools []llm.Tool, limit int) bool {
+	return limit <= 0 || llm.RequestSize(messages, tools) <= limit
 }

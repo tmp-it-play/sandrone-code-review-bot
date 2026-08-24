@@ -21,13 +21,14 @@ type Client struct {
 	baseURL        string
 	apiKey         string
 	capability     llm.Capability
+	profile        llm.ProviderProfile
 	requestProfile provider.RequestProfile
 	maxPromptChars int
 	extraHeaders   map[string]string
 	httpClient     *http.Client
 }
 
-func NewClient(name string, model string, displayName string, baseURL string, apiKey string, capability llm.Capability, requestProfile provider.RequestProfile, maxPromptChars int, extraHeaders map[string]string, timeout time.Duration) *Client {
+func NewClient(name string, model string, displayName string, baseURL string, apiKey string, capability llm.Capability, profile llm.ProviderProfile, requestProfile provider.RequestProfile, maxPromptChars int, extraHeaders map[string]string, timeout time.Duration) *Client {
 	return &Client{
 		name:           name,
 		model:          model,
@@ -35,6 +36,7 @@ func NewClient(name string, model string, displayName string, baseURL string, ap
 		baseURL:        strings.TrimRight(baseURL, "/"),
 		apiKey:         apiKey,
 		capability:     capability,
+		profile:        profile,
 		requestProfile: requestProfile,
 		maxPromptChars: maxPromptChars,
 		extraHeaders:   extraHeaders,
@@ -52,6 +54,14 @@ func (c *Client) Model() string {
 
 func (c *Client) Capability() llm.Capability {
 	return c.capability
+}
+
+func (c *Client) Profile() llm.ProviderProfile {
+	return c.profile
+}
+
+func (c *Client) RequestPolicy(request llm.Request) llm.ProviderRequestPolicyIdentity {
+	return c.requestProfile.Identity(request)
 }
 
 func (c *Client) PromptLimit() int {
@@ -113,12 +123,24 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureInvalid, Status: httpResponse.StatusCode, Cause: fmt.Errorf("응답에 선택지가 없습니다")}
 	}
 	choice := decoded.Choices[0]
+	resolvedModel := strings.TrimSpace(decoded.Model)
+	if resolvedModel == "" {
+		resolvedModel = c.model
+	}
+	modelLabel := c.displayName
+	if resolvedModel != c.model {
+		if modelLabel == "" {
+			modelLabel = resolvedModel
+		} else {
+			modelLabel += " [" + resolvedModel + "]"
+		}
+	}
 	return llm.Response{
 		Content:      choice.Message.Content,
 		ToolCalls:    fromChatToolCalls(choice.Message.ToolCalls),
 		Provider:     c.name,
-		Model:        c.model,
-		ModelLabel:   c.displayName,
+		Model:        resolvedModel,
+		ModelLabel:   modelLabel,
 		FinishReason: choice.FinishReason,
 		Usage: llm.Usage{
 			PromptTokens:     decoded.Usage.PromptTokens,

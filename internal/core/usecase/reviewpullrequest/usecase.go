@@ -14,10 +14,12 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/mapping"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/parsing"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewanalysis"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/selection"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/setting"
@@ -48,22 +50,19 @@ func (u *UseCase) ExecuteWithOutcome(ctx context.Context, task job.ReviewJob) (r
 }
 
 func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *review.Outcome) (executeErr error) {
-	if task.SnapshotObservedAt.IsZero() || strings.TrimSpace(task.SnapshotOrderKey) == "" {
-		u.deps.Logger.Warn("발생 순서가 없는 이전 형식의 리뷰 작업을 건너뜁니다", "target", task.Target.Reference())
-		return nil
-	}
 	activeRunID := uint64(0)
 	activeRunLease := ""
 	workflowRunCreated := false
 	publicationAttempted := false
 	startedAt := u.deps.Clock.Now()
+	failureResponse := llm.Response{}
 	fail := func(message string, cause error) error {
 		if publicationAttempted {
 			u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
 			return fmt.Errorf("%s: %w", message, cause)
 		}
 		recordFailure := !workflowRunCreated || activeRunID != 0
-		return u.fail(ctx, task, startedAt, message, cause, activeRunID, recordFailure)
+		return u.fail(ctx, task, startedAt, message, cause, activeRunID, recordFailure, failureResponse)
 	}
 	defer func() {
 		if activeRunID == 0 || activeRunLease == "" {
@@ -80,10 +79,27 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			u.deps.Logger.Warn("리뷰 실행 lease를 해제하지 못했습니다", "run", activeRunID, "error", err)
 		}
 	}()
+	task.Instruction = u.deps.Masker.Mask(task.Instruction)
 	target := task.Target
 	request, err := u.deps.Source.PullRequest(ctx, target)
 	if err != nil {
 		return fail("Pull Request를 읽지 못했습니다", err)
+	}
+	request = request.Masked(u.deps.Masker.Mask)
+	if task.SnapshotObservedAt.IsZero() {
+		task.SnapshotObservedAt = request.UpdatedAt
+		if task.SnapshotObservedAt.IsZero() {
+			task.SnapshotObservedAt = startedAt
+		}
+	}
+	if strings.TrimSpace(task.SnapshotOrderKey) == "" {
+		if task.CommentID > 0 {
+			task.SnapshotOrderKey = job.OrderKey(task.CommentID, task.InThread)
+		} else if strings.TrimSpace(task.RequestIdentity) != "" {
+			task.SnapshotOrderKey = task.RequestIdentity
+		} else {
+			task.SnapshotOrderKey = "legacy:automatic"
+		}
 	}
 	snapshotObservedAt := task.SnapshotObservedAt
 	stale := target.HeadSHA != "" && target.HeadSHA != request.HeadSHA
@@ -100,7 +116,32 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if err != nil {
 		return fail("설정을 읽지 못했습니다", err)
 	}
-	runCandidate, err := newWorkflowRun(task, target, config, startedAt, snapshotObservedAt)
+	classification := llm.DataClassificationPublic
+	if request.Private {
+		classification = llm.DataClassificationPrivateCode
+	}
+	maxCalls := u.deps.LLMMaxCalls
+	if maxCalls < 1 {
+		maxCalls = 12
+	}
+	callBudget := llm.NewExternalCallBudget(maxCalls)
+	reviewRequest := llm.Request{
+		Temperature:           config.Temperature,
+		MaxOutputTokens:       config.MaxOutputTokens,
+		Providers:             config.Sandrone.Providers,
+		TaskRole:              llm.TaskRoleReviewer,
+		DataClassification:    classification,
+		ExternalCallBudget:    callBudget,
+		ForceJSON:             true,
+		RequireCompletePrompt: true,
+		ResponseValidation:    llm.ResponseValidation{Policy: llm.ResponseValidationReviewResult},
+	}
+	policy := u.deps.Completer.PolicyHashInputs(reviewRequest)
+	modelPolicyHash, err := hashJSON(policy)
+	if err != nil {
+		return fail("모델 정책 hash를 만들지 못했습니다", err)
+	}
+	runCandidate, err := newWorkflowRun(task, target, config, modelPolicyHash, startedAt, snapshotObservedAt)
 	if err != nil {
 		return fail("리뷰 실행 식별자를 만들지 못했습니다", err)
 	}
@@ -190,63 +231,89 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 	activeRunID = run.ID
 	activeRunLease = runLease
+	callBudget = llm.NewDurableExternalCallBudget(maxCalls, func() bool {
+		reserved, reserveErr := u.deps.Workflows.ReserveExternalCall(ctx, run.ID, runLease, maxCalls)
+		if reserveErr != nil {
+			u.deps.Logger.Warn("리뷰 실행 외부 호출 예산을 예약하지 못했습니다", "run", run.ID, "error", reserveErr)
+			return false
+		}
+		return reserved
+	})
+	reviewRequest.ExternalCallBudget = callBudget
 	if resumePublishing {
 		marker := reviewworkflow.PublicationMarker(run.Key)
+		storedPublication, storedPublicationFound, storedPublicationErr := u.deps.Workflows.ReviewPublication(ctx, run.ID, runLease)
+		if storedPublicationErr != nil {
+			return fail("저장된 리뷰 게시 payload를 읽지 못했습니다", storedPublicationErr)
+		}
+		if storedPublicationFound && storedPublication.Marker != marker {
+			return fail("저장된 리뷰 게시 marker가 실행과 일치하지 않습니다", fmt.Errorf("review run %d", run.ID))
+		}
 		published, publishedErr := u.deps.Publisher.PublicationExists(ctx, target, marker)
 		if publishedErr != nil {
 			return fail("기존 리뷰 게시 결과를 확인하지 못했습니다", publishedErr)
 		}
-		if published {
+		if published || storedPublicationFound {
 			_, historyFound, historyErr := u.deps.Reviews.ByRunID(ctx, run.ID)
 			if historyErr != nil {
 				return fail("기존 리뷰 이력을 확인하지 못했습니다", historyErr)
 			}
-			if historyFound {
-				claimedAt := u.deps.Clock.Now()
-				if claimErr := u.deps.Workflows.ClaimPublication(ctx, run.ID, runLease, claimedAt, claimedAt.Add(reviewPublicationLease)); claimErr != nil {
-					return fail("기존 리뷰 게시 결과를 조정하지 못했습니다", claimErr)
+			if !historyFound {
+				return fail("게시 상태에 대응하는 내부 리뷰 이력을 찾지 못했습니다", fmt.Errorf("review run %d", run.ID))
+			}
+			claimedAt := u.deps.Clock.Now()
+			if claimErr := u.deps.Workflows.ClaimPublication(ctx, run.ID, runLease, claimedAt, claimedAt.Add(reviewPublicationLease)); claimErr != nil {
+				return fail("기존 리뷰 게시 결과를 조정하지 못했습니다", claimErr)
+			}
+			if published {
+				expiresAt := run.StartedAt.Add(u.deps.Retention)
+				if storedPublicationFound {
+					expiresAt = storedPublication.ExpiresAt
 				}
-				confirmed, confirmedErr := u.deps.Source.PullRequest(ctx, target)
-				if confirmedErr != nil {
-					return fail("기존 리뷰 게시 결과 확정 전 Pull Request 상태를 확인하지 못했습니다", confirmedErr)
+				if completeErr := u.completeReviewPublication(ctx, run.ID, runLease, marker, reviewworkflow.ReviewPublicationChannelReconciled, 0, expiresAt); completeErr != nil {
+					return fail("기존 리뷰 게시 receipt를 완료하지 못했습니다", completeErr)
 				}
-				if confirmed.HeadSHA != target.HeadSHA || confirmed.BaseSHA != target.BaseSHA {
-					detail := "기존 리뷰 게시 결과 확정 전에 base 또는 head가 변경되었습니다"
-					if invalidateErr := u.deps.Publisher.InvalidatePublication(ctx, target, marker, invalidatedReviewBody(detail)); invalidateErr != nil {
-						return fail("오래된 리뷰 게시 결과를 무효화하지 못했습니다", invalidateErr)
-					}
+			} else if storedPublication.Status == reviewworkflow.ReviewPublicationStatusPrepared {
+				if publishErr := u.publishPreparedReview(ctx, target, run.ID, runLease, storedPublication); errors.Is(publishErr, publication.ErrTargetChanged) {
+					detail := "저장된 리뷰 게시 payload 재개 직전에 base 또는 head가 변경되었습니다"
 					actualStatus, finishErr := u.finishWorkflow(ctx, run.ID, runLease, reviewworkflow.RunStatusSuperseded, detail, false)
 					if finishErr != nil {
-						return fail("오래된 리뷰 게시 결과를 종료하지 못했습니다", finishErr)
+						return fail("재개 중 대체된 리뷰 실행을 종료하지 못했습니다", finishErr)
 					}
 					*outcome = reviewOutcomeOf(actualStatus)
 					return nil
+				} else if publishErr != nil {
+					return fail("저장된 리뷰 게시 payload를 재게시하지 못했습니다", publishErr)
 				}
-				detail := "GitHub marker와 내부 이력으로 기존 게시 결과를 확인했습니다"
-				actualStatus, finishErr := u.finishWorkflow(ctx, run.ID, runLease, reviewworkflow.RunStatusComplete, detail, true)
-				if errors.Is(finishErr, reviewworkflow.ErrRunSuperseded) {
-					detail = "기존 리뷰 게시 결과 확정 중 더 최신인 실행이 확인되었습니다"
-					actualStatus, finishErr = u.supersedePublishedReview(ctx, target, marker, run.ID, runLease, detail)
-				}
-				if finishErr != nil {
-					return fail("기존 리뷰 게시 결과를 완료하지 못했습니다", finishErr)
-				}
-				*outcome = reviewOutcomeOf(actualStatus)
-				return nil
 			}
-			return fail("게시 marker에 대응하는 내부 리뷰 이력을 찾지 못했습니다", fmt.Errorf("review run %d", run.ID))
-		} else {
-			if resumeErr := u.deps.Workflows.ResumeRun(ctx, run.ID, runLease, u.deps.Clock.Now()); resumeErr != nil {
-				return fail("미게시 리뷰 실행을 다시 시작하지 못했습니다", resumeErr)
+			finalization := reviewworkflow.ReviewPublicationFinalization{
+				Status:           reviewworkflow.RunStatusPartial,
+				Detail:           "legacy marker와 게시 receipt만 확인되어 보수적으로 부분 완료했습니다",
+				AdvanceWatermark: false,
 			}
-			publicationAttempted = false
+			if storedPublicationFound && storedPublication.PayloadHash != "" {
+				finalization = storedPublication.Finalization
+			}
+			actualStatus, finishErr := u.finalizePublishedReview(ctx, target, run.ID, runLease, marker, finalization.Status, finalization.Detail, finalization.AdvanceWatermark)
+			if finishErr != nil {
+				return fail("재개한 리뷰 게시 결과를 완료하지 못했습니다", finishErr)
+			}
+			*outcome = reviewOutcomeOf(actualStatus)
+			return nil
 		}
+		if resumeErr := u.deps.Workflows.ResumeRun(ctx, run.ID, runLease, u.deps.Clock.Now()); resumeErr != nil {
+			return fail("미게시 리뷰 실행을 다시 시작하지 못했습니다", resumeErr)
+		}
+		publicationAttempted = false
 	}
 	u.acknowledge(ctx, target, task)
 
-	files, incremental, err := u.collectFiles(ctx, target, request)
+	files, incremental, expectedFiles, err := u.collectFiles(ctx, target, request, task)
 	if err != nil {
 		return fail("변경 파일을 읽지 못했습니다", err)
+	}
+	if err := u.revalidateFindingOccurrences(ctx, target, files); err != nil {
+		return fail("기존 지적을 재검증하지 못했습니다", err)
 	}
 	chosen := selection.FileSelector{
 		Include:  config.Include,
@@ -254,7 +321,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		MaxFiles: config.MaxFiles,
 	}.Select(files)
 	if chosen.IsEmpty() {
-		_, coverage := (reviewworkflow.PlanBuilder{MaxFileChars: config.MaxFileChars, ExpectedFiles: request.ChangedFiles}).Build(files, chosen, batching.Plan{})
+		_, coverage := (reviewworkflow.PlanBuilder{MaxFileChars: config.MaxFileChars, ExpectedFiles: expectedFiles}).Build(files, chosen, batching.Plan{})
 		if _, planErr := u.deps.Workflows.SavePlan(ctx, run.ID, runLease, nil, coverage, u.deps.Clock.Now()); planErr != nil {
 			return fail("빈 리뷰 계획을 저장하지 못했습니다", planErr)
 		}
@@ -283,6 +350,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		return nil
 	}
 	loaded := u.loadSources(ctx, target, chosen.Files, config)
+	pathMap := newPromptPathMap(files, u.deps.Masker.Mask)
 
 	instructions, err := u.deps.Settings.Instructions(ctx, target, config)
 	if err != nil {
@@ -290,7 +358,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 
 	inventory := inventoryOf(files)
-	executor := u.executor(target, config)
+	toolsAllowed := config.MaxExtraReads > 0 && u.deps.Tools != nil
 	planner := reviewBatchPlanner{
 		PullRequest:      request,
 		Inventory:        inventory,
@@ -298,46 +366,128 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		Config:           config,
 		Incremental:      incremental,
 		Extra:            task.Instruction,
-		ToolsAllowed:     executor != nil,
-		ProviderLimit:    u.deps.Completer.PromptBudget(config.Sandrone.Providers),
+		ToolsAllowed:     toolsAllowed,
+		ProviderLimit:    u.deps.Completer.PromptBudgetFor(reviewRequest),
 		MaxReviewBatches: config.Sandrone.MaxReviewBatches,
+		Mask:             u.deps.Masker.Mask,
+		Paths:            pathMap,
 	}
 	plan, promptConfig := planner.Build(loaded)
-	units, coverage := (reviewworkflow.PlanBuilder{MaxFileChars: config.MaxFileChars, ExpectedFiles: request.ChangedFiles}).Build(files, chosen, plan)
+	units, coverage := (reviewworkflow.PlanBuilder{MaxFileChars: config.MaxFileChars, ExpectedFiles: expectedFiles}).Build(files, chosen, plan)
 	if _, planErr := u.deps.Workflows.SavePlan(ctx, run.ID, runLease, units, coverage, u.deps.Clock.Now()); planErr != nil {
 		return fail("리뷰 실행 계획을 저장하지 못했습니다", planErr)
 	}
 
-	gathered := review.Result{}
+	batchResults := make([]review.Result, 0, len(plan.Batches))
 	usage := llm.Usage{}
 	response := llm.Response{}
+	toolExecutions := 0
+	modelsUsed := map[string]struct{}{}
+	multipleModels := false
 	reviewed := make([]pullrequest.ChangedFile, 0, len(loaded))
 	failed := make([]pullrequest.ChangedFile, 0)
+	evidenceDropped := 0
+	reviewerProviders := map[string]struct{}{}
+	captureFailureResponse := func() {
+		response.Usage = usage
+		response.ToolExecutions = toolExecutions
+		if multipleModels || len(modelsUsed) > 1 {
+			response.Provider = "multiple"
+			response.Model = "multiple"
+			response.ModelLabel = "복수 모델"
+		}
+		failureResponse = response
+	}
 
 	for index, batch := range plan.Batches {
 		unit := units[index]
+		messages := llm.MaskMessages(planner.Messages(batch, promptConfig), u.deps.Masker.Mask)
+		batchRequest := reviewRequest.WithMessages(messages)
+		promptFiles := pathMap.PromptFiles(batch)
+		batchRequest.ResponseValidation.RequiredPaths = make([]string, 0, len(promptFiles))
+		for _, file := range promptFiles {
+			batchRequest.ResponseValidation.RequiredPaths = append(batchRequest.ResponseValidation.RequiredPaths, file.Path)
+		}
+		sort.Strings(batchRequest.ResponseValidation.RequiredPaths)
+		executor := u.executor(target, config, pathMap)
+		var toolDefinitions []llm.Tool
+		if executor != nil {
+			toolDefinitions = executor.Definitions()
+		}
+		inputHash, hashErr := reviewUnitInputHash(target.FullName(), run.ConfigHash, unit.Hash, batchRequest, u.deps.Completer.PolicyHashInputs(batchRequest), config.MaxExtraReads, toolDefinitions)
+		if hashErr != nil {
+			return fail("리뷰 unit 입력 hash를 만들지 못했습니다", hashErr)
+		}
 		unitStartedAt := u.deps.Clock.Now()
-		leaseToken, unitErr := u.deps.Workflows.StartUnit(ctx, run.ID, runLease, unit.Hash, unitStartedAt, unitStartedAt.Add(reviewUnitLease))
+		claim, unitErr := u.deps.Workflows.StartUnit(ctx, run.ID, runLease, unit.Hash, inputHash, unitStartedAt, unitStartedAt.Add(reviewUnitLease))
 		if unitErr != nil {
 			return fail("리뷰 unit을 시작하지 못했습니다", unitErr)
 		}
-		messages := planner.Messages(batch, promptConfig)
+		if claim.Completed {
+			finishedAt := claim.Result.FinishedAt
+			if finishedAt.IsZero() {
+				finishedAt = unitStartedAt
+			}
+			batchResults = append(batchResults, claim.Result.Review)
+			if !claim.Reused {
+				usage = usage.Add(claim.Result.Usage)
+				toolExecutions += claim.Result.ToolExecutions
+			}
+			response.Provider = claim.Result.Provider
+			response.Model = claim.Result.Model
+			response.ModelLabel = ""
+			if claim.Result.MultipleModels {
+				response.ModelLabel = "복수 모델"
+			}
+			trackReviewModel(modelsUsed, claim.Result.Provider, claim.Result.Model)
+			multipleModels = multipleModels || claim.Result.MultipleModels
+			if claim.Result.Provider != "" {
+				reviewerProviders[claim.Result.Provider] = struct{}{}
+			}
+			captureFailureResponse()
+			transitionCoverage(coverage, unit.Hash, reviewworkflow.CoverageStatusReviewed, &finishedAt)
+			reviewed = append(reviewed, batch...)
+			u.deps.Logger.Info("저장된 리뷰 unit 결과를 재사용했습니다", "target", target.Reference(), "batch", index+1, "cross_run", claim.Reused)
+			continue
+		}
+		usage = usage.Add(claim.Result.Usage)
+		toolExecutions += claim.Result.ToolExecutions
+		trackReviewModel(modelsUsed, claim.Result.Provider, claim.Result.Model)
+		if claim.Result.MultipleModels || claim.Result.Provider == "multiple" || claim.Result.Model == "multiple" {
+			multipleModels = true
+		}
+		if claim.Result.Provider != "" || claim.Result.Model != "" {
+			response.Provider = claim.Result.Provider
+			response.Model = claim.Result.Model
+			if claim.Result.MultipleModels {
+				response.ModelLabel = "복수 모델"
+			}
+		}
+		captureFailureResponse()
 
-		batchResponse, batchErr := u.deps.Completer.Complete(ctx, llm.Request{
-			Messages:              messages,
-			Temperature:           config.Temperature,
-			MaxOutputTokens:       config.MaxOutputTokens,
-			Providers:             config.Sandrone.Providers,
-			ForceJSON:             true,
-			RequireCompletePrompt: true,
-		}, executor)
+		batchResponse, batchErr := u.deps.Completer.Complete(ctx, batchRequest, executor)
 		if batchErr != nil {
-			u.deps.Logger.Warn("일부 배치를 리뷰하지 못했습니다", "target", target.Reference(), "batch", index+1, "error", batchErr)
+			maskedBatchErr := errors.New(u.deps.Masker.Mask(batchErr.Error()))
+			usage = usage.Add(batchResponse.Usage)
+			toolExecutions += batchResponse.ToolExecutions
+			response.Provider = batchResponse.Provider
+			response.Model = batchResponse.Model
+			response.ModelLabel = batchResponse.ModelLabel
+			trackReviewModel(modelsUsed, batchResponse.Provider, batchResponse.Model)
+			multipleModels = multipleModels || batchResponse.ModelLabel == "복수 모델"
+			captureFailureResponse()
+			u.deps.Logger.Warn("일부 배치를 리뷰하지 못했습니다", "target", target.Reference(), "batch", index+1, "error", maskedBatchErr)
 			unitFinishedAt := u.deps.Clock.Now()
-			if unitErr := u.deps.Workflows.FinishUnit(ctx, run.ID, runLease, unit.Hash, leaseToken, reviewworkflow.UnitResult{
-				Status:     reviewworkflow.UnitStatusFailed,
-				Error:      u.deps.Masker.Mask(batchErr.Error()),
-				FinishedAt: unitFinishedAt,
+			if unitErr := u.finishUnitCheckpoint(ctx, run.ID, runLease, unit.Hash, claim.LeaseToken, reviewworkflow.UnitResult{
+				Status:         reviewworkflow.UnitStatusFailed,
+				InputHash:      inputHash,
+				Provider:       batchResponse.Provider,
+				Model:          batchResponse.Model,
+				MultipleModels: batchResponse.ModelLabel == "복수 모델",
+				Usage:          batchResponse.Usage,
+				ToolExecutions: batchResponse.ToolExecutions,
+				Error:          maskedBatchErr.Error(),
+				FinishedAt:     unitFinishedAt,
 			}); unitErr != nil {
 				return fail("실패한 리뷰 unit을 저장하지 못했습니다", unitErr)
 			}
@@ -346,22 +496,42 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			continue
 		}
 		usage = usage.Add(batchResponse.Usage)
+		toolExecutions += batchResponse.ToolExecutions
 		response = batchResponse
+		trackReviewModel(modelsUsed, batchResponse.Provider, batchResponse.Model)
+		multipleModels = multipleModels || batchResponse.ModelLabel == "복수 모델"
+		captureFailureResponse()
+		if batchResponse.Provider != "" {
+			reviewerProviders[batchResponse.Provider] = struct{}{}
+		}
 
-		batchResult, report, parseErr := u.deps.Parser.Parse(batchResponse.Content)
+		batchResponse.Content = u.deps.Masker.Mask(batchResponse.Content)
+		batchResult := review.Result{}
+		report := parsing.Report{}
+		var parseErr error
+		if !batchResponse.Completed() {
+			parseErr = fmt.Errorf("모델 응답이 완료되지 않았습니다: %s", batchResponse.FinishReason)
+		} else {
+			batchResult, report, parseErr = u.deps.Parser.Parse(batchResponse.Content)
+			batchResult = pathMap.RestoreResult(batchResult)
+		}
 		if parseErr == nil {
+			batchResult = boundedBatchResult(batch, batchResult)
 			parseErr = validateBatchResult(batch, batchResult, report)
 		}
 		if parseErr != nil {
 			u.deps.Logger.Warn("일부 배치의 응답을 해석하지 못했습니다", "target", target.Reference(), "batch", index+1, "error", parseErr)
 			unitFinishedAt := u.deps.Clock.Now()
-			if unitErr := u.deps.Workflows.FinishUnit(ctx, run.ID, runLease, unit.Hash, leaseToken, reviewworkflow.UnitResult{
-				Status:     reviewworkflow.UnitStatusFailed,
-				Provider:   batchResponse.Provider,
-				Model:      batchResponse.Model,
-				Usage:      batchResponse.Usage,
-				Error:      u.deps.Masker.Mask(parseErr.Error()),
-				FinishedAt: unitFinishedAt,
+			if unitErr := u.finishUnitCheckpoint(ctx, run.ID, runLease, unit.Hash, claim.LeaseToken, reviewworkflow.UnitResult{
+				Status:         reviewworkflow.UnitStatusFailed,
+				InputHash:      inputHash,
+				Provider:       batchResponse.Provider,
+				Model:          batchResponse.Model,
+				MultipleModels: batchResponse.ModelLabel == "복수 모델",
+				Usage:          batchResponse.Usage,
+				ToolExecutions: batchResponse.ToolExecutions,
+				Error:          u.deps.Masker.Mask(parseErr.Error()),
+				FinishedAt:     unitFinishedAt,
 			}); unitErr != nil {
 				return fail("해석 실패한 리뷰 unit을 저장하지 못했습니다", unitErr)
 			}
@@ -369,13 +539,21 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			failed = append(failed, batch...)
 			continue
 		}
+		batchResult.Findings = (selection.SeverityFilter{Minimum: config.MinSeverity}).Apply(batchResult.Findings)
+		var dropped int
+		batchResult.Findings, dropped = (reviewanalysis.EvidenceVerifier{}).Verify(batchResult.Findings, batch)
+		evidenceDropped += dropped
 		unitFinishedAt := u.deps.Clock.Now()
-		if unitErr := u.deps.Workflows.FinishUnit(ctx, run.ID, runLease, unit.Hash, leaseToken, reviewworkflow.UnitResult{
-			Status:     reviewworkflow.UnitStatusSucceeded,
-			Provider:   batchResponse.Provider,
-			Model:      batchResponse.Model,
-			Usage:      batchResponse.Usage,
-			FinishedAt: unitFinishedAt,
+		if unitErr := u.finishUnitCheckpoint(ctx, run.ID, runLease, unit.Hash, claim.LeaseToken, reviewworkflow.UnitResult{
+			Status:         reviewworkflow.UnitStatusSucceeded,
+			InputHash:      inputHash,
+			Provider:       batchResponse.Provider,
+			Model:          batchResponse.Model,
+			MultipleModels: batchResponse.ModelLabel == "복수 모델",
+			Usage:          batchResponse.Usage,
+			Review:         batchResult,
+			ToolExecutions: batchResponse.ToolExecutions,
+			FinishedAt:     unitFinishedAt,
 		}); unitErr != nil {
 			return fail("리뷰 unit 결과를 저장하지 못했습니다", unitErr)
 		}
@@ -387,18 +565,16 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			"files", len(batch),
 			"raw_findings", report.RawFindings,
 			"dropped", report.Dropped,
+			"unsupported", dropped,
 			"has_summary", report.HasSummary,
 			"content_length", len(batchResponse.Content))
 		if report.Dropped > 0 {
 			u.deps.Logger.Warn("형식이 맞지 않아 버린 지적이 있습니다", "target", target.Reference(), "dropped", report.Dropped)
 		}
-		if index == 0 {
-			gathered.Summary.Overview = batchResult.Summary.Overview
-		}
-		gathered.Summary.Files = append(gathered.Summary.Files, batchResult.Summary.Files...)
-		gathered.Findings = append(gathered.Findings, batchResult.Findings...)
+		batchResults = append(batchResults, batchResult)
 		reviewed = append(reviewed, batch...)
 	}
+	gathered, reduced := (reviewanalysis.ResultReducer{}).Reduce(batchResults)
 	if len(failed) > 0 && !task.FinalAttempt {
 		return fail("일부 리뷰 unit을 완료하지 못했습니다", fmt.Errorf("%d개 파일이 다음 시도에 남았습니다", len(failed)))
 	}
@@ -429,36 +605,80 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 
 	findings := selection.SeverityFilter{Minimum: config.MinSeverity}.Apply(gathered.Findings)
+	afterSeverity := len(findings)
+	var finalUnsupported int
+	findings, finalUnsupported = (reviewanalysis.EvidenceVerifier{}).Verify(findings, reviewed)
 	known, err := u.deps.Findings.Fingerprints(ctx, target)
 	if err != nil {
-		u.deps.Logger.Warn("기존 지적을 읽지 못했습니다", "target", target.Reference(), "error", err)
-		known = map[string]struct{}{}
+		return fail("기존 지적을 읽지 못했습니다", err)
 	}
-	afterSeverity := len(findings)
 	findings, duplicates := dedupe.DuplicateFilter{Known: known}.Apply(findings)
+	findings, omittedFindings := publishedFindingBudget(findings)
+	findings, verifierResponse, verifierRejected, verifierUsed, verificationUnavailable, verificationErr := u.verifyFindings(ctx, run.ID, runLease, findings, reviewed, reviewRequest, reviewerProviders, pathMap)
+	usage = usage.Add(verifierResponse.Usage)
+	toolExecutions += verifierResponse.ToolExecutions
+	trackReviewModel(modelsUsed, verifierResponse.Provider, verifierResponse.Model)
+	multipleModels = multipleModels || verifierResponse.ModelLabel == "복수 모델"
+	if verifierResponse.Provider != "" || verifierResponse.Model != "" {
+		response.Provider = verifierResponse.Provider
+		response.Model = verifierResponse.Model
+		response.ModelLabel = verifierResponse.ModelLabel
+	}
+	captureFailureResponse()
+	if verificationErr != nil {
+		return fail("독립 finding verifier 결과를 저장하지 못했습니다", verificationErr)
+	}
+	if verificationUnavailable {
+		runStatus = reviewworkflow.RunStatusPartial
+	}
+	var finalReduced int
+	findings, finalReduced = (dedupe.RootCauseReducer{}).Apply(findings)
 	findings = mapping.PositionMapper{MaxInline: config.MaxInlineComments}.Map(findings, reviewed)
 	u.deps.Logger.Info("지적 집계",
 		"target", target.Reference(),
 		"collected", len(gathered.Findings),
 		"after_severity", afterSeverity,
+		"unsupported", evidenceDropped+finalUnsupported,
+		"root_causes_collapsed", reduced+finalReduced,
+		"verifier_used", verifierUsed,
+		"verifier_rejected", verifierRejected,
+		"verification_unavailable", verificationUnavailable,
+		"omitted_by_budget", omittedFindings,
 		"duplicates", duplicates,
 		"final", len(findings),
 		"min_severity", string(config.MinSeverity))
 
 	placed := review.Result{Summary: gathered.Summary, Findings: findings}
 	response.Usage = usage
+	response.ToolExecutions = toolExecutions
+	if multipleModels || len(modelsUsed) > 1 {
+		response.Provider = "multiple"
+		response.Model = "multiple"
+		response.ModelLabel = "복수 모델"
+	}
 	attribution := attributionOf(response)
 	style := review.Style{Emoji: config.Emoji, Tone: string(config.Tone)}
 	view := review.SummaryView{
-		Summary:     placed.Summary,
-		Fallback:    placed.Fallback(),
-		InlineCount: len(placed.Inline()),
-		Attribution: attribution,
-		Style:       style,
-		Trigger:     task.Trigger,
-		Incremental: incremental,
-		SkippedDup:  duplicates,
-		Unreviewed:  unreviewedOf(chosen.Skipped, plan.Overflow, plan.Oversized, failed, coverage),
+		Summary:                 placed.Summary,
+		Fallback:                placed.Fallback(),
+		InlineCount:             len(placed.Inline()),
+		Attribution:             attribution,
+		Style:                   style,
+		Trigger:                 task.Trigger,
+		Incremental:             incremental,
+		SkippedDup:              duplicates,
+		OmittedFindings:         omittedFindings,
+		VerificationUnavailable: verificationUnavailable,
+		Unreviewed:              unreviewedOf(chosen.Skipped, plan.Overflow, plan.Oversized, failed, coverage),
+		Coverage: review.CoverageView{
+			Total:    coverageSummary.Total,
+			Reviewed: coverageSummary.Reviewed,
+			Failed:   coverageSummary.Failed,
+			Deferred: coverageSummary.Deferred,
+			Skipped:  coverageSummary.Skipped,
+			Pending:  coverageSummary.Pending,
+			Status:   string(runStatus),
+		},
 	}
 	heartbeatAt := u.deps.Clock.Now()
 	if leaseErr := u.deps.Workflows.RenewRun(ctx, run.ID, runLease, heartbeatAt, heartbeatAt.Add(reviewRunLease)); leaseErr != nil {
@@ -515,12 +735,21 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 
 	provisionalDetail := "GitHub 게시 결과 확인 대기 중"
-	if _, persistErr := u.saveWithFindings(ctx, task, startedAt, review.OutcomeUnavailable, provisionalDetail, response, len(placed.Inline()), len(placed.Fallback()), run.ID, placed.Findings); persistErr != nil {
+	if _, persistErr := u.saveWithFindings(ctx, task, startedAt, review.OutcomeUnavailable, provisionalDetail, response, len(placed.Inline()), len(placed.Fallback()), run.ID, run.StartedAt.Add(u.deps.Retention), placed.Findings); persistErr != nil {
 		return fail("게시 전 리뷰 이력과 지적을 저장하지 못했습니다", persistErr)
 	}
 	publicationAttempted = true
 	publicationMarker := reviewworkflow.PublicationMarker(run.Key)
-	if publishErr := u.publish(ctx, target, publicationMarker, view, placed, attribution, style); errors.Is(publishErr, publication.ErrTargetChanged) {
+	detail := coverageDetail(coverageSummary)
+	if verificationUnavailable {
+		detail += " verification=unavailable"
+	}
+	finalization := reviewworkflow.ReviewPublicationFinalization{
+		Status:           runStatus,
+		Detail:           detail,
+		AdvanceWatermark: runStatus == reviewworkflow.RunStatusComplete,
+	}
+	if publishErr := u.prepareAndPublishReview(ctx, target, run.ID, runLease, publicationMarker, view, placed, attribution, style, finalization); errors.Is(publishErr, publication.ErrTargetChanged) {
 		detail := "리뷰 게시 요청 직전에 base 또는 head가 변경되었습니다"
 		actualStatus, finishErr := u.finishWorkflow(ctx, run.ID, runLease, reviewworkflow.RunStatusSuperseded, detail, false)
 		if finishErr != nil {
@@ -532,39 +761,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	} else if publishErr != nil {
 		return fail("리뷰 게시 결과를 확인하지 못했습니다", publishErr)
 	}
-	publishedState, publishedStateErr := u.deps.Source.PullRequest(ctx, target)
-	if publishedStateErr != nil {
-		return fail("리뷰 게시 후 Pull Request 상태를 확인하지 못했습니다", publishedStateErr)
-	}
-	if publishedState.HeadSHA != target.HeadSHA || publishedState.BaseSHA != target.BaseSHA {
-		detail := "리뷰 게시 중 base 또는 head가 변경되었습니다"
-		actualStatus, finishErr := u.supersedePublishedReview(ctx, target, publicationMarker, run.ID, runLease, detail)
-		if finishErr != nil {
-			return fail("게시 중 오래된 리뷰를 무효화하고 종료하지 못했습니다", finishErr)
-		}
-		*outcome = reviewOutcomeOf(actualStatus)
-		return nil
-	}
-	publicationCheckedAt := u.deps.Clock.Now()
-	if renewErr := u.deps.Workflows.RenewRun(ctx, run.ID, runLease, publicationCheckedAt, publicationCheckedAt.Add(reviewRunLease)); renewErr != nil {
-		if errors.Is(renewErr, reviewworkflow.ErrRunSuperseded) {
-			detail := "리뷰 게시 중 더 최신인 실행이 확인되었습니다"
-			actualStatus, finishErr := u.supersedePublishedReview(ctx, target, publicationMarker, run.ID, runLease, detail)
-			if finishErr != nil {
-				return fail("대체된 리뷰 게시 결과를 무효화하고 종료하지 못했습니다", finishErr)
-			}
-			*outcome = reviewOutcomeOf(actualStatus)
-			return nil
-		}
-		return fail("리뷰 게시 후 실행 lease를 갱신하지 못했습니다", renewErr)
-	}
-
-	detail := coverageDetail(coverageSummary)
-	actualStatus, finishErr := u.finishWorkflow(ctx, run.ID, runLease, runStatus, detail, runStatus == reviewworkflow.RunStatusComplete)
-	if errors.Is(finishErr, reviewworkflow.ErrRunSuperseded) {
-		detail = "리뷰 실행 완료 중 더 최신인 실행이 확인되었습니다"
-		actualStatus, finishErr = u.supersedePublishedReview(ctx, target, publicationMarker, run.ID, runLease, detail)
-	}
+	actualStatus, finishErr := u.finalizePublishedReview(ctx, target, run.ID, runLease, publicationMarker, finalization.Status, finalization.Detail, finalization.AdvanceWatermark)
 	if finishErr != nil {
 		return fail("리뷰 실행을 완료하지 못했습니다", finishErr)
 	}
@@ -583,13 +780,27 @@ func (u *UseCase) acknowledge(ctx context.Context, target pullrequest.Target, ta
 	}
 }
 
-func (u *UseCase) collectFiles(ctx context.Context, target pullrequest.Target, request pullrequest.PullRequest) ([]pullrequest.ChangedFile, bool, error) {
+func (u *UseCase) collectFiles(ctx context.Context, target pullrequest.Target, request pullrequest.PullRequest, task job.ReviewJob) ([]pullrequest.ChangedFile, bool, int, error) {
+	if task.Incremental && u.deps.State != nil {
+		previousSHA, stateErr := u.deps.State.LastReviewedSHA(ctx, target, u.deps.Clock.Now().Add(-u.deps.Retention))
+		if stateErr != nil {
+			u.deps.Logger.Warn("증분 리뷰 기준점을 읽지 못해 전체 변경을 검토합니다", "target", target.Reference(), "error", stateErr)
+		} else if previousSHA == request.HeadSHA {
+			return nil, true, 0, nil
+		} else if previousSHA != "" {
+			incrementalFiles, incrementalErr := u.deps.Source.ChangedFilesBetween(ctx, target, previousSHA, request.HeadSHA)
+			if incrementalErr == nil {
+				return incrementalFiles, true, len(incrementalFiles), nil
+			}
+			u.deps.Logger.Warn("증분 diff를 읽지 못해 전체 변경을 검토합니다", "target", target.Reference(), "base", previousSHA, "error", incrementalErr)
+		}
+	}
 	files, err := u.deps.Source.ChangedFilesBetween(ctx, target, request.BaseSHA, request.HeadSHA)
 	if err != nil || len(files) == 0 || request.ChangedFiles > len(files) {
 		fallback, listErr := u.deps.Source.ChangedFiles(ctx, target)
-		return fallback, false, listErr
+		return fallback, false, request.ChangedFiles, listErr
 	}
-	return files, false, nil
+	return files, false, request.ChangedFiles, nil
 }
 
 func (u *UseCase) loadSources(ctx context.Context, target pullrequest.Target, files []pullrequest.ChangedFile, config setting.RepoConfig) []pullrequest.ChangedFile {
@@ -599,6 +810,7 @@ func (u *UseCase) loadSources(ctx context.Context, target pullrequest.Target, fi
 	}
 	loaded := make([]pullrequest.ChangedFile, 0, len(files))
 	for _, file := range files {
+		file.Patch = u.deps.Masker.Mask(file.Patch)
 		if config.MaxFileChars > 0 && len(file.Patch) > config.MaxFileChars {
 			file.Patch = truncateUTF8(file.Patch, config.MaxFileChars)
 			file.PatchTruncated = true
@@ -606,6 +818,7 @@ func (u *UseCase) loadSources(ctx context.Context, target pullrequest.Target, fi
 		if config.IncludeSources && limit > 0 {
 			content, err := u.deps.Source.FileContent(ctx, target, file.Path, target.HeadSHA)
 			if err == nil {
+				content = u.deps.Masker.Mask(content)
 				if len(content) > limit {
 					content = truncateUTF8(content, limit)
 					file.Truncated = true
@@ -613,8 +826,6 @@ func (u *UseCase) loadSources(ctx context.Context, target pullrequest.Target, fi
 				file.Content = content
 			}
 		}
-		file.Patch = u.deps.Masker.Mask(file.Patch)
-		file.Content = u.deps.Masker.Mask(file.Content)
 		loaded = append(loaded, file)
 	}
 	return loaded
@@ -630,60 +841,16 @@ func truncateUTF8(value string, limit int) string {
 	return value[:limit]
 }
 
-func (u *UseCase) executor(target pullrequest.Target, config setting.RepoConfig) outbound.ToolExecutor {
+func (u *UseCase) executor(target pullrequest.Target, config setting.RepoConfig, paths *promptPathMap) outbound.ToolExecutor {
 	if config.MaxExtraReads <= 0 || u.deps.Tools == nil {
 		return nil
 	}
-	return u.deps.Tools.ForTarget(target, target.HeadSHA, config.MaxExtraReads)
-}
-
-func (u *UseCase) publish(ctx context.Context, target pullrequest.Target, marker string, view review.SummaryView, result review.Result, attribution review.Attribution, style review.Style) error {
-	published, err := u.deps.Publisher.PublicationExists(ctx, target, marker)
-	if err != nil {
-		return err
+	return &pathMappingToolExecutor{
+		delegate:       u.deps.Tools.ForTarget(target, target.HeadSHA, config.MaxExtraReads),
+		paths:          paths,
+		mask:           u.deps.Masker.Mask,
+		remainingChars: 2000,
 	}
-	if published {
-		return nil
-	}
-	inline := result.Inline()
-	comments := make([]review.InlineComment, 0, len(inline))
-	for _, finding := range inline {
-		comments = append(comments, review.InlineComment{
-			Path: finding.File,
-			Line: finding.Line,
-			Body: u.deps.Renderer.InlineBody(finding, attribution, style),
-		})
-	}
-
-	body := u.deps.Renderer.SummaryBody(view) + "\n" + marker
-	submitErr := u.deps.Publisher.SubmitReview(ctx, target, marker, body, comments)
-	if submitErr == nil {
-		return nil
-	}
-	if errors.Is(submitErr, publication.ErrTargetChanged) {
-		return submitErr
-	}
-	u.deps.Logger.Warn("리뷰를 제출하지 못해 요약 코멘트로 대신합니다", "target", target.Reference(), "error", submitErr)
-
-	degraded := view
-	degraded.Fallback = append(append([]review.Finding{}, result.Fallback()...), inline...)
-	degraded.InlineCount = 0
-	published, reconcileErr := u.deps.Publisher.PublicationExists(ctx, target, marker)
-	if reconcileErr != nil {
-		return errors.Join(submitErr, reconcileErr)
-	}
-	if published {
-		return nil
-	}
-	_, commentErr := u.deps.Publisher.CreateComment(ctx, target, u.deps.Renderer.SummaryBody(degraded)+"\n"+marker)
-	if commentErr == nil {
-		return nil
-	}
-	published, reconcileErr = u.deps.Publisher.PublicationExists(ctx, target, marker)
-	if reconcileErr == nil && published {
-		return nil
-	}
-	return errors.Join(submitErr, commentErr, reconcileErr)
 }
 
 func invalidatedReviewBody(detail string) string {
@@ -706,13 +873,13 @@ func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, task jo
 	}
 }
 
-func (u *UseCase) fail(ctx context.Context, task job.ReviewJob, startedAt time.Time, message string, cause error, runID uint64, recordFailure bool) error {
+func (u *UseCase) fail(ctx context.Context, task job.ReviewJob, startedAt time.Time, message string, cause error, runID uint64, recordFailure bool, response llm.Response) error {
 	u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
 	if notice, announce := failureNotice(task.Attempt, task.FinalAttempt, message); announce {
 		u.announce(ctx, task.Target, notice)
 	}
 	if task.FinalAttempt && recordFailure {
-		u.save(ctx, task, startedAt, review.OutcomeFailed, message, llm.Response{}, 0, 0, runID)
+		u.save(ctx, task, startedAt, review.OutcomeFailed, message, response, 0, 0, runID)
 	}
 	return fmt.Errorf("%s: %w", message, cause)
 }
@@ -743,9 +910,9 @@ func (u *UseCase) save(ctx context.Context, task job.ReviewJob, startedAt time.T
 	return id
 }
 
-func (u *UseCase) saveWithFindings(ctx context.Context, task job.ReviewJob, startedAt time.Time, outcome review.Outcome, detail string, response llm.Response, inline int, fallback int, runID uint64, findings []review.Finding) (uint64, error) {
+func (u *UseCase) saveWithFindings(ctx context.Context, task job.ReviewJob, startedAt time.Time, outcome review.Outcome, detail string, response llm.Response, inline int, fallback int, runID uint64, lifecycleExpiresAt time.Time, findings []review.Finding) (uint64, error) {
 	record := u.reviewRecord(task, startedAt, outcome, detail, response, inline, fallback, runID)
-	id, err := u.deps.Reviews.SaveWithFindings(ctx, record, task.Target, findings)
+	id, err := u.deps.Reviews.SaveWithFindings(ctx, record, task.Target, findings, lifecycleExpiresAt)
 	if err != nil {
 		return 0, err
 	}
@@ -793,6 +960,15 @@ func attributionOf(response llm.Response) review.Attribution {
 		CompletionTokens: response.Usage.CompletionTokens,
 		TotalTokens:      response.Usage.TotalTokens,
 	}
+}
+
+func trackReviewModel(models map[string]struct{}, provider string, model string) {
+	provider = strings.TrimSpace(provider)
+	model = strings.TrimSpace(model)
+	if provider == "" && model == "" {
+		return
+	}
+	models[provider+"\x00"+model] = struct{}{}
 }
 
 func inventoryOf(files []pullrequest.ChangedFile) []pullrequest.ChangedFile {

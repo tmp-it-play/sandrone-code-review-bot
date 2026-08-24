@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/persistence/mysql/mapper"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/persistence/mysql/model"
@@ -47,7 +48,7 @@ func (r *ReviewRepository) Save(ctx context.Context, record review.Record) (uint
 	return id, nil
 }
 
-func (r *ReviewRepository) SaveWithFindings(ctx context.Context, record review.Record, target pullrequest.Target, findings []review.Finding) (uint64, error) {
+func (r *ReviewRepository) SaveWithFindings(ctx context.Context, record review.Record, target pullrequest.Target, findings []review.Finding, lifecycleExpiresAt time.Time) (uint64, error) {
 	reviewID := uint64(0)
 	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
 		id, created, err := saveReviewEntry(transaction, record)
@@ -71,14 +72,19 @@ func (r *ReviewRepository) SaveWithFindings(ctx context.Context, record review.R
 				writeFindings = true
 			}
 		}
-		if !writeFindings || len(findings) == 0 {
+		if !writeFindings {
 			return nil
 		}
-		entries := make([]model.Finding, 0, len(findings))
-		for _, finding := range findings {
-			entries = append(entries, mapper.ToFindingModel(reviewID, target, finding))
+		if len(findings) > 0 {
+			entries := make([]model.Finding, 0, len(findings))
+			for _, finding := range findings {
+				entries = append(entries, mapper.ToFindingModel(reviewID, target, finding))
+			}
+			if err := transaction.CreateInBatches(&entries, 50).Error; err != nil {
+				return err
+			}
 		}
-		return transaction.CreateInBatches(&entries, 50).Error
+		return upsertFindingOccurrences(transaction, reviewID, record.RunID, target, findings, lifecycleExpiresAt)
 	})
 	if err != nil {
 		return 0, fmt.Errorf("리뷰 기록과 지적을 저장하지 못했습니다: %w", err)

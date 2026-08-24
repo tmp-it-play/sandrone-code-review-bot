@@ -1,5 +1,7 @@
 package instruction
 
+import "unicode/utf8"
+
 type Budget struct {
 	total     int
 	remaining int
@@ -36,6 +38,10 @@ func (b *Budget) Take(content string) (string, bool) {
 		b.remaining -= len(content)
 		return content, false
 	}
+	keep := allowance
+	for keep > 0 && !utf8.RuneStart(content[keep]) {
+		keep--
+	}
 	b.remaining -= allowance
-	return content[:allowance], true
+	return content[:keep], true
 }

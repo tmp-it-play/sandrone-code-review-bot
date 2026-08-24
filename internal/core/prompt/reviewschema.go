@@ -1,0 +1,29 @@
+package prompt
+
+const agenticReviewSchema = `출력은 아래 JSON 하나만 낸다. 코드 블록 표시, 인사, 감탄, 설명을 JSON 밖에 덧붙이지 않는다.
+JSON 키, severity 값, 파일 경로는 번역하거나 문체에 맞게 바꾸지 않는다.
+
+{
+  "summary": {
+    "overview": "변경 전체를 3~6문장으로 요약",
+    "files": [{"path": "파일 경로", "note": "이 파일에서 무엇이 바뀌었는지 한 문장"}]
+  },
+  "findings": [
+    {
+      "file": "파일 경로",
+      "line": 12,
+      "endLine": 0,
+      "severity": "critical|major|minor|nit",
+      "title": "한 줄 요약",
+      "body": "무엇이 왜 문제인지와 근거",
+      "suggestion": "line이 가리키는 줄을 그대로 대체할 코드 또는 빈 문자열",
+      "evidence": "diff에서 + 기호를 제외하고 들여쓰기까지 정확히 복사한 추가·변경 줄 전체",
+      "rootCause": "같은 원인의 모든 발생 위치에서 동일하게 쓸 짧고 구체적인 원인 식별문"
+    }
+  ]
+}
+
+evidence는 line부터 endLine까지의 모든 줄이 실제 diff의 추가 줄일 때만 적는다. 한 줄이면 endLine은 0으로 둔다.
+삭제 줄, 문맥 줄, diff 밖의 줄은 finding으로 만들지 않는다. evidence가 실제 줄과 한 글자라도 다르면 finding을 만들지 않는다.
+같은 rootCause의 여러 발생 위치는 각각 finding으로 내되 rootCause 문자열을 정확히 같게 유지한다.
+변경을 끝까지 살펴본 뒤에도 남길 것이 정말 없을 때만 findings를 빈 배열로 둔다.`

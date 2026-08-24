@@ -10,6 +10,8 @@ type Provider interface {
 	Name() string
 	Model() string
 	Capability() llm.Capability
+	Profile() llm.ProviderProfile
+	RequestPolicy(request llm.Request) llm.ProviderRequestPolicyIdentity
 	PromptLimit() int
 	Complete(ctx context.Context, request llm.Request) (llm.Response, error)
 }

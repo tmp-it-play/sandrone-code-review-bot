@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const transientRetries = 2
+const transientRetries = 1
 
 func retryPause(attempt int) time.Duration {
 	if attempt < 1 {

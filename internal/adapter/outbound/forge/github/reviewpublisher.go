@@ -20,26 +20,26 @@ func NewReviewPublisher(clients *ClientFactory) *ReviewPublisher {
 	return &ReviewPublisher{clients: clients}
 }
 
-func (p *ReviewPublisher) SubmitReview(ctx context.Context, target pullrequest.Target, marker string, body string, comments []review.InlineComment) error {
+func (p *ReviewPublisher) SubmitReview(ctx context.Context, target pullrequest.Target, marker string, body string, comments []review.InlineComment) (int64, error) {
 	client, err := p.clients.Client(ctx, target.InstallationID)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	exists, err := reviewExists(ctx, client, target, marker)
+	reviewID, exists, err := findReview(ctx, client, target, marker)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if exists {
-		return nil
+		return reviewID, nil
 	}
 	current, _, err := client.PullRequests.Get(ctx, target.Owner, target.Repository, target.Number)
 	if err != nil {
-		return fmt.Errorf("리뷰 게시 직전 PR 상태를 읽지 못했습니다: %w", err)
+		return 0, fmt.Errorf("리뷰 게시 직전 PR 상태를 읽지 못했습니다: %w", err)
 	}
 	headChanged := target.HeadSHA != "" && current.GetHead().GetSHA() != target.HeadSHA
 	baseChanged := target.BaseSHA != "" && current.GetBase().GetSHA() != target.BaseSHA
 	if headChanged || baseChanged {
-		return publication.ErrTargetChanged
+		return 0, publication.ErrTargetChanged
 	}
 	drafts := make([]*gh.DraftReviewComment, 0, len(comments))
 	for _, comment := range comments {
@@ -63,15 +63,16 @@ func (p *ReviewPublisher) SubmitReview(ctx context.Context, target pullrequest.T
 	if target.HeadSHA != "" {
 		request.CommitID = gh.Ptr(target.HeadSHA)
 	}
-	if _, _, err := client.PullRequests.CreateReview(ctx, target.Owner, target.Repository, target.Number, request); err != nil {
+	created, _, err := client.PullRequests.CreateReview(ctx, target.Owner, target.Repository, target.Number, request)
+	if err != nil {
 		createErr := fmt.Errorf("리뷰를 제출하지 못했습니다: %w", err)
-		exists, reconcileErr := reviewExists(ctx, client, target, marker)
+		reconciledID, exists, reconcileErr := findReview(ctx, client, target, marker)
 		if reconcileErr == nil && exists {
-			return nil
+			return reconciledID, nil
 		}
-		return errors.Join(createErr, reconcileErr)
+		return 0, errors.Join(createErr, reconcileErr)
 	}
-	return nil
+	return created.GetID(), nil
 }
 
 func (p *ReviewPublisher) PublicationExists(ctx context.Context, target pullrequest.Target, marker string) (bool, error) {
@@ -163,6 +164,14 @@ func (p *ReviewPublisher) FindComment(ctx context.Context, target pullrequest.Ta
 func reviewExists(ctx context.Context, client *gh.Client, target pullrequest.Target, marker string) (bool, error) {
 	items, err := findReviews(ctx, client, target, marker)
 	return len(items) > 0, err
+}
+
+func findReview(ctx context.Context, client *gh.Client, target pullrequest.Target, marker string) (int64, bool, error) {
+	items, err := findReviews(ctx, client, target, marker)
+	if err != nil || len(items) == 0 {
+		return 0, false, err
+	}
+	return items[len(items)-1].GetID(), true, nil
 }
 
 func findReviews(ctx context.Context, client *gh.Client, target pullrequest.Target, marker string) ([]*gh.PullRequestReview, error) {

@@ -18,4 +18,5 @@ type Dependencies struct {
 	Clock        outbound.Clock
 	Logger       *slog.Logger
 	Retention    time.Duration
+	LLMMaxCalls  int
 }

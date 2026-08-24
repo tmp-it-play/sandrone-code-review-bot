@@ -34,13 +34,9 @@ func (s *TokenSource) InstallationToken(ctx context.Context, installationID int6
 		return cached.value, nil
 	}
 
-	appJWT, err := s.appJWT()
+	client, err := s.AppClient()
 	if err != nil {
 		return "", err
-	}
-	client, err := gh.NewClient(gh.WithTimeout(githubRequestTimeout), gh.WithAuthToken(appJWT))
-	if err != nil {
-		return "", fmt.Errorf("GitHub 클라이언트를 만들지 못했습니다: %w", err)
 	}
 	token, _, err := client.Apps.CreateInstallationToken(ctx, installationID, nil)
 	if err != nil {
@@ -51,6 +47,18 @@ func (s *TokenSource) InstallationToken(ctx context.Context, installationID int6
 	s.tokens[installationID] = cachedToken{value: token.GetToken(), expiresAt: token.GetExpiresAt().Time}
 	s.mutex.Unlock()
 	return token.GetToken(), nil
+}
+
+func (s *TokenSource) AppClient() (*gh.Client, error) {
+	appJWT, err := s.appJWT()
+	if err != nil {
+		return nil, err
+	}
+	client, err := gh.NewClient(gh.WithTimeout(githubRequestTimeout), gh.WithAuthToken(appJWT))
+	if err != nil {
+		return nil, fmt.Errorf("GitHub 앱 클라이언트를 만들지 못했습니다: %w", err)
+	}
+	return client, nil
 }
 
 func (s *TokenSource) appJWT() (string, error) {

@@ -28,6 +28,7 @@ type Run struct {
 	FailedCoverage     int
 	DeferredCoverage   int
 	SkippedCoverage    int
+	ExternalCalls      int
 	ErrorSummary       string
 	StartedAt          time.Time
 	HeartbeatAt        time.Time

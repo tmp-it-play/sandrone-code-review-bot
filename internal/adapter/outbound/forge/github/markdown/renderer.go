@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
@@ -34,11 +35,28 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 		builder.WriteString(overview)
 		builder.WriteString("\n\n")
 	}
+	if !view.Coverage.IsEmpty() {
+		fmt.Fprintf(&builder, "> 리뷰 커버리지 · 상태 `%s` · 전체 %d · 검토 %d · 실패 %d · 이월 %d · 제외 %d · 대기 %d\n\n",
+			view.Coverage.Status,
+			view.Coverage.Total,
+			view.Coverage.Reviewed,
+			view.Coverage.Failed,
+			view.Coverage.Deferred,
+			view.Coverage.Skipped,
+			view.Coverage.Pending,
+		)
+	}
+	if view.OmittedFindings > 0 {
+		fmt.Fprintf(&builder, "> 출력 크기 상한으로 우선순위가 낮은 지적 %d건을 생략했습니다.\n\n", view.OmittedFindings)
+	}
+	if view.VerificationUnavailable {
+		builder.WriteString("> 독립 검증을 완료하지 못해 후보 지적을 게시하지 않았습니다. 이 실행은 부분 완료로 기록됩니다.\n\n")
+	}
 	if len(view.Summary.Files) > 0 {
 		builder.WriteString(r.fileTable(view.Summary.Files))
 		builder.WriteString("\n")
 	}
-	if view.Trigger != review.TriggerCommandSummary && view.InlineCount == 0 && len(view.Fallback) == 0 {
+	if view.Trigger != review.TriggerCommandSummary && view.InlineCount == 0 && len(view.Fallback) == 0 && !view.VerificationUnavailable {
 		builder.WriteString(prose.noFindings)
 		builder.WriteString("\n\n")
 	}
@@ -65,6 +83,7 @@ func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribut
 	}
 	builder.WriteString("\n\n")
 	builder.WriteString(strings.TrimSpace(finding.Body))
+	appendOccurrenceLocations(&builder, finding)
 	if suggestion := normalizeSuggestion(finding.Suggestion); strings.TrimSpace(suggestion) != "" {
 		fence := fenceFor(suggestion)
 		if finding.SuggestionApplies() {
@@ -155,6 +174,7 @@ func (r Renderer) fallbackSection(findings []review.Finding, style review.Style)
 		}
 		builder.WriteString("\n\n")
 		builder.WriteString(strings.TrimSpace(finding.Body))
+		appendOccurrenceLocations(&builder, finding)
 		if suggestion := normalizeSuggestion(finding.Suggestion); strings.TrimSpace(suggestion) != "" {
 			fence := fenceFor(suggestion)
 			builder.WriteString("\n\n")
@@ -170,14 +190,79 @@ func (r Renderer) fallbackSection(findings []review.Finding, style review.Style)
 	return builder.String()
 }
 
+func appendOccurrenceLocations(builder *strings.Builder, finding review.Finding) {
+	locations := make([]string, 0, 5)
+	omitted := 0
+	for _, occurrence := range finding.Occurrences {
+		primary := occurrence.ID != "" && occurrence.ID == finding.OccurrenceID
+		if !primary {
+			primary = occurrence.File == finding.File && occurrence.Line == finding.Line && occurrence.EndLine == finding.EndLine
+		}
+		if primary {
+			continue
+		}
+		if len(locations) >= 5 {
+			omitted++
+			continue
+		}
+		location := occurrence.File
+		if occurrence.Line > 0 {
+			location = fmt.Sprintf("%s:%d", occurrence.File, occurrence.Line)
+			if occurrence.EndLine > occurrence.Line {
+				location = fmt.Sprintf("%s-%d", location, occurrence.EndLine)
+			}
+		}
+		locations = append(locations, "`"+location+"`")
+	}
+	if len(locations) == 0 {
+		return
+	}
+	builder.WriteString("\n\n같은 원인의 다른 위치: ")
+	builder.WriteString(strings.Join(locations, ", "))
+	if omitted > 0 {
+		fmt.Fprintf(builder, " 외 %d곳", omitted)
+	}
+}
+
 func (r Renderer) unreviewedSection(files []review.UnreviewedFile, prose reviewProse) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "<details>\n<summary>이번 리뷰에서 다루지 못한 파일 %d개</summary>\n\n", len(files))
 	builder.WriteString(prose.unreviewedFiles)
 	builder.WriteString("\n\n")
-	builder.WriteString("| 파일 | 변경 | 사유 |\n| --- | --- | --- |\n")
+	byReason := map[string]unreviewedReasonSummary{}
 	for _, file := range files {
-		fmt.Fprintf(&builder, "| `%s` | +%d / -%d | %s |\n", file.Path, file.Additions, file.Deletions, file.Reason)
+		summary := byReason[file.Reason]
+		summary.files++
+		summary.additions += file.Additions
+		summary.deletions += file.Deletions
+		byReason[file.Reason] = summary
+	}
+	reasons := make([]string, 0, len(byReason))
+	for reason := range byReason {
+		reasons = append(reasons, reason)
+	}
+	sort.Strings(reasons)
+	builder.WriteString("| 사유 | 파일 수 | 변경 |\n| --- | ---: | ---: |\n")
+	for _, reason := range reasons {
+		summary := byReason[reason]
+		fmt.Fprintf(&builder, "| %s | %d | +%d / -%d |\n", reason, summary.files, summary.additions, summary.deletions)
+	}
+	preview := len(files)
+	if preview > 12 {
+		preview = 12
+	}
+	if preview > 0 {
+		builder.WriteString("\n예시: ")
+		for index, file := range files[:preview] {
+			if index > 0 {
+				builder.WriteString(", ")
+			}
+			fmt.Fprintf(&builder, "`%s`", file.Path)
+		}
+		if len(files) > preview {
+			fmt.Fprintf(&builder, " 외 %d개", len(files)-preview)
+		}
+		builder.WriteString("\n")
 	}
 	builder.WriteString("\n</details>\n")
 	return builder.String()

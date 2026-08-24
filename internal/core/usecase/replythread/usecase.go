@@ -9,7 +9,7 @@ import (
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
-	"github.com/it-play/sandrone-code-review-bot/internal/core/prompt"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/thread"
@@ -28,9 +28,13 @@ func New(deps Dependencies) *UseCase {
 
 func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 	if strings.TrimSpace(task.OperationKey) == "" {
-		u.deps.Logger.Warn("게시 식별자가 없는 이전 형식의 답글 작업을 건너뜁니다", "target", task.Target.Reference())
+		task.OperationKey = job.OperationKey("reply", task.Target, task.RequestIdentity, task.CommentID, task.InThread)
+	}
+	if strings.TrimSpace(task.OperationKey) == "" || task.CommentID <= 0 {
+		u.deps.Logger.Warn("이전 형식의 답글 작업에 안전한 게시 식별자를 만들 수 없습니다", "target", task.Target.Reference())
 		return nil
 	}
+	task.Instruction = u.deps.Masker.Mask(task.Instruction)
 	claimedAt := u.deps.Clock.Now()
 	claim, claimErr := u.deps.Publications.ClaimReplyPublication(
 		ctx,
@@ -67,9 +71,11 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 	if err != nil {
 		return fail("Pull Request를 읽지 못했습니다", err)
 	}
+	request = request.Masked(u.deps.Masker.Mask)
 	if target.HeadSHA == "" {
 		target.HeadSHA = request.HeadSHA
 	}
+	target.BaseSHA = request.BaseSHA
 	target.BaseRef = request.BaseRef
 
 	config, err := u.deps.Settings.RepoConfig(ctx, target)
@@ -101,27 +107,77 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 	}
 
 	source, truncated := u.currentSource(ctx, task, conversation.Path, target.HeadSHA, config.MaxSourceChars)
-	messages := prompt.ReplyPrompt{
-		PullRequest:   request,
-		Thread:        conversation,
-		CurrentSource: source,
-		Truncated:     truncated,
-		Config:        config,
-		Extra:         task.Instruction,
-	}.Messages()
-
-	response, err := u.deps.Completer.Complete(ctx, llm.Request{
-		Messages:        messages,
-		Temperature:     config.Temperature,
-		MaxOutputTokens: config.MaxOutputTokens,
-		Providers:       config.Sandrone.Providers,
-	}, nil)
-	if err != nil {
-		return fail("답글 모델을 호출하지 못했습니다", err)
+	classification := llm.DataClassificationPublic
+	if request.Private {
+		classification = llm.DataClassificationPrivateCode
 	}
-	body := strings.TrimSpace(response.Content)
-	if body == "" {
-		return fail("모델이 답글을 만들지 못했습니다", fmt.Errorf("빈 응답"))
+	maxCalls := u.deps.LLMMaxCalls
+	if maxCalls < 1 {
+		maxCalls = 12
+	}
+	completionRequest := llm.Request{
+		Temperature:           config.Temperature,
+		MaxOutputTokens:       config.MaxOutputTokens,
+		Providers:             config.Sandrone.Providers,
+		TaskRole:              llm.TaskRoleReply,
+		DataClassification:    classification,
+		ExternalCallBudget:    llm.NewExternalCallBudget(maxCalls),
+		RequireCompletePrompt: true,
+	}
+	plan, err := u.buildReplyPromptPlan(request, conversation, source, truncated, config, task.Instruction, completionRequest)
+	if err != nil {
+		return fail("답글 모델 입력을 안전한 크기로 만들지 못했습니다", err)
+	}
+	callBudget := llm.NewDurableExternalCallBudget(maxCalls, func() bool {
+		reserved, reserveErr := u.deps.Publications.ReserveReplyExternalCall(ctx, task.OperationKey, publicationLease, maxCalls)
+		if reserveErr != nil {
+			u.deps.Logger.Warn("답글 외부 호출 예산을 예약하지 못했습니다", "operation", task.OperationKey, "error", reserveErr)
+			return false
+		}
+		return reserved
+	})
+
+	completionRequest.Messages = plan.Messages
+	completionRequest.ExternalCallBudget = callBudget
+	inputHash, err := llm.CompletionInputHash(completionRequest, u.deps.Completer.PolicyHashInputs(completionRequest), "reply-canonical-v2")
+	if err != nil {
+		return fail("답글 모델 입력 식별자를 만들지 못했습니다", err)
+	}
+	checkpoint, cached, err := u.deps.Publications.ReplyCompletion(ctx, task.OperationKey, publicationLease, inputHash, u.deps.Clock.Now())
+	if err != nil {
+		return fail("기존 답글 모델 결과를 읽지 못했습니다", err)
+	}
+	response := checkpoint.MetadataResponse()
+	body := checkpoint.CanonicalContent
+	if !cached {
+		response, err = u.deps.Completer.Complete(ctx, completionRequest, nil)
+		response.Content = u.deps.Masker.Mask(response.Content)
+		if err != nil {
+			_, recordErr := u.recordCompletionAttempt(ctx, task.OperationKey, publicationLease, response)
+			return fail("답글 모델을 호출하지 못했습니다", errors.Join(errors.New(u.deps.Masker.Mask(err.Error())), recordErr))
+		}
+		if !response.Completed() {
+			_, recordErr := u.recordCompletionAttempt(ctx, task.OperationKey, publicationLease, response)
+			return fail("답글 모델 응답이 완료되지 않았습니다", errors.Join(fmt.Errorf("finish reason: %s", response.FinishReason), recordErr))
+		}
+		body = strings.TrimSpace(response.Content)
+		if body == "" {
+			_, recordErr := u.recordCompletionAttempt(ctx, task.OperationKey, publicationLease, response)
+			resultErr := errors.Join(errors.New("빈 응답"), recordErr)
+			return fail("모델이 답글을 만들지 못했습니다", resultErr)
+		}
+		checkpointContext, checkpointCancel := completionCheckpointContext(ctx)
+		checkpoint, err = u.deps.Publications.SaveReplyCompletion(
+			checkpointContext,
+			task.OperationKey,
+			publicationLease,
+			publication.NewCompletionCheckpoint(inputHash, body, response, u.deps.Clock.Now()),
+		)
+		checkpointCancel()
+		if err != nil {
+			return fail("답글 모델 결과를 저장하지 못했습니다", err)
+		}
+		response = checkpoint.MetadataResponse()
 	}
 	replyBody := u.deps.Renderer.ReplyBody(body, review.Attribution{
 		Provider:         response.Provider,
@@ -157,13 +213,24 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 	return nil
 }
 
+func (u *UseCase) recordCompletionAttempt(ctx context.Context, operationKey string, leaseToken string, response llm.Response) (llm.Response, error) {
+	response.Content = u.deps.Masker.Mask(response.Content)
+	checkpointContext, checkpointCancel := completionCheckpointContext(ctx)
+	defer checkpointCancel()
+	checkpoint, err := u.deps.Publications.RecordReplyCompletionAttempt(checkpointContext, operationKey, leaseToken, response, u.deps.Clock.Now())
+	if err != nil {
+		return response, err
+	}
+	return checkpoint.MetadataResponse(), nil
+}
+
 func (u *UseCase) renewPublication(ctx context.Context, operationKey string, leaseToken string) error {
 	return u.deps.Publications.RenewReplyPublication(ctx, operationKey, leaseToken, u.deps.Clock.Now().Add(replyPublicationLease))
 }
 
 func (u *UseCase) completePublication(ctx context.Context, operationKey string, leaseToken string) error {
 	now := u.deps.Clock.Now()
-	return u.deps.Publications.CompleteReplyPublication(ctx, operationKey, leaseToken, now, now.Add(u.deps.Retention))
+	return u.deps.Publications.CompleteReplyPublication(ctx, operationKey, leaseToken, now)
 }
 
 func (u *UseCase) releasePublication(ctx context.Context, operationKey string, leaseToken string) {
@@ -208,7 +275,7 @@ func (u *UseCase) currentSource(ctx context.Context, task job.ReplyJob, path str
 	}
 	content = u.deps.Masker.Mask(content)
 	if limit > 0 && len(content) > limit {
-		return content[:limit], true
+		return truncateReplyUTF8(content, limit), true
 	}
 	return content, false
 }
