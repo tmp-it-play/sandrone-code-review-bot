@@ -119,6 +119,9 @@ func mergeSandrone(current setting.SandroneSetting, raw rawSandrone) setting.San
 	if raw.AutoReview != nil {
 		current.AutoReview = *raw.AutoReview
 	}
+	if raw.AutoReviewOnDraft != nil {
+		current.AutoReviewOnDraft = *raw.AutoReviewOnDraft
+	}
 	if raw.AutoReviewOnPush != nil {
 		current.AutoReviewOnPush = *raw.AutoReviewOnPush
 	}

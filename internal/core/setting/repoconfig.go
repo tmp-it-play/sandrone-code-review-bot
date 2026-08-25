@@ -44,6 +44,7 @@ func DefaultRepoConfig() RepoConfig {
 		ThreadReply:       true,
 		Sandrone: SandroneSetting{
 			AutoReview:          true,
+			AutoReviewOnDraft:   true,
 			AutoReviewOnPush:    false,
 			SummaryPlacement:    SummaryPlacementNewComment,
 			Providers:           nil,

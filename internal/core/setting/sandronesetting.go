@@ -2,6 +2,7 @@ package setting
 
 type SandroneSetting struct {
 	AutoReview          bool
+	AutoReviewOnDraft   bool
 	AutoReviewOnPush    bool
 	SummaryPlacement    SummaryPlacement
 	Providers           []string

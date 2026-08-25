@@ -3,6 +3,7 @@ package settings
 type rawSandrone struct {
 	Review              rawReviewSetting `yaml:",inline"`
 	AutoReview          *bool            `yaml:"autoReview"`
+	AutoReviewOnDraft   *bool            `yaml:"autoReviewOnDraft"`
 	AutoReviewOnPush    *bool            `yaml:"autoReviewOnPush"`
 	SummaryPlacement    *string          `yaml:"summaryPlacement"`
 	Providers           []string         `yaml:"providers"`
