@@ -11,7 +11,7 @@ import (
 
 type ReplyPublicationRepository interface {
 	ClaimReplyPublication(ctx context.Context, target pullrequest.Target, operationKey string, commentID int64, inThread bool, claimedAt time.Time, leaseExpiresAt time.Time, expiresAt time.Time) (publication.Claim, error)
-	ReserveReplyExternalCall(ctx context.Context, operationKey string, leaseToken string, limit int) (bool, error)
+	ReserveReplyExternalCall(ctx context.Context, operationKey string, leaseToken string, limit int, reservedAt time.Time, leaseExpiresAt time.Time) (bool, error)
 	ReplyCompletion(ctx context.Context, operationKey string, leaseToken string, inputHash string, currentAt time.Time) (publication.CompletionCheckpoint, bool, error)
 	RecordReplyCompletionAttempt(ctx context.Context, operationKey string, leaseToken string, response llm.Response, recordedAt time.Time) (publication.CompletionCheckpoint, error)
 	SaveReplyCompletion(ctx context.Context, operationKey string, leaseToken string, checkpoint publication.CompletionCheckpoint) (publication.CompletionCheckpoint, error)

@@ -2,6 +2,8 @@ package settings
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
@@ -33,7 +35,10 @@ func (l *ConfigLoader) RepoConfig(ctx context.Context, target pullrequest.Target
 		for _, candidate := range configCandidates {
 			body, err := l.content.File(ctx, target, candidate, ref)
 			if err != nil {
-				continue
+				if errors.Is(err, outbound.ErrRepositoryContentNotFound) {
+					continue
+				}
+				return config, fmt.Errorf("저장소 리뷰 설정을 읽지 못했습니다: %w", err)
 			}
 			var raw rawConfig
 			if err := yaml.Unmarshal([]byte(body), &raw); err != nil {

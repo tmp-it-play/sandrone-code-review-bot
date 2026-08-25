@@ -1,6 +1,8 @@
 package reviewpullrequest
 
 import (
+	"time"
+
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
@@ -21,5 +23,7 @@ type reviewUnitExecutionResult struct {
 	reviewerProviders map[string]struct{}
 	externalCalls     int
 	budgetExhausted   bool
+	retryable         bool
+	retryAt           time.Time
 	errorMessage      string
 }

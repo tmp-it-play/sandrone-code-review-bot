@@ -38,12 +38,19 @@ func (r *ReviewRetentionRepository) ReconcileOrphans(ctx context.Context, staleB
 				Where("review_run_id = ? AND status IN ?", runID, []string{string(reviewworkflow.UnitStatusPending), string(reviewworkflow.UnitStatusRunning)}).
 				Updates(map[string]any{
 					"status":           string(reviewworkflow.UnitStatusFailed),
+					"retryable":        false,
+					"retry_at":         nil,
 					"error_summary":    "7일 동안 진행되지 않아 종료됨",
 					"finished_at":      terminalAt,
 					"heartbeat_at":     terminalAt,
 					"lease_token":      "",
 					"lease_expires_at": nil,
 				}).Error; err != nil {
+				return err
+			}
+			if err := transaction.Model(&model.ReviewUnit{}).
+				Where("review_run_id = ? AND retryable = ?", runID, true).
+				Updates(map[string]any{"retryable": false, "retry_at": nil}).Error; err != nil {
 				return err
 			}
 			if err := transaction.Model(&model.CoverageItem{}).

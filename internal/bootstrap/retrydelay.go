@@ -1,6 +1,20 @@
 package bootstrap
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+func retryDelayFor(attempt int, cause error, now time.Time) time.Duration {
+	var scheduled interface{ RetryAt() time.Time }
+	if errors.As(cause, &scheduled) {
+		delay := scheduled.RetryAt().Sub(now)
+		if delay > 0 {
+			return delay
+		}
+	}
+	return retryDelay(attempt)
+}
 
 func retryDelay(attempt int) time.Duration {
 	delays := []time.Duration{

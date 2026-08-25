@@ -9,8 +9,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/batching"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/instruction"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/leaseheartbeat"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
@@ -23,6 +26,7 @@ import (
 const reactionTimeout = 5 * time.Second
 const reviewRunLease = 20 * time.Minute
 const reviewPublicationLease = 30 * time.Minute
+const reviewPublicationRecoveryDelay = 5*time.Minute + 10*time.Second
 
 type UseCase struct {
 	deps            Dependencies
@@ -79,13 +83,32 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	activeRunID := uint64(0)
 	activeRunLease := ""
 	workflowRunCreated := false
-	publicationAttempted := false
+	publicationClaimed := false
 	startedAt := u.deps.Clock.Now()
 	failureResponse := llm.Response{}
 	fail := func(message string, cause error) error {
-		if publicationAttempted {
+		if errors.Is(cause, reviewworkflow.ErrRunSuperseded) && activeRunID != 0 && activeRunLease != "" && !publicationClaimed {
+			detail := "더 최신인 PR 상태가 현재 리뷰 실행을 대체했습니다"
+			supersedingHeadSHA := u.resolveSupersedingHeadSHA(ctx, task.Target)
+			actualStatus, finishErr := u.finishWorkflowSupersededByHead(ctx, activeRunID, activeRunLease, supersedingHeadSHA, detail)
+			if finishErr != nil {
+				return fmt.Errorf("대체된 리뷰 실행을 종료하지 못했습니다: %w", errors.Join(cause, finishErr))
+			}
+			u.save(ctx, task, startedAt, review.OutcomeSuperseded, detail, failureResponse, 0, 0, activeRunID)
+			*outcome = reviewOutcomeOf(actualStatus)
+			return nil
+		}
+		if publicationClaimed {
 			u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
-			return fmt.Errorf("%s: %w", message, cause)
+			failed := fmt.Errorf("%s: %w", message, cause)
+			if task.FinalAttempt {
+				return failed
+			}
+			var scheduled interface{ RetryAt() time.Time }
+			if errors.As(failed, &scheduled) && !scheduled.RetryAt().IsZero() {
+				return failed
+			}
+			return &job.RetryAtError{At: u.deps.Clock.Now().Add(reviewPublicationRecoveryDelay), Cause: failed}
 		}
 		recordFailure := !workflowRunCreated || activeRunID != 0
 		return u.fail(ctx, task, startedAt, message, cause, activeRunID, recordFailure, failureResponse)
@@ -96,7 +119,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		}
 		finishContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), reactionTimeout)
 		defer cancel()
-		if executeErr != nil && task.FinalAttempt && !publicationAttempted {
+		if executeErr != nil && task.FinalAttempt && !publicationClaimed {
 			if _, err := u.finishWorkflowWithOutcome(finishContext, activeRunID, activeRunLease, reviewworkflow.RunStatusFailed, review.OutcomeFailed, u.deps.Masker.Mask(executeErr.Error()), false); err != nil {
 				u.deps.Logger.Error("실패한 리뷰 실행을 종료하지 못했습니다", "run", activeRunID, "error", err)
 			}
@@ -153,10 +176,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if request.Private {
 		classification = llm.DataClassificationPrivateCode
 	}
-	maxCalls := u.deps.LLMMaxCalls
-	if maxCalls < 1 {
-		maxCalls = 12
-	}
+	maxCalls := llm.OperationCallLimit(u.deps.LLMMaxCalls, llm.TaskRoleReviewer)
 	verifierCallReserve := 0
 	if maxCalls > 1 {
 		verifierCallReserve = 1
@@ -165,15 +185,17 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	callBudget := llm.NewExternalCallBudget(maxCalls)
 	reviewRequest := llm.Request{
 		Temperature:           config.Temperature,
-		MaxOutputTokens:       config.MaxOutputTokens,
+		MaxOutputTokens:       reviewOutputTokens(config.MaxOutputTokens),
 		Providers:             config.Sandrone.Providers,
 		TaskRole:              llm.TaskRoleReviewer,
 		DataClassification:    classification,
 		ExternalCallBudget:    callBudget,
 		ForceJSON:             true,
 		RequireCompletePrompt: true,
+		FailFastOnIncomplete:  false,
 		ResponseValidation:    llm.ResponseValidation{Policy: llm.ResponseValidationReviewResult},
 	}
+	routePolicy := newReviewRoutePolicy(u.deps.Completer.RouteCapacitiesFor(reviewRequest), reviewRequest.MaxOutputTokens)
 	policy := u.deps.Completer.PolicyHashInputs(reviewRequest)
 	modelPolicyHash, err := hashJSON(policy)
 	if err != nil {
@@ -194,7 +216,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		return nil
 	}
 	resumePublishing := run.Status == reviewworkflow.RunStatusPublishing
-	publicationAttempted = resumePublishing
+	publicationClaimed = resumePublishing
 	if stale {
 		detail := "더 최신인 " + request.HeadSHA + " head가 있어 실행을 중단했습니다"
 		var actualStatus reviewworkflow.RunStatus
@@ -252,7 +274,8 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		*outcome = reviewOutcomeOf(actualStatus)
 		return nil
 	}
-	runLease, leaseErr := u.deps.Runs.AcquireRun(ctx, run.ID, u.deps.Clock.Now(), u.deps.Clock.Now().Add(reviewRunLease))
+	leaseStartedAt := u.deps.Clock.Now()
+	acquiredRunLease, leaseErr := u.deps.Runs.AcquireRun(ctx, run.ID, leaseStartedAt, leaseStartedAt.Add(reviewRunLease))
 	if errors.Is(leaseErr, reviewworkflow.ErrRunSuperseded) {
 		detail := "더 최신인 리뷰 실행이 있어 중단했습니다"
 		var actualStatus reviewworkflow.RunStatus
@@ -276,12 +299,13 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if leaseErr != nil {
 		return fail("리뷰 실행 lease를 얻지 못했습니다", leaseErr)
 	}
+	runLease := acquiredRunLease.Token
 	if runLease == "" {
 		return nil
 	}
 	activeRunID = run.ID
 	activeRunLease = runLease
-	externalCalls := run.ExternalCalls
+	externalCalls := acquiredRunLease.ExternalCalls
 	if externalCalls < 0 {
 		externalCalls = 0
 	}
@@ -290,7 +314,14 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 	reserveExternalCall := func(limit int) func() error {
 		return func() error {
-			reserved, reserveErr := u.deps.Execution.ReserveExternalCall(ctx, run.ID, runLease, limit)
+			heartbeatAt := u.deps.Clock.Now()
+			reserved, reserveErr := u.deps.Execution.ReserveExternalCall(ctx, reviewworkflow.ExternalCallReservation{
+				RunID:             run.ID,
+				RunLeaseToken:     runLease,
+				Limit:             limit,
+				HeartbeatAt:       heartbeatAt,
+				RunLeaseExpiresAt: heartbeatAt.Add(reviewRunLease),
+			})
 			if reserveErr != nil {
 				return reserveErr
 			}
@@ -303,6 +334,10 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	callBudget = llm.NewScopedDurableExternalCallBudget(maxCalls, externalCalls, maxCalls, reserveExternalCall(maxCalls))
 	reviewRequest.ExternalCallBudget = callBudget
 	if resumePublishing {
+		claimedAt := u.deps.Clock.Now()
+		if claimErr := u.deps.Publications.ClaimPublication(ctx, run.ID, runLease, claimedAt, claimedAt.Add(reviewPublicationLease)); claimErr != nil {
+			return fail("기존 리뷰 게시 권한을 복구하지 못했습니다", claimErr)
+		}
 		marker := reviewworkflow.PublicationMarker(run.Key)
 		storedPublication, storedPublicationFound, storedPublicationErr := u.deps.Publications.ReviewPublication(ctx, run.ID, runLease)
 		if storedPublicationErr != nil {
@@ -311,7 +346,14 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		if storedPublicationFound && storedPublication.Marker != marker {
 			return fail("저장된 리뷰 게시 marker가 실행과 일치하지 않습니다", fmt.Errorf("review run %d", run.ID))
 		}
-		published, publishedErr := u.deps.Publisher.PublicationExists(ctx, target, marker)
+		published := false
+		publishedErr := leaseheartbeat.Run(ctx, reviewRunLease, func(heartbeatContext context.Context) error {
+			return u.renewReviewRun(heartbeatContext, run.ID, runLease)
+		}, func(reconciliationContext context.Context) error {
+			var reconciliationErr error
+			published, reconciliationErr = u.deps.Publisher.PublicationExists(reconciliationContext, target, marker)
+			return reconciliationErr
+		})
 		if publishedErr != nil {
 			return fail("기존 리뷰 게시 결과를 확인하지 못했습니다", publishedErr)
 		}
@@ -323,10 +365,6 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			if !historyFound {
 				return fail("게시 상태에 대응하는 내부 리뷰 이력을 찾지 못했습니다", fmt.Errorf("review run %d", run.ID))
 			}
-			claimedAt := u.deps.Clock.Now()
-			if claimErr := u.deps.Publications.ClaimPublication(ctx, run.ID, runLease, claimedAt, claimedAt.Add(reviewPublicationLease)); claimErr != nil {
-				return fail("기존 리뷰 게시 결과를 조정하지 못했습니다", claimErr)
-			}
 			if published {
 				expiresAt := run.StartedAt.Add(u.deps.Retention)
 				if storedPublicationFound {
@@ -336,7 +374,12 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 					return fail("기존 리뷰 게시 receipt를 완료하지 못했습니다", completeErr)
 				}
 			} else if storedPublication.Status == reviewworkflow.ReviewPublicationStatusPrepared {
-				if publishErr := u.publishPreparedReview(ctx, target, run.ID, runLease, storedPublication); errors.Is(publishErr, publication.ErrTargetChanged) {
+				publishErr := leaseheartbeat.Run(ctx, reviewPublicationLease, func(heartbeatContext context.Context) error {
+					return u.renewReviewPublicationRun(heartbeatContext, run.ID, runLease)
+				}, func(publicationContext context.Context) error {
+					return u.publishPreparedReview(publicationContext, target, run.ID, runLease, storedPublication)
+				})
+				if errors.Is(publishErr, publication.ErrTargetChanged) || errors.Is(publishErr, reviewworkflow.ErrRunSuperseded) {
 					detail := "저장된 리뷰 게시 payload 재개 직전에 base 또는 head가 변경되었습니다"
 					supersedingHeadSHA := u.resolveSupersedingHeadSHA(ctx, target)
 					actualStatus, finishErr := u.finishWorkflowSupersededByHead(ctx, run.ID, runLease, supersedingHeadSHA, detail)
@@ -367,15 +410,24 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		if resumeErr := u.deps.Runs.ResumeRun(ctx, run.ID, runLease, u.deps.Clock.Now()); resumeErr != nil {
 			return fail("미게시 리뷰 실행을 다시 시작하지 못했습니다", resumeErr)
 		}
-		publicationAttempted = false
+		publicationClaimed = false
 	}
 	u.acknowledge(ctx, target, task)
 
-	files, incremental, expectedFiles, err := u.collectFiles(ctx, target, request, task)
+	var files []pullrequest.ChangedFile
+	var incremental bool
+	var expectedFiles int
+	err = leaseheartbeat.Run(ctx, reviewRunLease, func(heartbeatContext context.Context) error {
+		return u.renewReviewRun(heartbeatContext, run.ID, runLease)
+	}, func(collectionContext context.Context) error {
+		var collectErr error
+		files, incremental, expectedFiles, collectErr = u.collectFiles(collectionContext, target, request, task)
+		return collectErr
+	})
 	if err != nil {
 		return fail("변경 파일을 읽지 못했습니다", err)
 	}
-	if err := u.revalidateFindingOccurrences(ctx, target, files); err != nil {
+	if err := u.revalidateFindingOccurrences(ctx, target, files, run.ID, runLease); err != nil {
 		return fail("기존 지적을 재검증하지 못했습니다", err)
 	}
 	chosen := selection.FileSelector{
@@ -412,12 +464,28 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		*outcome = reviewOutcomeOf(actualStatus)
 		return nil
 	}
-	loaded := u.loadSources(ctx, target, chosen.Files, config)
+	loaded, err := u.loadSources(ctx, target, chosen.Files, config, run.ID, runLease)
+	if err != nil {
+		return fail("리뷰 source를 수집하는 동안 실행 lease를 갱신하지 못했습니다", err)
+	}
 	pathMap := newPromptPathMap(files, u.deps.Masker.Mask)
 
-	instructions, err := u.deps.Settings.Instructions(ctx, target, config)
+	if err := u.renewReviewRun(ctx, run.ID, runLease); err != nil {
+		return fail("리뷰 지침 수집 전 실행 lease를 갱신하지 못했습니다", err)
+	}
+	instructions := instruction.Collection{}
+	err = leaseheartbeat.Run(ctx, reviewRunLease, func(heartbeatContext context.Context) error {
+		return u.renewReviewRun(heartbeatContext, run.ID, runLease)
+	}, func(collectionContext context.Context) error {
+		var instructionErr error
+		instructions, instructionErr = u.deps.Settings.Instructions(collectionContext, target, config)
+		return instructionErr
+	})
 	if err != nil {
-		u.deps.Logger.Warn("지침 문서를 읽지 못했습니다", "target", target.Reference(), "error", err)
+		return fail("리뷰 지침 문서를 읽지 못했습니다", err)
+	}
+	if err := u.renewReviewRun(ctx, run.ID, runLease); err != nil {
+		return fail("리뷰 지침 수집 후 실행 lease를 갱신하지 못했습니다", err)
 	}
 
 	inventory := inventoryOf(files)
@@ -431,8 +499,9 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		Incremental:       incremental,
 		Extra:             task.Instruction,
 		ToolsAllowed:      toolsAllowed,
-		ProviderLimit:     u.deps.Completer.PromptBudgetFor(reviewRequest),
+		ProviderLimit:     routePolicy.promptLimit,
 		MaxReviewBatches:  config.Sandrone.MaxReviewBatches,
+		RoutePolicy:       routePolicy,
 		Mask:              u.deps.Masker.Mask,
 		Paths:             pathMap,
 	}
@@ -464,8 +533,14 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	response := unitExecution.response
 	reviewed := unitExecution.reviewed
 	failed := unitExecution.failed
-	if len(failed) > 0 && !task.FinalAttempt && !unitExecution.budgetExhausted {
-		return fail("일부 리뷰 unit을 완료하지 못했습니다", fmt.Errorf("%d개 파일이 다음 시도에 남았습니다", len(failed)))
+	if len(failed) > 0 && !task.FinalAttempt && !unitExecution.budgetExhausted && unitExecution.retryable {
+		retryAt := unitExecution.retryAt
+		if retryAt.IsZero() {
+			retryAt = u.deps.Clock.Now().Add(time.Minute)
+		}
+		cause := fmt.Errorf("%d개 파일의 일시 실패가 남아 있습니다", len(failed))
+		u.deps.Logger.Info("일시 실패한 리뷰 unit을 사용자 실패로 처리하지 않고 재개를 예약합니다", "target", target.Reference(), "run", run.ID, "files", len(failed), "retry_at", retryAt)
+		return &job.RetryAtError{At: retryAt, Cause: cause}
 	}
 	coverageSummary := reviewworkflow.SummarizeCoverage(coverage)
 	runStatus := coverageSummary.TerminalStatus()
@@ -496,10 +571,17 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			*outcome = review.OutcomeFailed
 			return nil
 		}
-		return fail("유효한 리뷰 결과를 만들지 못했습니다", fmt.Errorf("모든 리뷰 unit이 실패했습니다"))
+		u.notify(ctx, target, task, review.Notice{Kind: review.NoticeFailed, Message: "모든 리뷰 프로바이더를 시도했지만 유효한 리뷰 결과를 만들지 못해 이번 리뷰를 종료합니다."})
+		u.save(ctx, task, startedAt, review.OutcomeFailed, detail, response, 0, 0, run.ID)
+		*outcome = review.OutcomeFailed
+		return nil
 	}
 
-	reviewRequest.ExternalCallBudget = llm.NewScopedDurableExternalCallBudget(maxCalls, unitExecution.externalCalls, maxCalls, reserveExternalCall(maxCalls))
+	verifierCallLimit := unitExecution.externalCalls + verifierCallReserve
+	if verifierCallLimit > maxCalls {
+		verifierCallLimit = maxCalls
+	}
+	reviewRequest.ExternalCallBudget = llm.NewScopedDurableExternalCallBudget(maxCalls, unitExecution.externalCalls, verifierCallLimit, reserveExternalCall(verifierCallLimit))
 	finalizedResult, finalizationErr := u.resultFinalizer.finalize(ctx, reviewResultFinalization{
 		target:      target,
 		runID:       run.ID,
@@ -563,6 +645,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		}
 		return fail("리뷰 게시 권한을 얻지 못했습니다", claimErr)
 	}
+	publicationClaimed = true
 	confirmed, confirmedErr := u.deps.Source.PullRequest(ctx, target)
 	if confirmedErr != nil {
 		return fail("게시 직전 Pull Request 상태를 확인하지 못했습니다", confirmedErr)
@@ -581,7 +664,6 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if _, persistErr := u.saveWithFindings(ctx, task, startedAt, review.OutcomeUnavailable, provisionalDetail, response, len(placed.Inline()), len(placed.Fallback()), run.ID, run.StartedAt.Add(u.deps.Retention), placed.Findings); persistErr != nil {
 		return fail("게시 전 리뷰 이력과 지적을 저장하지 못했습니다", persistErr)
 	}
-	publicationAttempted = true
 	publicationMarker := reviewworkflow.PublicationMarker(run.Key)
 	detail := coverageDetail(coverageSummary)
 	if verificationUnavailable {
@@ -592,7 +674,12 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		Detail:           detail,
 		AdvanceWatermark: runStatus == reviewworkflow.RunStatusComplete,
 	}
-	if publishErr := u.prepareAndPublishReview(ctx, target, run.ID, runLease, publicationMarker, view, placed, attribution, style, finalization); errors.Is(publishErr, publication.ErrTargetChanged) {
+	publishErr := leaseheartbeat.Run(ctx, reviewPublicationLease, func(heartbeatContext context.Context) error {
+		return u.renewReviewPublicationRun(heartbeatContext, run.ID, runLease)
+	}, func(publicationContext context.Context) error {
+		return u.prepareAndPublishReview(publicationContext, target, run.ID, runLease, publicationMarker, view, placed, attribution, style, finalization)
+	})
+	if errors.Is(publishErr, publication.ErrTargetChanged) || errors.Is(publishErr, reviewworkflow.ErrRunSuperseded) {
 		detail := "리뷰 게시 요청 직전에 base 또는 head가 변경되었습니다"
 		supersedingHeadSHA := u.resolveSupersedingHeadSHA(ctx, target)
 		actualStatus, finishErr := u.finishWorkflowSupersededByHead(ctx, run.ID, runLease, supersedingHeadSHA, detail)
@@ -647,7 +734,7 @@ func (u *UseCase) collectFiles(ctx context.Context, target pullrequest.Target, r
 	return files, false, request.ChangedFiles, nil
 }
 
-func (u *UseCase) loadSources(ctx context.Context, target pullrequest.Target, files []pullrequest.ChangedFile, config setting.RepoConfig) []pullrequest.ChangedFile {
+func (u *UseCase) loadSources(ctx context.Context, target pullrequest.Target, files []pullrequest.ChangedFile, config setting.RepoConfig, runID uint64, runLease string) ([]pullrequest.ChangedFile, error) {
 	limit := config.MaxSourceChars
 	if config.MaxFileChars > 0 && config.MaxFileChars < limit {
 		limit = config.MaxFileChars
@@ -659,20 +746,39 @@ func (u *UseCase) loadSources(ctx context.Context, target pullrequest.Target, fi
 			file.Patch = truncateUTF8(file.Patch, config.MaxFileChars)
 			file.PatchTruncated = true
 		}
-		if config.IncludeSources && limit > 0 {
+		if config.IncludeSources && limit > 0 && !file.IsRemoved() {
 			content, err := u.deps.Source.FileContent(ctx, target, file.Path, target.HeadSHA)
-			if err == nil {
-				content = u.deps.Masker.Mask(content)
-				if len(content) > limit {
-					content = truncateUTF8(content, limit)
-					file.Truncated = true
-				}
-				file.Content = content
+			if renewErr := u.renewReviewRun(ctx, runID, runLease); renewErr != nil {
+				return nil, renewErr
 			}
+			if err != nil {
+				if errors.Is(err, outbound.ErrRepositoryContentNotFound) || errors.Is(err, outbound.ErrRepositoryContentUnavailable) {
+					u.deps.Logger.Info("전체 source를 사용할 수 없어 diff만 리뷰합니다", "target", target.Reference(), "path", u.deps.Masker.Mask(file.Path))
+					loaded = append(loaded, file)
+					continue
+				}
+				return nil, fmt.Errorf("%s source를 읽지 못했습니다: %w", u.deps.Masker.Mask(file.Path), err)
+			}
+			content = u.deps.Masker.Mask(content)
+			if len(content) > limit {
+				content = truncateUTF8(content, limit)
+				file.Truncated = true
+			}
+			file.Content = content
 		}
 		loaded = append(loaded, file)
 	}
-	return loaded
+	return loaded, nil
+}
+
+func (u *UseCase) renewReviewRun(ctx context.Context, runID uint64, runLease string) error {
+	heartbeatAt := u.deps.Clock.Now()
+	return u.deps.Runs.RenewRun(ctx, runID, runLease, heartbeatAt, heartbeatAt.Add(reviewRunLease))
+}
+
+func (u *UseCase) renewReviewPublicationRun(ctx context.Context, runID uint64, runLease string) error {
+	heartbeatAt := u.deps.Clock.Now()
+	return u.deps.Runs.RenewRun(ctx, runID, runLease, heartbeatAt, heartbeatAt.Add(reviewPublicationLease))
 }
 
 func truncateUTF8(value string, limit int) string {

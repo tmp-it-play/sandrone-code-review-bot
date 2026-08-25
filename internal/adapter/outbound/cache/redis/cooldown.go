@@ -24,15 +24,20 @@ func (c *Cooldown) Active(ctx context.Context, provider string) (bool, error) {
 	return count > 0, nil
 }
 
-func (c *Cooldown) Mark(ctx context.Context, provider string, duration time.Duration) error {
+func (c *Cooldown) Mark(ctx context.Context, provider string, duration time.Duration) (time.Time, error) {
 	if duration <= 0 {
-		return nil
+		return time.Time{}, nil
 	}
-	deadline := time.Now().Add(duration).UTC().Format(time.RFC3339)
-	if err := markCooldownScript.Run(ctx, c.client, []string{cooldownKey(provider)}, deadline, duration.Milliseconds()).Err(); err != nil {
-		return fmt.Errorf("쿨다운을 기록하지 못했습니다: %w", err)
+	deadline := time.Now().Add(duration).UTC().Format(time.RFC3339Nano)
+	value, err := markCooldownScript.Run(ctx, c.client, []string{cooldownKey(provider)}, deadline, duration.Milliseconds()).Text()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("쿨다운을 기록하지 못했습니다: %w", err)
 	}
-	return nil
+	effective, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("쿨다운 만료 시각을 해석하지 못했습니다: %w", err)
+	}
+	return effective, nil
 }
 
 func (c *Cooldown) EndsAt(ctx context.Context, provider string) (time.Time, bool, error) {

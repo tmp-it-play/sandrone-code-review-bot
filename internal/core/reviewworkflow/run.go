@@ -29,6 +29,8 @@ type Run struct {
 	DeferredCoverage   int
 	SkippedCoverage    int
 	ExternalCalls      int
+	InitialPlanHash    string
+	PlanRevision       int
 	ErrorSummary       string
 	SupersedingHeadSHA string
 	StartedAt          time.Time

@@ -18,8 +18,8 @@ var ErrCompletePromptLimitExceeded = errors.New("도구 결과를 포함한 전�
 
 var ErrPromptLimitExceeded = errors.New("프롬프트가 프로바이더 입력 한도를 넘었습니다")
 
-var ErrIncompleteResponse = errors.New("LLM 응답이 완료되지 않았습니다")
+var ErrIncompleteResponse = llm.ErrIncompleteResponse
 
-var ErrInvalidJSONResponse = errors.New("LLM 응답이 유효한 JSON 객체가 아닙니다")
+var ErrInvalidJSONResponse = llm.ErrInvalidJSONResponse
 
-var ErrSemanticResponse = errors.New("LLM 응답이 요청한 결과 계약을 충족하지 않습니다")
+var ErrSemanticResponse = llm.ErrSemanticResponse

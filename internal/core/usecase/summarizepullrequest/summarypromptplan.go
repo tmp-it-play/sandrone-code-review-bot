@@ -27,7 +27,7 @@ type summaryPromptPlan struct {
 func (u *UseCase) buildSummaryPromptPlan(request pullrequest.PullRequest, selected []pullrequest.ChangedFile, chosen selection.Selection, instructions instruction.Collection, config setting.RepoConfig, extra string, completionRequest llm.Request, paths *summaryPromptPathMap) (summaryPromptPlan, error) {
 	budget := u.deps.Completer.PromptBudgetFor(completionRequest)
 	if budget <= 0 {
-		return summaryPromptPlan{}, fmt.Errorf("요약에 사용할 수 있는 LLM 입력 한도가 없습니다")
+		return summaryPromptPlan{}, fmt.Errorf("%w: 요약에 사용할 수 있는 LLM 입력 한도가 없습니다", llm.ErrPromptCapacity)
 	}
 	if config.MaxPromptChars > 0 && config.MaxPromptChars < budget {
 		budget = config.MaxPromptChars
@@ -66,7 +66,7 @@ func (u *UseCase) buildSummaryPromptPlan(request pullrequest.PullRequest, select
 	fittedInstructions := u.fitSummaryInstructions(request, included, instructions, config, extra, budget, paths)
 	messages := u.summaryMessages(request, included, fittedInstructions, config, extra, paths)
 	if llm.MessagesSize(messages) > budget {
-		return summaryPromptPlan{}, fmt.Errorf("요약 프롬프트가 입력 한도 %d자를 넘었습니다", budget)
+		return summaryPromptPlan{}, fmt.Errorf("%w: 요약 프롬프트가 입력 한도 %d자를 넘었습니다", llm.ErrPromptCapacity, budget)
 	}
 	plan := summaryPromptPlan{Messages: messages, RequiredPaths: make([]string, 0, len(included))}
 	for _, file := range included {
@@ -134,7 +134,7 @@ func (u *UseCase) fitSummaryExtra(request pullrequest.PullRequest, config settin
 		return extra, nil
 	}
 	if !u.summaryMessagesFit(request, nil, instruction.Collection{}, config, "", budget, paths) {
-		return "", fmt.Errorf("PR 기본 정보가 요약 입력 한도 %d자를 넘었습니다", budget)
+		return "", fmt.Errorf("%w: PR 기본 정보가 요약 입력 한도 %d자를 넘었습니다", llm.ErrPromptCapacity, budget)
 	}
 	low := 0
 	high := len(extra)

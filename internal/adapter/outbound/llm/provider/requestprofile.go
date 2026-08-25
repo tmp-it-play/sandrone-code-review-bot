@@ -12,6 +12,7 @@ type RequestProfile struct {
 	ThinkingEnabled          *bool
 	ParallelToolCalls        *bool
 	OutputTokenLimit         int
+	StructuredOutputPercent  int
 	UseMaxCompletionTokens   bool
 	UseRequestTemperature    bool
 	ForceJSONWithTools       bool

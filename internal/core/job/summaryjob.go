@@ -8,16 +8,17 @@ import (
 )
 
 type SummaryJob struct {
-	Target          pullrequest.Target
-	Trigger         review.Trigger
-	Invoker         string
-	Instruction     string
-	CommentID       int64
-	InThread        bool
-	RequestIdentity string
-	OperationKey    string
-	OrderKey        string
-	RequestedAt     time.Time
-	Attempt         int
-	FinalAttempt    bool
+	Target              pullrequest.Target
+	Trigger             review.Trigger
+	Invoker             string
+	Instruction         string
+	CommentID           int64
+	InThread            bool
+	RequestIdentity     string
+	OperationKey        string
+	OrderKey            string
+	RequestedAt         time.Time
+	Attempt             int
+	FinalizationAttempt bool
+	FinalAttempt        bool
 }

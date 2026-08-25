@@ -61,18 +61,30 @@ func (c *Chain) PromptBudgetFor(request llm.Request) int {
 	if !request.TaskRole.Valid() || !request.DataClassification.Valid() {
 		return 0
 	}
+	return resilientPromptBudget(c.RouteCapacitiesFor(request))
+}
+
+func (c *Chain) RouteCapacitiesFor(request llm.Request) []llm.RouteCapacity {
+	capacities := make([]llm.RouteCapacity, 0, len(c.providers))
 	for _, candidate := range c.providers {
-		if !routeAllowed(candidate, request) || candidate.PromptLimit() <= 0 {
+		if !routeAllowed(candidate, request) {
 			continue
 		}
-		return candidate.PromptLimit()
+		policy := candidate.RequestPolicy(request)
+		capacities = append(capacities, llm.RouteCapacity{
+			Provider:           candidate.Name(),
+			Model:              candidate.Model(),
+			PromptChars:        candidate.PromptLimit(),
+			MaxOutputTokens:    policy.MaxOutputTokens,
+			UsableOutputTokens: policy.UsableOutputTokens,
+		})
 	}
-	return 0
+	return capacities
 }
 
 func (c *Chain) PolicyHashInputs(request llm.Request) llm.PolicyHashInputs {
 	identity := llm.PolicyHashInputs{
-		Version:               "llm-routing-v4",
+		Version:               "llm-routing-v5",
 		TaskRole:              request.TaskRole,
 		DataClassification:    request.DataClassification,
 		RequestedProviders:    normalizedNames(request.Providers),
@@ -80,8 +92,10 @@ func (c *Chain) PolicyHashInputs(request llm.Request) llm.PolicyHashInputs {
 		MaxExternalCalls:      request.ExternalCallBudget.Limit(),
 		MaxToolRounds:         c.maxToolRounds,
 		MaxTransientRetries:   transientRetries,
+		RequiredOutputTokens:  request.RequiredOutputTokens,
 		ForceJSON:             request.ForceJSON,
 		RequireCompletePrompt: request.RequireCompletePrompt,
+		FailFastOnIncomplete:  request.FailFastOnIncomplete,
 		ResponseValidation:    request.ResponseValidation,
 	}
 	for _, candidate := range c.providers {
@@ -111,7 +125,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 	if request.ExternalCallBudget == nil {
 		return llm.Response{}, ErrExternalCallBudgetRequired
 	}
-	var lastErr error
+	collector := &completionFailureCollector{}
 	routed := false
 	toolExecutions := 0
 	usage := llm.Usage{}
@@ -127,8 +141,19 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			continue
 		}
 		routed = true
+		requestPolicy := candidate.RequestPolicy(request)
+		outputLimit := requestPolicy.UsableOutputTokens
+		if outputLimit <= 0 {
+			outputLimit = requestPolicy.MaxOutputTokens
+		}
+		if request.RequiredOutputTokens > 0 && outputLimit < request.RequiredOutputTokens {
+			cause := fmt.Errorf("프로바이더 출력 한도 %d token이 필요한 %d token보다 작습니다", outputLimit, request.RequiredOutputTokens)
+			collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: llm.CompletionAttemptOutputLimit, Adaptable: true, Cause: cause})
+			c.logger.Info("출력 한도가 요청에 부족해 프로바이더를 건너뜁니다", "provider", candidate.Name(), "limit", outputLimit, "required", request.RequiredOutputTokens)
+			continue
+		}
 		var tools []llm.Tool
-		if executor != nil && candidate.Capability().ToolCalling {
+		if executor != nil && candidate.Capability().ToolCalling && request.ExternalCallBudget.Remaining() >= 2 {
 			tools = executor.Definitions()
 		}
 		fits := fitsWithinTrimBudget(request.Messages, candidate.PromptLimit()-llm.ToolsSize(tools))
@@ -136,16 +161,19 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			fits = requestFits(request.Messages, tools, candidate.PromptLimit())
 		}
 		if !fits {
+			cause := fmt.Errorf("프로바이더 입력 한도 %d자를 초과했습니다", candidate.PromptLimit())
+			collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: llm.CompletionAttemptPromptLimit, Adaptable: true, Cause: cause})
 			c.logger.Info("입력이 프로바이더 한도에 비해 너무 커서 건너뜁니다",
 				"provider", candidate.Name(), "limit", candidate.PromptLimit())
 			continue
 		}
 		release, acquired := c.acquireProvider(candidate)
 		if !acquired {
+			collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: llm.CompletionAttemptBusy, RetryAt: c.clock.Now().Add(time.Minute), Cause: ErrNoProviderAvailable})
 			c.logger.Info("프로바이더 동시 실행 한도에 도달해 건너뜁니다", "provider", candidate.Name())
 			continue
 		}
-		cooling, err := c.cooldown.Active(ctx, candidate.Name())
+		coolingUntil, cooling, err := c.cooldown.EndsAt(ctx, candidate.Name())
 		if err != nil {
 			if ctx.Err() != nil {
 				release()
@@ -156,20 +184,12 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			c.logger.Warn("쿨다운 상태를 읽지 못했습니다", "provider", candidate.Name(), "error", err)
 		}
 		if cooling {
+			collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: llm.CompletionAttemptCooling, RetryAt: coolingUntil, Cause: ErrNoProviderAvailable})
 			release()
 			continue
 		}
 		usedBefore := request.ExternalCallBudget.Used()
-		if reserveErr := request.ExternalCallBudget.Reserve(); reserveErr != nil {
-			lastResponse.Usage = usage
-			lastResponse.ToolExecutions = toolExecutions
-			release()
-			if ctx.Err() != nil {
-				return lastResponse, ctx.Err()
-			}
-			return lastResponse, reserveErr
-		}
-		response, observedUsage, attemptErr := c.attemptWithRetry(ctx, candidate, request, executor)
+		response, observedUsage, observedElapsed, attemptErr := c.attemptWithRetry(ctx, candidate, request, executor)
 		invoked := request.ExternalCallBudget.Used() > usedBefore
 		usage = usage.Add(response.Usage)
 		toolExecutions += response.ToolExecutions
@@ -204,7 +224,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			if len(invokedProviders) > 1 {
 				response.ModelLabel = "복수 모델"
 			}
-			c.observe(ctx, candidate, response.Model, request.TaskRole, "succeeded", 0, observedUsage, nil)
+			c.observe(ctx, candidate, response.Model, request.TaskRole, "succeeded", 0, observedUsage, observedElapsed, nil)
 			release()
 			return response, nil
 		}
@@ -220,29 +240,52 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 				if errors.Is(attemptErr, llm.ErrExternalCallBudgetUnavailable) {
 					budgetOutcome = "budget_unavailable"
 				}
-				c.observe(ctx, candidate, candidate.Model(), request.TaskRole, budgetOutcome, 0, observedUsage, nil)
+				c.observe(ctx, candidate, candidate.Model(), request.TaskRole, budgetOutcome, 0, observedUsage, observedElapsed, nil)
 			}
+			attemptKind := llm.CompletionAttemptBudget
+			retryAt := time.Time{}
+			if errors.Is(attemptErr, llm.ErrExternalCallBudgetUnavailable) {
+				attemptKind = llm.CompletionAttemptBudgetUnavailable
+				retryAt = c.clock.Now().Add(time.Minute)
+			}
+			collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: attemptKind, RetryAt: retryAt, Invoked: invoked, Cause: attemptErr})
 			release()
-			return lastResponse, attemptErr
+			return lastResponse, collector.failure()
 		}
-		lastErr = attemptErr
 		failure, ok := llm.AsFailure(attemptErr)
 		outcome := "failed"
 		status := 0
+		attemptKind := llm.CompletionAttemptProviderFailure
+		adaptable := false
 		if errors.Is(attemptErr, ErrIncompleteResponse) {
 			outcome = "incomplete"
+			attemptKind = llm.CompletionAttemptIncomplete
+			adaptable = true
 		}
 		if errors.Is(attemptErr, ErrInvalidJSONResponse) {
 			outcome = "invalid_json"
+			attemptKind = llm.CompletionAttemptInvalidJSON
+			adaptable = true
 		}
 		if errors.Is(attemptErr, ErrSemanticResponse) {
 			outcome = "invalid_semantic_response"
+			attemptKind = llm.CompletionAttemptInvalidSemantic
+			adaptable = true
 		}
+		if errors.Is(attemptErr, ErrPromptLimitExceeded) || errors.Is(attemptErr, ErrCompletePromptLimitExceeded) {
+			outcome = "prompt_limit"
+			attemptKind = llm.CompletionAttemptPromptLimit
+			adaptable = true
+		}
+		retryAt := time.Time{}
 		if ok {
 			outcome = string(failure.Kind)
 			status = failure.Status
 			if failure.Kind.TriggersCooldown() || (failure.Kind != llm.FailureAborted && failure.RetryAfter > 0) {
-				c.markProviderCooldown(ctx, candidate, failure.RetryAfter)
+				cooldownEnd := c.markProviderCooldown(ctx, candidate, failure.RetryAfter)
+				if failure.Kind == llm.FailureQuota || failure.Kind == llm.FailureRateLimited || failure.Kind == llm.FailureUnavailable {
+					retryAt = cooldownEnd
+				}
 			}
 		}
 		reason := outcome
@@ -250,12 +293,18 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			reason = semanticFailureReason(attemptErr)
 		}
 		if invoked {
-			c.observe(ctx, candidate, candidate.Model(), request.TaskRole, outcome, status, observedUsage, failure)
+			c.observe(ctx, candidate, candidate.Model(), request.TaskRole, outcome, status, observedUsage, observedElapsed, failure)
 		}
+		collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: attemptKind, RetryAt: retryAt, Invoked: invoked, Adaptable: adaptable, Cause: attemptErr})
 		logFields := []any{"provider", candidate.Name(), "outcome", outcome, "status", status, "reason", reason}
 		logFields = append(logFields, providerFailureLogFields(failure)...)
 		c.logger.Warn("프로바이더 호출에 실패해 다음으로 넘어간다", logFields...)
 		release()
+		if request.FailFastOnIncomplete && errors.Is(attemptErr, ErrIncompleteResponse) {
+			lastResponse.Usage = usage
+			lastResponse.ToolExecutions = toolExecutions
+			return lastResponse, collector.failure()
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		lastResponse.Usage = usage
@@ -263,9 +312,10 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		return lastResponse, err
 	}
 	if !routed {
-		return llm.Response{}, ErrNoProviderAllowed
+		collector.add(llm.CompletionAttempt{Kind: llm.CompletionAttemptPolicy, Cause: ErrNoProviderAllowed})
+		return llm.Response{}, collector.failure()
 	}
-	if lastErr == nil {
+	if len(collector.attempts) == 0 {
 		return llm.Response{}, ErrNoProviderAvailable
 	}
 	lastResponse.Usage = usage
@@ -273,51 +323,54 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 	if len(invokedProviders) > 1 {
 		lastResponse.ModelLabel = "복수 모델"
 	}
-	return lastResponse, fmt.Errorf("모든 프로바이더가 실패했습니다: %w", lastErr)
+	return lastResponse, collector.failure()
 }
 
-func (c *Chain) attemptWithRetry(ctx context.Context, candidate outbound.Provider, request llm.Request, executor outbound.ToolExecutor) (llm.Response, llm.Usage, error) {
+func (c *Chain) attemptWithRetry(ctx context.Context, candidate outbound.Provider, request llm.Request, executor outbound.ToolExecutor) (llm.Response, llm.Usage, time.Duration, error) {
 	var lastErr error
 	toolExecutions := 0
 	usage := llm.Usage{}
 	lastAttemptUsage := llm.Usage{}
+	lastAttemptElapsed := time.Duration(0)
 	for tryIndex := 0; tryIndex <= transientRetries; tryIndex++ {
 		if tryIndex > 0 {
 			select {
 			case <-ctx.Done():
-				return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, llm.Usage{}, ctx.Err()
+				return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, llm.Usage{}, 0, ctx.Err()
 			case <-time.After(retryPause(tryIndex)):
 			}
 		}
+		attemptStartedAt := time.Now()
 		response, err := c.attempt(ctx, candidate, request, executor)
+		lastAttemptElapsed = time.Since(attemptStartedAt)
 		lastAttemptUsage = response.Usage
 		usage = usage.Add(response.Usage)
 		toolExecutions += response.ToolExecutions
 		if err == nil {
 			response.Usage = usage
 			response.ToolExecutions = toolExecutions
-			return response, lastAttemptUsage, nil
+			return response, lastAttemptUsage, lastAttemptElapsed, nil
 		}
 		if ctx.Err() != nil {
-			return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, lastAttemptUsage, ctx.Err()
+			return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, lastAttemptUsage, lastAttemptElapsed, ctx.Err()
 		}
 		lastErr = err
 		failure, ok := llm.AsFailure(err)
 		if !ok || !failure.Kind.IsTransient() || failure.RetryAfter > 0 || tryIndex == transientRetries {
-			return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, lastAttemptUsage, err
+			return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, lastAttemptUsage, lastAttemptElapsed, err
 		}
-		c.observe(ctx, candidate, candidate.Model(), request.TaskRole, string(failure.Kind), failure.Status, lastAttemptUsage, failure)
+		c.observe(ctx, candidate, candidate.Model(), request.TaskRole, string(failure.Kind), failure.Status, lastAttemptUsage, lastAttemptElapsed, failure)
 		logFields := []any{"provider", candidate.Name(), "status", failure.Status, "attempt", tryIndex + 1}
 		logFields = append(logFields, providerFailureLogFields(failure)...)
 		c.logger.Warn("일시적인 오류라 같은 프로바이더로 다시 시도합니다", logFields...)
 	}
-	return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, lastAttemptUsage, lastErr
+	return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, lastAttemptUsage, lastAttemptElapsed, lastErr
 }
 
 func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, request llm.Request, executor outbound.ToolExecutor) (llm.Response, error) {
 	messages := append([]llm.Message{}, request.Messages...)
 	var tools []llm.Tool
-	if executor != nil && candidate.Capability().ToolCalling {
+	if executor != nil && candidate.Capability().ToolCalling && request.ExternalCallBudget.Remaining() >= 2 {
 		tools = executor.Definitions()
 	}
 	accumulated := llm.Usage{}
@@ -339,16 +392,34 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 		if !requestFits(attempt.Messages, tools, candidate.PromptLimit()) {
 			return llm.Response{Usage: accumulated, ToolExecutions: toolExecutions}, ErrPromptLimitExceeded
 		}
+		if err := request.ExternalCallBudget.Reserve(); err != nil {
+			return llm.Response{Usage: accumulated, ToolExecutions: toolExecutions}, err
+		}
 		response, err := c.invoke(ctx, candidate, attempt)
 		accumulated = accumulated.Add(response.Usage)
 		if err != nil {
 			return llm.Response{Usage: accumulated, ToolExecutions: toolExecutions}, err
 		}
 		response = models.Add(response, candidate.Model())
-		if len(tools) == 0 || !response.NeedsToolExecution() {
+		if len(tools) == 0 {
 			response.Usage = accumulated
 			response.ToolExecutions += toolExecutions
 			return models.Apply(response), nil
+		}
+		if !response.NeedsToolExecution() {
+			policy := candidate.RequestPolicy(request)
+			validStructuredResponse := !request.ForceJSON || validJSONObject(response.Content)
+			if validStructuredResponse {
+				validStructuredResponse = validateSemanticResponse(request.ResponseValidation, response.Content) == nil
+			}
+			if policy.ForceJSONWithTools || validStructuredResponse {
+				response.Usage = accumulated
+				response.ToolExecutions += toolExecutions
+				return models.Apply(response), nil
+			}
+			messages = append(messages, llm.Message{Role: llm.RoleUser, Content: "도구를 호출하지 말고 요청한 JSON 객체만 최종 응답으로 반환하세요."})
+			tools = nil
+			break
 		}
 		messages = append(messages, llm.Message{
 			Role:      llm.RoleAssistant,
@@ -367,6 +438,9 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 				ToolCallID: call.ID,
 			})
 		}
+		if request.ExternalCallBudget.Remaining() < 2 {
+			tools = nil
+		}
 	}
 	final := request
 	final.Messages = messages
@@ -380,6 +454,9 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 	}
 	if !messagesFit(final.Messages, candidate.PromptLimit()) {
 		return llm.Response{Usage: accumulated, ToolExecutions: toolExecutions}, ErrPromptLimitExceeded
+	}
+	if err := request.ExternalCallBudget.Reserve(); err != nil {
+		return llm.Response{Usage: accumulated, ToolExecutions: toolExecutions}, err
 	}
 	response, err := c.invoke(ctx, candidate, final)
 	accumulated = accumulated.Add(response.Usage)
@@ -396,22 +473,25 @@ func (c *Chain) invoke(ctx context.Context, candidate outbound.Provider, request
 	return candidate.Complete(ctx, request)
 }
 
-func (c *Chain) observe(ctx context.Context, candidate outbound.Provider, model string, role llm.TaskRole, outcome string, status int, tokens llm.Usage, failure *llm.Failure) {
+func (c *Chain) observe(ctx context.Context, candidate outbound.Provider, model string, role llm.TaskRole, outcome string, status int, tokens llm.Usage, elapsed time.Duration, failure *llm.Failure) {
 	c.metrics.ObserveProvider(candidate.Name(), outcome)
 	event := usage.Event{
-		Provider:         candidate.Name(),
-		Model:            model,
-		Role:             string(role),
-		Outcome:          outcome,
-		Status:           status,
-		PromptTokens:     tokens.PromptTokens,
-		CompletionTokens: tokens.CompletionTokens,
-		TotalTokens:      tokens.TotalTokens,
-		OccurredAt:       c.clock.Now(),
+		Provider:                   candidate.Name(),
+		Model:                      model,
+		Role:                       string(role),
+		Outcome:                    outcome,
+		Status:                     status,
+		PromptTokens:               tokens.PromptTokens,
+		CompletionTokens:           tokens.CompletionTokens,
+		TotalTokens:                tokens.TotalTokens,
+		RequestElapsedMilliseconds: elapsed.Milliseconds(),
+		OccurredAt:                 c.clock.Now(),
 	}
 	if failure != nil {
 		event.ProviderErrorCode = failure.ProviderErrorCode
-		event.RequestElapsedMilliseconds = failure.Elapsed.Milliseconds()
+		if event.RequestElapsedMilliseconds == 0 {
+			event.RequestElapsedMilliseconds = failure.Elapsed.Milliseconds()
+		}
 	}
 	if err := c.usage.Record(ctx, event); err != nil {
 		c.logger.Warn("프로바이더 사용량을 기록하지 못했습니다", "provider", candidate.Name(), "error", err)

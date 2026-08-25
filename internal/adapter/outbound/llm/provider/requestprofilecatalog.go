@@ -14,26 +14,29 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 	switch normalizedProvider + "/" + baseModel {
 	case "gemini/gemini-3.7-flash":
 		return RequestProfile{
-			ReasoningEffort:    "medium",
-			OutputTokenLimit:   65536,
-			ForceJSONWithTools: true,
+			ReasoningEffort:         "medium",
+			OutputTokenLimit:        65536,
+			StructuredOutputPercent: 80,
+			ForceJSONWithTools:      true,
 		}
 	case "groq/openai/gpt-oss-120b":
 		return RequestProfile{
-			Temperature:            float64Value(1),
-			TopP:                   float64Value(1),
-			ReasoningEffort:        "medium",
-			ParallelToolCalls:      boolValue(false),
-			OutputTokenLimit:       2500,
-			UseMaxCompletionTokens: true,
+			Temperature:             float64Value(1),
+			TopP:                    float64Value(1),
+			ReasoningEffort:         "medium",
+			ParallelToolCalls:       boolValue(false),
+			OutputTokenLimit:        2500,
+			StructuredOutputPercent: 50,
+			UseMaxCompletionTokens:  true,
 		}
 	case "openrouter/z-ai/glm-5.2":
 		return RequestProfile{
-			Temperature:           float64Value(1),
-			TopP:                  float64Value(0.95),
-			NestedReasoningEffort: "high",
-			ExcludeReasoning:      true,
-			OutputTokenLimit:      131072,
+			Temperature:             float64Value(1),
+			TopP:                    float64Value(0.95),
+			NestedReasoningEffort:   "high",
+			ExcludeReasoning:        true,
+			OutputTokenLimit:        131072,
+			StructuredOutputPercent: 50,
 		}
 	case "nvidia/google/gemma-4-31b-it":
 		capability := llm.Capability{JSONMode: true}

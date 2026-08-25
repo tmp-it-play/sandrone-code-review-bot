@@ -28,14 +28,31 @@ func (b PlanBuilder) Build(files []pullrequest.ChangedFile, chosen selection.Sel
 	units := make([]Unit, 0, len(plan.Batches))
 	for index, batch := range plan.Batches {
 		keys := make([]string, 0)
+		paths := make([]string, 0, len(batch))
 		for _, file := range batch {
+			paths = append(paths, file.Path)
 			for _, item := range itemsByPath[file.Path] {
-				keys = append(keys, item.Key)
+				if item.Status == CoverageStatusPlanned {
+					keys = append(keys, item.Key)
+				}
 			}
 		}
+		if len(keys) == 0 {
+			continue
+		}
 		sort.Strings(keys)
-		unitHash := hashParts(append([]string{"semantic-review-unit-v1"}, keys...)...)
-		units = append(units, Unit{Hash: unitHash, Ordinal: index + 1, Kind: "semantic_batch", Status: UnitStatusPending})
+		spec := NewUnitSpec(paths, keys)
+		unitHash := RootUnitHash(spec)
+		specJSON := spec.JSON()
+		units = append(units, Unit{
+			Hash:     unitHash,
+			Ordinal:  index + 1,
+			Depth:    0,
+			OrderKey: RootUnitOrderKey(index + 1),
+			Kind:     "semantic_batch",
+			SpecJSON: specJSON,
+			Status:   UnitStatusPending,
+		})
 		for _, file := range batch {
 			pathItems := itemsByPath[file.Path]
 			for itemIndex := range pathItems {

@@ -48,8 +48,11 @@ func (r *ReviewExecutionStore) StartUnit(ctx context.Context, runID uint64, runL
 			}
 			if err := transaction.Model(&model.ReviewUnit{}).Where("id = ? AND status = ?", unit.ID, string(reviewworkflow.UnitStatusSucceeded)).Updates(map[string]any{
 				"status":           string(reviewworkflow.UnitStatusFailed),
+				"input_hash":       "",
 				"result_json":      "",
 				"reused":           false,
+				"retryable":        false,
+				"retry_at":         nil,
 				"error_summary":    "input_changed",
 				"lease_token":      "",
 				"lease_expires_at": nil,
@@ -63,12 +66,22 @@ func (r *ReviewExecutionStore) StartUnit(ctx context.Context, runID uint64, runL
 			}
 			unit.Status = string(reviewworkflow.UnitStatusFailed)
 		}
+		retryAt := time.Time{}
+		if unit.RetryAt != nil {
+			retryAt = *unit.RetryAt
+		}
 		claim.Result = reviewworkflow.UnitResult{
 			Provider:       unit.Provider,
 			Model:          unit.Model,
 			MultipleModels: unit.MultipleModels,
 			Usage:          llm.Usage{PromptTokens: unit.PromptTokens, CompletionTokens: unit.CompletionTokens, TotalTokens: unit.TotalTokens},
 			ToolExecutions: unit.ToolExecutions,
+			Retryable:      unit.Retryable,
+			RetryAt:        retryAt,
+		}
+		if reviewworkflow.UnitStatus(unit.Status) == reviewworkflow.UnitStatusFailed && unit.InputHash == inputHash && unit.Retryable && unit.RetryAt != nil && unit.RetryAt.After(leaseNow) {
+			claim.Waiting = true
+			return nil
 		}
 		updates := map[string]any{
 			"status":           string(reviewworkflow.UnitStatusRunning),
@@ -79,17 +92,16 @@ func (r *ReviewExecutionStore) StartUnit(ctx context.Context, runID uint64, runL
 			"heartbeat_at":     startedAt,
 			"result_json":      "",
 			"reused":           false,
+			"retryable":        false,
+			"retry_at":         nil,
 			"error_summary":    "",
 			"lease_token":      leaseToken,
 			"lease_expires_at": leaseExpiresAt,
 		}
 		result := transaction.Model(&model.ReviewUnit{}).
 			Where("id = ?", unit.ID).
-			Where("status IN ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?))", []string{
-				string(reviewworkflow.UnitStatusPending),
-				string(reviewworkflow.UnitStatusFailed),
-				string(reviewworkflow.UnitStatusDeferred),
-			}, string(reviewworkflow.UnitStatusRunning), leaseNow).
+			Where("status = ? OR (status = ? AND COALESCE(input_hash, '') <> ?) OR (status = ? AND (COALESCE(input_hash, '') <> ? OR (retryable = ? AND (retry_at IS NULL OR retry_at <= ?)))) OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?))",
+				string(reviewworkflow.UnitStatusPending), string(reviewworkflow.UnitStatusDeferred), inputHash, string(reviewworkflow.UnitStatusFailed), inputHash, true, leaseNow, string(reviewworkflow.UnitStatusRunning), leaseNow).
 			Updates(updates)
 		if result.Error != nil {
 			return result.Error
@@ -139,6 +151,12 @@ func (r *ReviewExecutionStore) FinishUnit(ctx context.Context, runID uint64, run
 		if unit.Provider != "" && unit.Model != "" && result.Provider != "" && result.Model != "" && (unit.Provider != result.Provider || unit.Model != result.Model) {
 			multipleModels = true
 		}
+		retryable := result.Status == reviewworkflow.UnitStatusFailed && result.Retryable
+		var retryAt *time.Time
+		if retryable && !result.RetryAt.IsZero() {
+			retryAtValue := result.RetryAt
+			retryAt = &retryAtValue
+		}
 		updated := transaction.Model(&model.ReviewUnit{}).
 			Where("id = ? AND status = ? AND lease_token = ? AND lease_expires_at > CURRENT_TIMESTAMP(6)", unit.ID, string(reviewworkflow.UnitStatusRunning), leaseToken).
 			Updates(map[string]any{
@@ -153,6 +171,8 @@ func (r *ReviewExecutionStore) FinishUnit(ctx context.Context, runID uint64, run
 				"tool_executions":   gorm.Expr("tool_executions + ?", result.ToolExecutions),
 				"result_json":       resultJSON,
 				"reused":            result.Reused,
+				"retryable":         retryable,
+				"retry_at":          retryAt,
 				"error_summary":     boundedText(result.Error, 1000),
 				"finished_at":       result.FinishedAt,
 				"heartbeat_at":      result.FinishedAt,

@@ -9,7 +9,7 @@ import (
 
 const maximumProviderCooldown = 24 * time.Hour
 
-func (c *Chain) markProviderCooldown(ctx context.Context, failed outbound.Provider, retryAfter time.Duration) {
+func (c *Chain) markProviderCooldown(ctx context.Context, failed outbound.Provider, retryAfter time.Duration) time.Time {
 	duration := c.cooldownFor
 	if retryAfter > duration {
 		duration = retryAfter
@@ -18,13 +18,20 @@ func (c *Chain) markProviderCooldown(ctx context.Context, failed outbound.Provid
 		duration = maximumProviderCooldown
 	}
 	if duration <= 0 {
-		return
+		return time.Time{}
 	}
+	endsAt := c.clock.Now().Add(duration)
 	for _, name := range c.failureDomainProviders(failed) {
-		if err := c.cooldown.Mark(ctx, name, duration); err != nil {
+		effective, err := c.cooldown.Mark(ctx, name, duration)
+		if err != nil {
 			c.logger.Warn("쿨다운을 기록하지 못했습니다", "provider", name, "source_provider", failed.Name(), "error", err)
+			continue
+		}
+		if effective.After(endsAt) {
+			endsAt = effective
 		}
 	}
+	return endsAt
 }
 
 func (c *Chain) failureDomainProviders(failed outbound.Provider) []string {

@@ -57,6 +57,9 @@ func Migrate(database *gorm.DB) error {
 		if err := backfillReviewVerificationCompletion(connection); err != nil {
 			return err
 		}
+		if err := backfillCoverageInitialUnitHashes(connection); err != nil {
+			return err
+		}
 		if err := removeObsoleteMigrationArtifacts(connection); err != nil {
 			return err
 		}

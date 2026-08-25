@@ -96,12 +96,9 @@ func (s *PullRequestSource) FileContent(ctx context.Context, target pullrequest.
 	}
 	file, _, _, err := client.Repositories.GetContents(ctx, target.Owner, target.Repository, path, &gh.RepositoryContentGetOptions{Ref: ref})
 	if err != nil {
-		return "", fmt.Errorf("%s 파일을 읽지 못했습니다: %w", path, err)
+		return "", wrapRepositoryContentError(path, err)
 	}
-	if file == nil {
-		return "", fmt.Errorf("%s는 파일이 아닙니다", path)
-	}
-	return file.GetContent()
+	return decodeRepositoryContent(path, file)
 }
 
 func toChangedFile(file *gh.CommitFile) pullrequest.ChangedFile {

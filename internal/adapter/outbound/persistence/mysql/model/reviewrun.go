@@ -25,6 +25,8 @@ type ReviewRun struct {
 	DeferredCoverage   int
 	SkippedCoverage    int
 	ExternalCalls      int    `gorm:"not null;default:0"`
+	InitialPlanHash    string `gorm:"size:64;not null;default:''"`
+	PlanRevision       int    `gorm:"not null;default:0"`
 	ErrorSummary       string `gorm:"size:1000"`
 	SupersedingHeadSHA string `gorm:"size:64;not null;default:''"`
 	StartedAt          time.Time

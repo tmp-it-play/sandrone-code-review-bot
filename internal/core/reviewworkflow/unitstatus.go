@@ -8,4 +8,5 @@ const (
 	UnitStatusSucceeded UnitStatus = "succeeded"
 	UnitStatusFailed    UnitStatus = "failed"
 	UnitStatusDeferred  UnitStatus = "deferred"
+	UnitStatusSplit     UnitStatus = "split"
 )

@@ -20,7 +20,7 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 		HeadSHA:        run.HeadSHA,
 	}
 	now := r.deps.Clock.Now()
-	leaseToken, err := r.deps.Runs.AcquireRun(ctx, run.ID, now, now.Add(r.config.RunLease))
+	lease, err := r.deps.Runs.AcquireRun(ctx, run.ID, now, now.Add(r.config.RunLease))
 	if errors.Is(err, reviewworkflow.ErrRunLeased) || errors.Is(err, reviewworkflow.ErrPublicationLeased) {
 		return nil
 	}
@@ -34,6 +34,7 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 	if err != nil {
 		return err
 	}
+	leaseToken := lease.Token
 	if leaseToken == "" {
 		return nil
 	}

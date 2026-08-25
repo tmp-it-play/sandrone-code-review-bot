@@ -12,6 +12,9 @@ import (
 )
 
 const taskRetention = 30 * 24 * time.Hour
+const defaultTaskTimeout = 20 * time.Minute
+const reviewTaskTimeout = 3 * time.Hour
+const conversationalTaskTimeout = 50 * time.Minute
 
 type Client struct {
 	client *asynq.Client
@@ -45,7 +48,7 @@ func (c *Client) enqueue(ctx context.Context, taskType string, payload any) erro
 	task := asynq.NewTask(taskType, encoded)
 	options := []asynq.Option{
 		asynq.MaxRetry(6),
-		asynq.Timeout(20 * time.Minute),
+		asynq.Timeout(timeoutFor(taskType)),
 		asynq.Retention(taskRetention),
 	}
 	if id := deterministicTaskID(taskType, payload); id != "" {
@@ -58,4 +61,15 @@ func (c *Client) enqueue(ctx context.Context, taskType string, payload any) erro
 		return fmt.Errorf("작업을 큐에 넣지 못했습니다: %w", err)
 	}
 	return nil
+}
+
+func timeoutFor(taskType string) time.Duration {
+	switch taskType {
+	case TaskReview:
+		return reviewTaskTimeout
+	case TaskSummary, TaskReply:
+		return conversationalTaskTimeout
+	default:
+		return defaultTaskTimeout
+	}
 }

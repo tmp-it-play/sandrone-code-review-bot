@@ -22,6 +22,10 @@ func storedUnitResult(unit model.ReviewUnit) (reviewworkflow.UnitResult, error) 
 	if unit.FinishedAt != nil {
 		finishedAt = *unit.FinishedAt
 	}
+	retryAt := time.Time{}
+	if unit.RetryAt != nil {
+		retryAt = *unit.RetryAt
+	}
 	return reviewworkflow.UnitResult{
 		Status:         reviewworkflow.UnitStatus(unit.Status),
 		InputHash:      unit.InputHash,
@@ -32,6 +36,8 @@ func storedUnitResult(unit model.ReviewUnit) (reviewworkflow.UnitResult, error) 
 		Review:         result,
 		ToolExecutions: unit.ToolExecutions,
 		Reused:         unit.Reused,
+		Retryable:      unit.Retryable,
+		RetryAt:        retryAt,
 		FinishedAt:     finishedAt,
 	}, nil
 }

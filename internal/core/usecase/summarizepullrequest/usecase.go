@@ -8,7 +8,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/it-play/sandrone-code-review-bot/internal/core/instruction"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/leaseheartbeat"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
@@ -23,6 +25,7 @@ type UseCase struct {
 
 const summaryPublicationLease = 30 * time.Minute
 const summaryPublicationFinalizeTimeout = 5 * time.Second
+const summaryPublicationRecoveryDelay = summaryPublicationLease + 10*time.Second
 
 func New(deps Dependencies) *UseCase {
 	return &UseCase{deps: deps}
@@ -88,23 +91,120 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 			u.releasePublication(ctx, target, task.OperationKey, publicationLease)
 		}
 	}()
+	withHeartbeat := func(work func(context.Context) error) error {
+		return leaseheartbeat.Run(ctx, summaryPublicationLease, func(heartbeatContext context.Context) error {
+			return u.renewPublication(heartbeatContext, target, task.OperationKey, publicationLease)
+		}, work)
+	}
+	publicationExists := func(marker string) (bool, error) {
+		published := false
+		err := withHeartbeat(func(reconciliationContext context.Context) error {
+			var reconciliationErr error
+			published, reconciliationErr = u.publicationExists(reconciliationContext, target, marker)
+			return reconciliationErr
+		})
+		return published, err
+	}
+	notifyWithHeartbeat := func(notice review.Notice, marker string) error {
+		return withHeartbeat(func(notificationContext context.Context) error {
+			return u.notify(notificationContext, target, notice, marker)
+		})
+	}
 	publicationMarker := job.PublicationMarker("summary", target, task.RequestIdentity, task.CommentID, task.InThread)
+	failureMarker := job.PublicationMarker("summary-final-notice", target, task.RequestIdentity, task.CommentID, task.InThread)
+	terminalFailure := func(message string, cause error, response llm.Response) error {
+		releasePublicationLease = false
+		maskedCause := &llm.SanitizedError{Message: u.deps.Masker.Mask(cause.Error()), Cause: cause}
+		if notifyErr := notifyWithHeartbeat(review.Notice{Kind: review.NoticeFailed, Message: message}, failureMarker); notifyErr != nil {
+			u.deps.Logger.Warn("요약 실패 안내를 남기지 못했습니다", "target", target.Reference(), "error", notifyErr)
+			if task.FinalAttempt {
+				u.save(ctx, task, startedAt, review.OutcomeFailed, errors.Join(maskedCause, notifyErr).Error(), response)
+				releasePublicationLease = true
+				return errors.Join(maskedCause, notifyErr)
+			}
+			return &job.RetryAtError{At: u.deps.Clock.Now().Add(summaryPublicationRecoveryDelay), Cause: errors.Join(maskedCause, notifyErr)}
+		}
+		u.save(ctx, task, startedAt, review.OutcomeFailed, maskedCause.Error(), response)
+		if completeErr := u.completePublication(ctx, target, task.OperationKey, publicationLease); completeErr != nil {
+			if task.FinalAttempt {
+				u.deps.Logger.Warn("최종 요약 실패 안내의 완료 상태를 저장하지 못해 lease만 해제합니다", "target", target.Reference(), "error", completeErr)
+				releasePublicationLease = true
+				return nil
+			}
+			return &job.RetryAtError{At: u.deps.Clock.Now().Add(summaryPublicationRecoveryDelay), Cause: completeErr}
+		}
+		publicationLease = ""
+		return nil
+	}
+	failClaimed := func(message string, cause error, responses ...llm.Response) error {
+		if errors.Is(cause, publication.ErrSuperseded) {
+			u.deps.Logger.Info("더 최신인 요약 작업이 현재 작업을 대체했습니다", "target", task.Target.Reference())
+			return nil
+		}
+		response := llm.Response{}
+		if len(responses) > 0 {
+			response = responses[0]
+		}
+		if task.FinalizationAttempt {
+			return terminalFailure(message+" 재시도했지만 해결되지 않아 중단합니다.", cause, response)
+		}
+		u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
+		if task.Attempt == 0 {
+			marker := job.PublicationMarker("summary-retry-notice", task.Target, task.RequestIdentity, task.CommentID, task.InThread)
+			if notifyErr := notifyWithHeartbeat(review.Notice{Kind: review.NoticeRetrying, Message: message + " 잠시 후 다시 시도합니다."}, marker); notifyErr != nil {
+				u.deps.Logger.Warn("요약 재시도 안내를 남기지 못했습니다", "target", task.Target.Reference(), "error", notifyErr)
+			}
+		}
+		return fmt.Errorf("%s: %w", message, cause)
+	}
 	if publicationMarker != "" {
-		published, publishedErr := u.publicationExists(ctx, target, publicationMarker)
+		published, publishedErr := publicationExists(publicationMarker)
 		if publishedErr != nil {
-			return u.fail(ctx, task, startedAt, "기존 요약 게시 결과를 확인하지 못했습니다", publishedErr)
+			return failClaimed("기존 요약 게시 결과를 확인하지 못했습니다", publishedErr)
 		}
 		if published {
 			if completeErr := u.completePublication(ctx, target, task.OperationKey, publicationLease); completeErr != nil {
+				if task.FinalAttempt {
+					u.deps.Logger.Warn("기존 요약 marker의 완료 상태를 저장하지 못해 lease만 해제합니다", "target", target.Reference(), "error", completeErr)
+					releasePublicationLease = true
+					u.save(ctx, task, startedAt, review.OutcomeSucceeded, "게시 marker 확인 후 완료 상태 저장 실패", llm.Response{})
+					return nil
+				}
 				return completeErr
 			}
 			publicationLease = ""
 			return nil
 		}
 	}
-	files, err := u.deps.Source.ChangedFiles(ctx, target)
+	if failureMarker != "" {
+		published, publishedErr := publicationExists(failureMarker)
+		if publishedErr != nil {
+			return failClaimed("기존 요약 실패 안내를 확인하지 못했습니다", publishedErr)
+		}
+		if published {
+			if completeErr := u.completePublication(ctx, target, task.OperationKey, publicationLease); completeErr != nil {
+				if task.FinalAttempt {
+					u.deps.Logger.Warn("기존 요약 실패 marker의 완료 상태를 저장하지 못해 lease만 해제합니다", "target", target.Reference(), "error", completeErr)
+					releasePublicationLease = true
+					u.save(ctx, task, startedAt, review.OutcomeFailed, "실패 marker 확인 후 완료 상태 저장 실패", llm.Response{})
+					return nil
+				}
+				return completeErr
+			}
+			publicationLease = ""
+			return nil
+		}
+	}
+	var files []pullrequest.ChangedFile
+	err = leaseheartbeat.Run(ctx, summaryPublicationLease, func(heartbeatContext context.Context) error {
+		return u.renewPublication(heartbeatContext, target, task.OperationKey, publicationLease)
+	}, func(collectionContext context.Context) error {
+		var collectErr error
+		files, collectErr = u.deps.Source.ChangedFiles(collectionContext, target)
+		return collectErr
+	})
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "변경 파일을 읽지 못했습니다", err)
+		return failClaimed("변경 파일을 읽지 못했습니다", err)
 	}
 	chosen := selection.FileSelector{
 		Include:  config.Include,
@@ -112,15 +212,24 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		MaxFiles: config.MaxFiles,
 	}.Select(files)
 	if chosen.IsEmpty() {
-		if renewErr := u.renewPublication(ctx, target, task.OperationKey, publicationLease); renewErr != nil {
-			return renewErr
-		}
 		releasePublicationLease = false
-		if notifyErr := u.notify(ctx, target, review.Notice{Kind: review.NoticeSkipped, Message: "요약할 변경 사항이 없습니다."}, publicationMarker); notifyErr != nil {
-			return notifyErr
+		if notifyErr := notifyWithHeartbeat(review.Notice{Kind: review.NoticeSkipped, Message: "요약할 변경 사항이 없습니다."}, publicationMarker); notifyErr != nil {
+			if task.FinalAttempt {
+				u.deps.Logger.Warn("최종 요약 생략 안내를 남기지 못해 lease만 해제합니다", "target", target.Reference(), "error", notifyErr)
+				releasePublicationLease = true
+				u.save(ctx, task, startedAt, review.OutcomeFailed, notifyErr.Error(), llm.Response{})
+				return &llm.SanitizedError{Message: u.deps.Masker.Mask(notifyErr.Error()), Cause: notifyErr}
+			}
+			return &job.RetryAtError{At: u.deps.Clock.Now().Add(summaryPublicationRecoveryDelay), Cause: notifyErr}
 		}
 		if completeErr := u.completePublication(ctx, target, task.OperationKey, publicationLease); completeErr != nil {
-			return completeErr
+			if task.FinalAttempt {
+				u.deps.Logger.Warn("생략된 요약의 완료 상태를 저장하지 못해 lease만 해제합니다", "target", target.Reference(), "error", completeErr)
+				releasePublicationLease = true
+				u.save(ctx, task, startedAt, review.OutcomeSkipped, "요약 대상 파일 없음; 완료 상태 저장 실패", llm.Response{})
+				return nil
+			}
+			return &job.RetryAtError{At: u.deps.Clock.Now().Add(summaryPublicationRecoveryDelay), Cause: completeErr}
 		}
 		publicationLease = ""
 		u.save(ctx, task, startedAt, review.OutcomeSkipped, "요약 대상 파일 없음", llm.Response{})
@@ -129,19 +238,23 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 	selected := u.trim(chosen.Files, config)
 	pathMap := newSummaryPromptPathMap(selected, u.deps.Masker.Mask)
 
-	instructions, err := u.deps.Settings.Instructions(ctx, target, config)
+	instructions := instruction.Collection{}
+	err = leaseheartbeat.Run(ctx, summaryPublicationLease, func(heartbeatContext context.Context) error {
+		return u.renewPublication(heartbeatContext, target, task.OperationKey, publicationLease)
+	}, func(collectionContext context.Context) error {
+		var instructionErr error
+		instructions, instructionErr = u.deps.Settings.Instructions(collectionContext, target, config)
+		return instructionErr
+	})
 	if err != nil {
-		u.deps.Logger.Warn("지침 문서를 읽지 못했습니다", "target", target.Reference(), "error", err)
+		return failClaimed("요약 지침 문서를 읽지 못했습니다", err)
 	}
 
 	classification := llm.DataClassificationPublic
 	if request.Private {
 		classification = llm.DataClassificationPrivateCode
 	}
-	maxCalls := u.deps.LLMMaxCalls
-	if maxCalls < 1 {
-		maxCalls = 12
-	}
+	maxCalls := llm.OperationCallLimit(u.deps.LLMMaxCalls, llm.TaskRoleSummary)
 	completionRequest := llm.Request{
 		Temperature:           config.Temperature,
 		MaxOutputTokens:       config.MaxOutputTokens,
@@ -155,58 +268,72 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 	}
 	plan, err := u.buildSummaryPromptPlan(request, selected, chosen, instructions, config, task.Instruction, completionRequest, pathMap)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "요약 모델 입력을 안전한 크기로 만들지 못했습니다", err)
+		if errors.Is(err, llm.ErrPromptCapacity) {
+			return terminalFailure("요약 입력이 사용 가능한 모델 한도를 넘어 이번 요청을 종료합니다.", err, llm.Response{})
+		}
+		return failClaimed("요약 모델 입력을 안전한 크기로 만들지 못했습니다", err)
 	}
 	completionRequest.ResponseValidation.RequiredPaths = plan.RequiredPaths
-	callBudget := llm.NewDurableExternalCallBudget(maxCalls, func() bool {
-		reserved, reserveErr := u.deps.Publications.ReserveSummaryExternalCall(ctx, target, task.OperationKey, publicationLease, maxCalls)
+	callBudget := llm.NewScopedDurableExternalCallBudget(maxCalls, claim.ExternalCalls, maxCalls, func() error {
+		reservedAt := u.deps.Clock.Now()
+		reserved, reserveErr := u.deps.Publications.ReserveSummaryExternalCall(ctx, target, task.OperationKey, publicationLease, maxCalls, reservedAt, reservedAt.Add(summaryPublicationLease))
 		if reserveErr != nil {
-			u.deps.Logger.Warn("요약 외부 호출 예산을 예약하지 못했습니다", "operation", task.OperationKey, "error", reserveErr)
-			return false
+			return reserveErr
 		}
-		return reserved
+		if !reserved {
+			return llm.ErrExternalCallBudgetExhausted
+		}
+		return nil
 	})
 
 	completionRequest.Messages = plan.Messages
 	completionRequest.ExternalCallBudget = callBudget
 	inputHash, err := llm.CompletionInputHash(completionRequest, u.deps.Completer.PolicyHashInputs(completionRequest), plan.ResultPolicy)
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "요약 모델 입력 식별자를 만들지 못했습니다", err)
+		return failClaimed("요약 모델 입력 식별자를 만들지 못했습니다", err)
 	}
 	checkpoint, cached, err := u.deps.Publications.SummaryCompletion(ctx, target, task.OperationKey, publicationLease, inputHash, u.deps.Clock.Now())
 	if err != nil {
-		return u.fail(ctx, task, startedAt, "기존 요약 모델 결과를 읽지 못했습니다", err)
+		return failClaimed("기존 요약 모델 결과를 읽지 못했습니다", err)
 	}
 	response := checkpoint.MetadataResponse()
 	var summary review.Summary
 	if cached {
 		summary, err = summaryFromCanonicalContent(checkpoint.CanonicalContent)
 		if err != nil {
-			return u.fail(ctx, task, startedAt, "기존 요약 완료 결과를 해석하지 못했습니다", err, response)
+			return failClaimed("기존 요약 완료 결과를 해석하지 못했습니다", err, response)
 		}
 	} else {
 		response, err = u.deps.Completer.Complete(ctx, completionRequest, nil)
 		response.Content = u.deps.Masker.Mask(response.Content)
 		if err != nil {
 			response, recordErr := u.recordCompletionAttempt(ctx, target, task.OperationKey, publicationLease, response)
-			return u.fail(ctx, task, startedAt, "요약 모델을 호출하지 못했습니다", errors.Join(errors.New(u.deps.Masker.Mask(err.Error())), recordErr), response)
+			maskedErr := &llm.SanitizedError{Message: u.deps.Masker.Mask(err.Error()), Cause: err}
+			if failure, ok := llm.AsCompletionFailure(err); ok && recordErr == nil {
+				if !failure.Terminal() && !task.FinalizationAttempt {
+					u.deps.Logger.Info("일시적인 요약 모델 실패를 사용자 실패로 처리하지 않고 재개를 예약합니다", "target", task.Target.Reference(), "retry_at", failure.RetryAt())
+					return maskedErr
+				}
+				return terminalFailure("요약 모델이 유효한 결과를 만들지 못해 이번 요청을 종료합니다.", maskedErr, response)
+			}
+			return failClaimed("요약 모델을 호출하지 못했습니다", errors.Join(maskedErr, recordErr), response)
 		}
 		if !response.Completed() {
 			response, recordErr := u.recordCompletionAttempt(ctx, target, task.OperationKey, publicationLease, response)
-			return u.fail(ctx, task, startedAt, "요약 모델 응답이 완료되지 않았습니다", errors.Join(fmt.Errorf("finish reason: %s", response.FinishReason), recordErr), response)
+			return failClaimed("요약 모델 응답이 완료되지 않았습니다", errors.Join(fmt.Errorf("finish reason: %s", response.FinishReason), recordErr), response)
 		}
 		result, _, parseErr := u.deps.Parser.Parse(response.Content)
 		if parseErr != nil {
 			var recordErr error
 			response, recordErr = u.recordCompletionAttempt(ctx, target, task.OperationKey, publicationLease, response)
 			parseErr = errors.Join(parseErr, recordErr)
-			return u.fail(ctx, task, startedAt, "모델 응답을 해석하지 못했습니다", parseErr, response)
+			return failClaimed("모델 응답을 해석하지 못했습니다", parseErr, response)
 		}
 		if result.Summary.IsEmpty() {
 			var recordErr error
 			response, recordErr = u.recordCompletionAttempt(ctx, target, task.OperationKey, publicationLease, response)
 			resultErr := errors.Join(errors.New("빈 요약"), recordErr)
-			return u.fail(ctx, task, startedAt, "모델이 요약을 만들지 못했습니다", resultErr, response)
+			return failClaimed("모델이 요약을 만들지 못했습니다", resultErr, response)
 		}
 		summary = pathMap.RestoreSummary(result.Summary)
 		canonicalContent, canonicalErr := canonicalSummaryContent(summary)
@@ -214,7 +341,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 			var recordErr error
 			response, recordErr = u.recordCompletionAttempt(ctx, target, task.OperationKey, publicationLease, response)
 			canonicalErr = errors.Join(canonicalErr, recordErr)
-			return u.fail(ctx, task, startedAt, "요약 완료 결과를 만들지 못했습니다", canonicalErr, response)
+			return failClaimed("요약 완료 결과를 만들지 못했습니다", canonicalErr, response)
 		}
 		checkpointContext, checkpointCancel := completionCheckpointContext(ctx)
 		checkpoint, err = u.deps.Publications.SaveSummaryCompletion(
@@ -226,7 +353,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		)
 		checkpointCancel()
 		if err != nil {
-			return u.fail(ctx, task, startedAt, "요약 모델 결과를 저장하지 못했습니다", err, response)
+			return failClaimed("요약 모델 결과를 저장하지 못했습니다", err, response)
 		}
 		response = checkpoint.MetadataResponse()
 	}
@@ -244,15 +371,24 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		Style:   review.Style{Emoji: config.Emoji, Tone: string(config.Tone)},
 		Trigger: task.Trigger,
 	}), u.deps.Renderer.Marker(), publicationMarker)
-	if renewErr := u.renewPublication(ctx, target, task.OperationKey, publicationLease); renewErr != nil {
-		return renewErr
-	}
 	releasePublicationLease = false
-	if err := u.place(ctx, target, config.Sandrone.SummaryPlacement, publicationMarker, body); err != nil {
-		return u.fail(ctx, task, startedAt, "요약을 게시하지 못했습니다", err, response)
+	if err := withHeartbeat(func(placementContext context.Context) error {
+		return u.place(placementContext, target, config.Sandrone.SummaryPlacement, publicationMarker, body)
+	}); err != nil {
+		retryErr := &job.RetryAtError{At: u.deps.Clock.Now().Add(summaryPublicationRecoveryDelay), Cause: err}
+		if task.FinalAttempt {
+			return terminalFailure("요약을 게시하지 못해 이번 요청을 종료합니다.", retryErr, response)
+		}
+		return retryErr
 	}
 	if completeErr := u.completePublication(ctx, target, task.OperationKey, publicationLease); completeErr != nil {
-		return completeErr
+		if task.FinalAttempt {
+			u.deps.Logger.Warn("게시된 요약의 완료 상태를 저장하지 못해 lease만 해제합니다", "target", target.Reference(), "error", completeErr)
+			releasePublicationLease = true
+			u.save(ctx, task, startedAt, review.OutcomeSucceeded, "요약 게시 후 완료 상태 저장 실패", response)
+			return nil
+		}
+		return &job.RetryAtError{At: u.deps.Clock.Now().Add(summaryPublicationRecoveryDelay), Cause: completeErr}
 	}
 	publicationLease = ""
 	u.save(ctx, task, startedAt, review.OutcomeSucceeded, "", response)

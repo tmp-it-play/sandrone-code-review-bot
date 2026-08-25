@@ -49,6 +49,9 @@ func (r *ReviewRunStore) FinishRun(ctx context.Context, runID uint64, result rev
 				return summaryErr
 			}
 			summaryLoaded = true
+			if summary.Pending > 0 {
+				return fmt.Errorf("종료할 리뷰 실행에 미완료 coverage %d개가 남아 있습니다", summary.Pending)
+			}
 			coverageStatus := summary.TerminalStatus()
 			if result.Status == reviewworkflow.RunStatusPartial && coverageStatus == reviewworkflow.RunStatusComplete {
 				status = reviewworkflow.RunStatusPartial
@@ -127,6 +130,8 @@ func (r *ReviewRunStore) FinishRun(ctx context.Context, runID uint64, result rev
 					string(reviewworkflow.UnitStatusRunning),
 				}).Updates(map[string]any{
 				"status":           string(reviewworkflow.UnitStatusFailed),
+				"retryable":        false,
+				"retry_at":         nil,
 				"error_summary":    boundedText(result.Error, 1000),
 				"finished_at":      result.TerminalAt,
 				"heartbeat_at":     result.TerminalAt,
@@ -157,6 +162,8 @@ func (r *ReviewRunStore) FinishRun(ctx context.Context, runID uint64, result rev
 					string(reviewworkflow.UnitStatusRunning),
 				}).Updates(map[string]any{
 				"status":           string(reviewworkflow.UnitStatusDeferred),
+				"retryable":        false,
+				"retry_at":         nil,
 				"error_summary":    reason,
 				"finished_at":      result.TerminalAt,
 				"heartbeat_at":     result.TerminalAt,
@@ -180,6 +187,11 @@ func (r *ReviewRunStore) FinishRun(ctx context.Context, runID uint64, result rev
 				return err
 			}
 			coverageChanged = true
+		}
+		if err := transaction.Model(&model.ReviewUnit{}).
+			Where("review_run_id = ? AND retryable = ?", runID, true).
+			Updates(map[string]any{"retryable": false, "retry_at": nil}).Error; err != nil {
+			return err
 		}
 		if !summaryLoaded || coverageChanged {
 			var summaryErr error

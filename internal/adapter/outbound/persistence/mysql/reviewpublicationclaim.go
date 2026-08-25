@@ -31,7 +31,7 @@ func (r *ReviewPublicationStore) ClaimPublication(ctx context.Context, runID uin
 		claimActive := state.PublishingRunID != 0 && state.PublishingLeaseExpiresAt != nil && state.PublishingLeaseExpiresAt.After(leaseNow)
 		claimOwned := state.PublishingRunID == run.ID && state.PublishingLeaseToken == runLeaseToken
 		if claimActive && !claimOwned {
-			return reviewworkflow.ErrPublicationLeased
+			return &reviewworkflow.LeaseConflict{Cause: reviewworkflow.ErrPublicationLeased, Until: *state.PublishingLeaseExpiresAt}
 		}
 		if err := transaction.Model(&model.PullRequestState{}).Where("id = ?", state.ID).Updates(map[string]any{
 			"publishing_run_id":           run.ID,

@@ -39,6 +39,7 @@ func (r *SummaryPublicationRepository) ClaimSummaryPublication(ctx context.Conte
 	}
 	claim := publication.Claim{LeaseToken: leaseToken}
 	leased := false
+	leaseRetryAt := time.Time{}
 	err = r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
 		state := model.PullRequestState{
 			Owner:      target.Owner,
@@ -80,30 +81,7 @@ func (r *SummaryPublicationRepository) ClaimSummaryPublication(ctx context.Conte
 			return fmt.Errorf("요약 게시 lifecycle이 이미 만료되었습니다")
 		}
 		if active {
-			if !summaryPublicationIsSame(state, operationKey, orderKey, observedAt) {
-				externalCalls := state.SummaryExternalCalls
-				if !sameOperation {
-					externalCalls = 0
-				}
-				values := map[string]any{
-					"summary_operation_key":  operationKey,
-					"summary_order_key":      orderKey,
-					"summary_observed_at":    observedAt,
-					"summary_expires_at":     lifecycleExpiresAt,
-					"summary_external_calls": externalCalls,
-					"updated_at":             claimedAt,
-				}
-				if !sameOperation {
-					mergeValues(values, summaryCompletionResetValues())
-				}
-				updated := transaction.Model(&model.PullRequestState{}).Where("id = ?", state.ID).Updates(values)
-				if updated.Error != nil {
-					return updated.Error
-				}
-				if updated.RowsAffected != 1 {
-					return publication.ErrLeaseLost
-				}
-			}
+			leaseRetryAt = *state.SummaryLeaseExpiresAt
 			leased = true
 			claim = publication.Claim{}
 			return nil
@@ -112,6 +90,7 @@ func (r *SummaryPublicationRepository) ClaimSummaryPublication(ctx context.Conte
 		if !sameOperation {
 			externalCalls = 0
 		}
+		claim.ExternalCalls = externalCalls
 		values := map[string]any{
 			"summary_operation_key":    operationKey,
 			"summary_order_key":        orderKey,
@@ -139,7 +118,7 @@ func (r *SummaryPublicationRepository) ClaimSummaryPublication(ctx context.Conte
 		return publication.Claim{}, fmt.Errorf("요약 게시 권한을 얻지 못했습니다: %w", err)
 	}
 	if leased {
-		return publication.Claim{}, fmt.Errorf("요약 게시 권한을 얻지 못했습니다: %w", publication.ErrLeased)
+		return publication.Claim{}, fmt.Errorf("요약 게시 권한을 얻지 못했습니다: %w", &publication.LeaseConflict{Until: leaseRetryAt})
 	}
 	return claim, nil
 }
@@ -150,18 +129,56 @@ func mergeValues(target map[string]any, values map[string]any) {
 	}
 }
 
-func (r *SummaryPublicationRepository) ReserveSummaryExternalCall(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, limit int) (bool, error) {
+func (r *SummaryPublicationRepository) ReserveSummaryExternalCall(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, limit int, reservedAt time.Time, leaseExpiresAt time.Time) (bool, error) {
 	if limit < 1 {
 		return false, nil
 	}
-	updated := r.database.WithContext(ctx).Model(&model.PullRequestState{}).
-		Where("owner = ? AND repository = ? AND number = ?", target.Owner, target.Repository, target.Number).
-		Where("summary_operation_key = ? AND summary_publishing_key = ? AND summary_lease_token = ? AND summary_lease_expires_at > CURRENT_TIMESTAMP AND summary_expires_at > CURRENT_TIMESTAMP AND COALESCE(summary_external_calls, 0) < ?", operationKey, operationKey, leaseToken, limit).
-		UpdateColumn("summary_external_calls", gorm.Expr("COALESCE(summary_external_calls, 0) + 1"))
-	if updated.Error != nil {
-		return false, fmt.Errorf("요약 외부 호출 예산을 예약하지 못했습니다: %w", updated.Error)
+	if reservedAt.IsZero() || !leaseExpiresAt.After(reservedAt) {
+		return false, fmt.Errorf("요약 외부 호출 lease 시각이 유효하지 않습니다")
 	}
-	return updated.RowsAffected == 1, nil
+	reserved := false
+	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		var state model.PullRequestState
+		err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("owner = ? AND repository = ? AND number = ?", target.Owner, target.Repository, target.Number).
+			First(&state).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return publication.ErrLeaseLost
+		}
+		if err != nil {
+			return err
+		}
+		leaseCurrentAt, err := databaseTime(transaction)
+		if err != nil {
+			return err
+		}
+		if !validSummaryPublicationLease(state, operationKey, leaseToken, leaseCurrentAt) {
+			return summaryPublicationLeaseStateError(state, operationKey)
+		}
+		if state.SummaryExternalCalls >= limit {
+			return nil
+		}
+		nextLeaseExpiresAt := leaseExpiresAt
+		if state.SummaryExpiresAt != nil && nextLeaseExpiresAt.After(*state.SummaryExpiresAt) {
+			nextLeaseExpiresAt = *state.SummaryExpiresAt
+		}
+		updated := transaction.Model(&model.PullRequestState{}).Where("id = ?", state.ID).Updates(map[string]any{
+			"summary_external_calls":   state.SummaryExternalCalls + 1,
+			"summary_lease_expires_at": nextLeaseExpiresAt,
+		})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return publication.ErrLeaseLost
+		}
+		reserved = true
+		return nil
+	})
+	if err != nil {
+		return false, fmt.Errorf("요약 외부 호출 예산을 예약하지 못했습니다: %w", err)
+	}
+	return reserved, nil
 }
 
 func (r *SummaryPublicationRepository) SummaryCompletion(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, inputHash string, currentAt time.Time) (publication.CompletionCheckpoint, bool, error) {
@@ -186,7 +203,7 @@ func (r *SummaryPublicationRepository) SummaryCompletion(ctx context.Context, ta
 			return err
 		}
 		if !validSummaryPublicationLease(state, operationKey, leaseToken, leaseCurrentAt) {
-			return publication.ErrLeaseLost
+			return summaryPublicationLeaseStateError(state, operationKey)
 		}
 		checkpoint = summaryCompletionCheckpoint(state)
 		if state.SummaryResultInputHash != inputHash || state.SummaryResultCompletedAt == nil {
@@ -225,7 +242,7 @@ func (r *SummaryPublicationRepository) RecordSummaryCompletionAttempt(ctx contex
 			return err
 		}
 		if !validSummaryPublicationLease(state, operationKey, leaseToken, leaseCurrentAt) {
-			return publication.ErrLeaseLost
+			return summaryPublicationLeaseStateError(state, operationKey)
 		}
 		aggregate = aggregateCompletionAttempt(summaryCompletionCheckpoint(state), response, false)
 		updated := transaction.Model(&model.PullRequestState{}).Where("id = ?", state.ID).Updates(summaryCompletionMetadataValues(aggregate, recordedAt))
@@ -264,7 +281,7 @@ func (r *SummaryPublicationRepository) SaveSummaryCompletion(ctx context.Context
 			return err
 		}
 		if !validSummaryPublicationLease(state, operationKey, leaseToken, leaseCurrentAt) {
-			return publication.ErrLeaseLost
+			return summaryPublicationLeaseStateError(state, operationKey)
 		}
 		response := llm.Response{
 			Provider:       checkpoint.Provider,
@@ -311,7 +328,7 @@ func (r *SummaryPublicationRepository) RenewSummaryPublication(ctx context.Conte
 		return fmt.Errorf("요약 게시 lease를 갱신하지 못했습니다: %w", updated.Error)
 	}
 	if updated.RowsAffected != 1 {
-		return publication.ErrLeaseLost
+		return r.summaryPublicationLeaseError(ctx, target, operationKey)
 	}
 	return nil
 }
@@ -332,7 +349,7 @@ func (r *SummaryPublicationRepository) CompleteSummaryPublication(ctx context.Co
 		return fmt.Errorf("요약 게시 완료를 저장하지 못했습니다: %w", updated.Error)
 	}
 	if updated.RowsAffected != 1 {
-		return publication.ErrLeaseLost
+		return r.summaryPublicationLeaseError(ctx, target, operationKey)
 	}
 	return nil
 }
@@ -371,16 +388,34 @@ func summaryPublicationIsNewer(state model.PullRequestState, operationKey string
 	return state.SummaryOperationKey > operationKey
 }
 
-func summaryPublicationIsSame(state model.PullRequestState, operationKey string, orderKey string, observedAt time.Time) bool {
-	return state.SummaryObservedAt != nil && state.SummaryObservedAt.Equal(observedAt) && state.SummaryOrderKey == orderKey && state.SummaryOperationKey == operationKey
-}
-
 func validSummaryPublicationLease(state model.PullRequestState, operationKey string, leaseToken string, currentAt time.Time) bool {
 	return state.SummaryOperationKey == operationKey &&
 		state.SummaryPublishingKey == operationKey &&
 		state.SummaryLeaseToken == leaseToken &&
 		state.SummaryLeaseExpiresAt != nil && state.SummaryLeaseExpiresAt.After(currentAt) &&
 		state.SummaryExpiresAt != nil && state.SummaryExpiresAt.After(currentAt)
+}
+
+func summaryPublicationLeaseStateError(state model.PullRequestState, operationKey string) error {
+	if state.SummaryOperationKey != "" && state.SummaryOperationKey != operationKey {
+		return publication.ErrSuperseded
+	}
+	return publication.ErrLeaseLost
+}
+
+func (r *SummaryPublicationRepository) summaryPublicationLeaseError(ctx context.Context, target pullrequest.Target, operationKey string) error {
+	var state model.PullRequestState
+	err := r.database.WithContext(ctx).
+		Select("summary_operation_key").
+		Where("owner = ? AND repository = ? AND number = ?", target.Owner, target.Repository, target.Number).
+		First(&state).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return publication.ErrLeaseLost
+	}
+	if err != nil {
+		return err
+	}
+	return summaryPublicationLeaseStateError(state, operationKey)
 }
 
 func summaryCompletionCheckpoint(state model.PullRequestState) publication.CompletionCheckpoint {

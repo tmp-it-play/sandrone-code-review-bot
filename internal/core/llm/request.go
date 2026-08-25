@@ -4,6 +4,7 @@ type Request struct {
 	Messages              []Message
 	Temperature           float64
 	MaxOutputTokens       int
+	RequiredOutputTokens  int
 	Tools                 []Tool
 	ForceJSON             bool
 	Providers             []string
@@ -12,6 +13,7 @@ type Request struct {
 	DataClassification    DataClassification
 	ExternalCallBudget    *ExternalCallBudget
 	RequireCompletePrompt bool
+	FailFastOnIncomplete  bool
 	ResponseValidation    ResponseValidation
 }
 

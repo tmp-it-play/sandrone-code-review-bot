@@ -26,15 +26,6 @@ func NewExternalCallBudget(limit int) *ExternalCallBudget {
 	return &ExternalCallBudget{limit: int64(limit), takeLimit: int64(limit)}
 }
 
-func NewDurableExternalCallBudget(limit int, reserve func() bool) *ExternalCallBudget {
-	return NewScopedDurableExternalCallBudget(limit, 0, limit, func() error {
-		if reserve == nil || !reserve() {
-			return ErrExternalCallBudgetExhausted
-		}
-		return nil
-	})
-}
-
 func NewScopedDurableExternalCallBudget(limit int, used int, takeLimit int, reserve func() error) *ExternalCallBudget {
 	budget := NewExternalCallBudget(limit)
 	if used < 0 {

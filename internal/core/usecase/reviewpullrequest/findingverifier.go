@@ -2,6 +2,7 @@ package reviewpullrequest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -81,6 +82,16 @@ func (v *findingVerifier) verify(ctx context.Context, input findingVerification)
 	response, err := v.deps.completer.Complete(ctx, request, nil)
 	response.Content = v.deps.masker.Mask(response.Content)
 	if err != nil {
+		if errors.Is(err, llm.ErrExternalCallBudgetUnavailable) {
+			aggregate, recordErr := v.recordAttempt(ctx, input.runID, input.runLease, inputHash, response)
+			result.findings = input.findings
+			result.response = aggregate
+			result.used = true
+			if recordErr != nil {
+				return result, errors.Join(err, fmt.Errorf("finding verifier 시도를 저장하지 못했습니다: %w", recordErr))
+			}
+			return result, err
+		}
 		v.deps.logger.Warn("독립 finding verifier를 완료하지 못해 결정론적 검증 결과를 사용합니다", "error", v.deps.masker.Mask(err.Error()))
 		return v.unavailableResult(ctx, input, inputHash, response)
 	}

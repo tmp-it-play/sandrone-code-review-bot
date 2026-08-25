@@ -64,7 +64,7 @@ func (r *ReplyPublicationRepository) ClaimReplyPublication(ctx context.Context, 
 		}
 		active := !expired && entry.LeaseToken != "" && entry.LeaseExpiresAt != nil && entry.LeaseExpiresAt.After(claimCurrentAt)
 		if active {
-			return publication.ErrLeased
+			return &publication.LeaseConflict{Until: *entry.LeaseExpiresAt}
 		}
 		lifecycleExpiresAt := expiresAt
 		if !expired {
@@ -81,6 +81,7 @@ func (r *ReplyPublicationRepository) ClaimReplyPublication(ctx context.Context, 
 		if expired {
 			externalCalls = 0
 		}
+		claim.ExternalCalls = externalCalls
 		values := map[string]any{
 			"lease_token":      leaseToken,
 			"lease_expires_at": lifecycleLeaseExpiresAt,
@@ -107,17 +108,54 @@ func (r *ReplyPublicationRepository) ClaimReplyPublication(ctx context.Context, 
 	return claim, nil
 }
 
-func (r *ReplyPublicationRepository) ReserveReplyExternalCall(ctx context.Context, operationKey string, leaseToken string, limit int) (bool, error) {
+func (r *ReplyPublicationRepository) ReserveReplyExternalCall(ctx context.Context, operationKey string, leaseToken string, limit int, reservedAt time.Time, leaseExpiresAt time.Time) (bool, error) {
 	if limit < 1 {
 		return false, nil
 	}
-	updated := r.database.WithContext(ctx).Model(&model.ReplyPublication{}).
-		Where("operation_key = ? AND lease_token = ? AND completed_at IS NULL AND lease_expires_at > CURRENT_TIMESTAMP AND expires_at > CURRENT_TIMESTAMP AND COALESCE(external_calls, 0) < ?", operationKey, leaseToken, limit).
-		UpdateColumn("external_calls", gorm.Expr("COALESCE(external_calls, 0) + 1"))
-	if updated.Error != nil {
-		return false, fmt.Errorf("답글 외부 호출 예산을 예약하지 못했습니다: %w", updated.Error)
+	if reservedAt.IsZero() || !leaseExpiresAt.After(reservedAt) {
+		return false, fmt.Errorf("답글 외부 호출 lease 시각이 유효하지 않습니다")
 	}
-	return updated.RowsAffected == 1, nil
+	reserved := false
+	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		var entry model.ReplyPublication
+		err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).Where("operation_key = ?", operationKey).First(&entry).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return publication.ErrLeaseLost
+		}
+		if err != nil {
+			return err
+		}
+		leaseCurrentAt, err := databaseTime(transaction)
+		if err != nil {
+			return err
+		}
+		if !validReplyPublicationLease(entry, leaseToken, leaseCurrentAt) {
+			return publication.ErrLeaseLost
+		}
+		if entry.ExternalCalls >= limit {
+			return nil
+		}
+		nextLeaseExpiresAt := leaseExpiresAt
+		if nextLeaseExpiresAt.After(entry.ExpiresAt) {
+			nextLeaseExpiresAt = entry.ExpiresAt
+		}
+		updated := transaction.Model(&model.ReplyPublication{}).Where("id = ?", entry.ID).Updates(map[string]any{
+			"external_calls":   entry.ExternalCalls + 1,
+			"lease_expires_at": nextLeaseExpiresAt,
+		})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return publication.ErrLeaseLost
+		}
+		reserved = true
+		return nil
+	})
+	if err != nil {
+		return false, fmt.Errorf("답글 외부 호출 예산을 예약하지 못했습니다: %w", err)
+	}
+	return reserved, nil
 }
 
 func (r *ReplyPublicationRepository) ReplyCompletion(ctx context.Context, operationKey string, leaseToken string, inputHash string, currentAt time.Time) (publication.CompletionCheckpoint, bool, error) {

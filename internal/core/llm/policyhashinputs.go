@@ -10,7 +10,9 @@ type PolicyHashInputs struct {
 	MaxExternalCalls      int
 	MaxToolRounds         int
 	MaxTransientRetries   int
+	RequiredOutputTokens  int
 	ForceJSON             bool
 	RequireCompletePrompt bool
+	FailFastOnIncomplete  bool
 	ResponseValidation    ResponseValidation
 }

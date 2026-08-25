@@ -250,8 +250,8 @@ func NewApplication(config Config) (*Application, error) {
 	asynqServer := asynq.NewServer(redisOptions, asynq.Config{
 		Concurrency:     config.WorkerConcurrency,
 		ShutdownTimeout: asynqShutdownTimeout,
-		RetryDelayFunc: asynq.RetryDelayFunc(func(attempt int, _ error, _ *asynq.Task) time.Duration {
-			return retryDelay(attempt)
+		RetryDelayFunc: asynq.RetryDelayFunc(func(attempt int, cause error, _ *asynq.Task) time.Duration {
+			return retryDelayFor(attempt, cause, time.Now())
 		}),
 		Logger: newQueueLogger(logger),
 	})

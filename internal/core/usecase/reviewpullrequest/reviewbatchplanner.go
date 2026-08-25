@@ -20,6 +20,7 @@ type reviewBatchPlanner struct {
 	ToolsAllowed      bool
 	ProviderLimit     int
 	MaxReviewBatches  int
+	RoutePolicy       reviewRoutePolicy
 	Mask              func(string) string
 	Paths             *promptPathMap
 }
@@ -53,8 +54,8 @@ func (p reviewBatchPlanner) Build(files []pullrequest.ChangedFile) (batching.Pla
 		plan.Batches = append(plan.Batches, current)
 	}
 	if p.MaxReviewBatches > 0 && len(plan.Batches) > p.MaxReviewBatches {
-		for _, batch := range plan.Batches[p.MaxReviewBatches:] {
-			plan.Overflow = append(plan.Overflow, batch...)
+		for _, overflow := range plan.Batches[p.MaxReviewBatches:] {
+			plan.Overflow = append(plan.Overflow, overflow...)
 		}
 		plan.Batches = plan.Batches[:p.MaxReviewBatches]
 	}
@@ -62,6 +63,7 @@ func (p reviewBatchPlanner) Build(files []pullrequest.ChangedFile) (batching.Pla
 }
 
 func (p reviewBatchPlanner) Messages(files []pullrequest.ChangedFile, config setting.RepoConfig) []llm.Message {
+	batchPolicy := p.RoutePolicy.BatchPolicy(files, p.includeFileNotes())
 	return prompt.ReviewPrompt{
 		Context: prompt.Context{
 			PullRequest:  p.PullRequest,
@@ -74,6 +76,7 @@ func (p reviewBatchPlanner) Messages(files []pullrequest.ChangedFile, config set
 		Extra:            p.Extra,
 		ToolsAllowed:     p.ToolsAllowed,
 		IncludeFileNotes: p.includeFileNotes(),
+		MaxFindings:      batchPolicy.MaxFindings,
 	}.Messages()
 }
 
@@ -101,7 +104,7 @@ func (p reviewBatchPlanner) promptConfig() (setting.RepoConfig, int) {
 
 func (p reviewBatchPlanner) fixedCost(config setting.RepoConfig) int {
 	context := prompt.Context{Config: config}
-	messages := prompt.ReviewPrompt{Context: context, Extra: p.Extra, ToolsAllowed: p.ToolsAllowed, IncludeFileNotes: p.includeFileNotes()}.Messages()
+	messages := prompt.ReviewPrompt{Context: context, Extra: p.Extra, ToolsAllowed: p.ToolsAllowed, IncludeFileNotes: p.includeFileNotes(), MaxFindings: p.RoutePolicy.maximumFindings}.Messages()
 	fixed := messagesSize(messages) - len(context.Render())
 	if p.ToolsAllowed {
 		fixed += toolPromptReserve
@@ -118,7 +121,11 @@ func (p reviewBatchPlanner) includeFileNotes() bool {
 }
 
 func (p reviewBatchPlanner) fits(files []pullrequest.ChangedFile, config setting.RepoConfig, limit int) bool {
-	return limit <= 0 || messagesSize(p.Messages(files, config)) <= limit
+	promptSize := messagesSize(p.Messages(files, config))
+	if p.RoutePolicy.ShouldSplit(files, promptSize, p.includeFileNotes()) {
+		return false
+	}
+	return limit <= 0 || promptSize <= limit
 }
 
 func (p reviewBatchPlanner) fitSingle(file pullrequest.ChangedFile, config setting.RepoConfig, limit int) (pullrequest.ChangedFile, bool) {

@@ -17,6 +17,8 @@ type UnitResult struct {
 	Review         review.Result
 	ToolExecutions int
 	Reused         bool
+	Retryable      bool
+	RetryAt        time.Time
 	Error          string
 	FinishedAt     time.Time
 }

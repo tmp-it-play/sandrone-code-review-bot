@@ -8,6 +8,7 @@ type CoverageItem struct {
 	ReviewRun        ReviewRun   `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
 	ReviewUnitID     *uint64     `gorm:"index"`
 	ReviewUnit       *ReviewUnit `gorm:"constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
+	InitialUnitHash  string      `gorm:"size:64;not null;default:'';index"`
 	CoverageKey      string      `gorm:"size:64;uniqueIndex:idx_coverage_item_key,priority:2"`
 	Kind             string      `gorm:"size:30"`
 	Path             string      `gorm:"size:500"`

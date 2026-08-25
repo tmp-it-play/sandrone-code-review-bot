@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func registerLatestRun(transaction *gorm.DB, run model.ReviewRun, registeredAt time.Time) (bool, bool, error) {
+func registerLatestRun(transaction *gorm.DB, run model.ReviewRun, registeredAt time.Time) (bool, time.Time, error) {
 	var snapshotObservedAt *time.Time
 	if !run.SnapshotObservedAt.IsZero() {
 		snapshotObservedAt = &run.SnapshotObservedAt
@@ -27,14 +27,14 @@ func registerLatestRun(transaction *gorm.DB, run model.ReviewRun, registeredAt t
 		UpdatedAt:        registeredAt,
 	}
 	if err := transaction.Clauses(clause.OnConflict{DoNothing: true}).Create(&state).Error; err != nil {
-		return false, false, err
+		return false, time.Time{}, err
 	}
 	state = model.PullRequestState{}
 	if err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).Where("owner = ? AND repository = ? AND number = ?", run.Owner, run.Repository, run.Number).First(&state).Error; err != nil {
-		return false, false, err
+		return false, time.Time{}, err
 	}
 	if latestRunIsNewer(state, run) {
-		return false, false, nil
+		return false, time.Time{}, nil
 	}
 	latestRunAt := registeredAt
 	if state.LatestRunID == run.ID && state.LatestRunAt != nil {
@@ -52,13 +52,13 @@ func registerLatestRun(transaction *gorm.DB, run model.ReviewRun, registeredAt t
 				"updated_at":         registeredAt,
 			})
 			if updated.Error != nil {
-				return false, false, updated.Error
+				return false, time.Time{}, updated.Error
 			}
 			if updated.RowsAffected != 1 {
-				return false, false, reviewworkflow.ErrPublicationLeased
+				return false, time.Time{}, reviewworkflow.ErrPublicationLeased
 			}
 		}
-		return false, true, nil
+		return false, *state.PublishingLeaseExpiresAt, nil
 	}
 	err := transaction.Model(&model.PullRequestState{}).Where("id = ?", state.ID).Updates(map[string]any{
 		"latest_run_id":               run.ID,
@@ -72,7 +72,7 @@ func registerLatestRun(transaction *gorm.DB, run model.ReviewRun, registeredAt t
 		"publishing_lease_expires_at": nil,
 		"updated_at":                  registeredAt,
 	}).Error
-	return err == nil, false, err
+	return err == nil, time.Time{}, err
 }
 
 func latestRunIsNewer(state model.PullRequestState, run model.ReviewRun) bool {

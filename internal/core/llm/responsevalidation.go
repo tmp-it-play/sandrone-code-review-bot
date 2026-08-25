@@ -9,3 +9,5 @@ type ResponseValidation struct {
 const ResponseValidationReviewResult = "review-result-v1"
 
 const ResponseValidationSummaryResult = "summary-result-v1"
+
+const ResponseValidationNonEmpty = "non-empty-v1"

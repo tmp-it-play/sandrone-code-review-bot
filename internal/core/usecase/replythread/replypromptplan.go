@@ -19,7 +19,7 @@ type replyPromptPlan struct {
 func (u *UseCase) buildReplyPromptPlan(request pullrequest.PullRequest, conversation thread.Thread, source string, sourceTruncated bool, config setting.RepoConfig, extra string, completionRequest llm.Request) (replyPromptPlan, error) {
 	budget := u.deps.Completer.PromptBudgetFor(completionRequest)
 	if budget <= 0 {
-		return replyPromptPlan{}, fmt.Errorf("답글에 사용할 수 있는 LLM 입력 한도가 없습니다")
+		return replyPromptPlan{}, fmt.Errorf("%w: 답글에 사용할 수 있는 LLM 입력 한도가 없습니다", llm.ErrPromptCapacity)
 	}
 	if config.MaxPromptChars > 0 && config.MaxPromptChars < budget {
 		budget = config.MaxPromptChars
@@ -57,7 +57,7 @@ func (u *UseCase) buildReplyPromptPlan(request pullrequest.PullRequest, conversa
 		bounded.Messages = []thread.Message{latest}
 	}
 	if !u.replyMessagesFit(request, bounded, source, sourceTruncated, config, replyPlanExtra(extra, omitted), budget) {
-		return replyPromptPlan{}, fmt.Errorf("최신 대화와 현재 소스가 답글 입력 한도 %d자를 넘었습니다", budget)
+		return replyPromptPlan{}, fmt.Errorf("%w: 최신 대화와 현재 소스가 답글 입력 한도 %d자를 넘었습니다", llm.ErrPromptCapacity, budget)
 	}
 	for index := len(originalMessages) - 2; index >= 0; index-- {
 		candidate := bounded
@@ -71,7 +71,7 @@ func (u *UseCase) buildReplyPromptPlan(request pullrequest.PullRequest, conversa
 	}
 	messages := u.replyMessages(request, bounded, source, sourceTruncated, config, replyPlanExtra(extra, omitted))
 	if llm.MessagesSize(messages) > budget {
-		return replyPromptPlan{}, fmt.Errorf("답글 프롬프트가 입력 한도 %d자를 넘었습니다", budget)
+		return replyPromptPlan{}, fmt.Errorf("%w: 답글 프롬프트가 입력 한도 %d자를 넘었습니다", llm.ErrPromptCapacity, budget)
 	}
 	return replyPromptPlan{Messages: messages}, nil
 }

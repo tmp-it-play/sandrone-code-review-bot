@@ -49,8 +49,8 @@ func LoadConfig() (Config, error) {
 		RedisDatabase:     number("REDIS_DB", 0),
 		WorkerConcurrency: number("SANDRONE_WORKER_CONCURRENCY", 2),
 		ProviderCooldown:  duration("SANDRONE_PROVIDER_COOLDOWN", 15*time.Minute),
-		RequestTimeout:    duration("SANDRONE_REQUEST_TIMEOUT", 5*time.Minute),
-		LLMMaxCalls:       boundedNumber("SANDRONE_LLM_MAX_CALLS_PER_OPERATION", 12, 1, 12),
+		RequestTimeout:    requestTimeout(),
+		LLMMaxCalls:       boundedNumber("SANDRONE_LLM_MAX_CALLS_PER_OPERATION", 24, 1, 24),
 		DashboardUsername: os.Getenv("DASHBOARD_USERNAME"),
 		DashboardPassword: os.Getenv("DASHBOARD_PASSWORD"),
 		DashboardSecret:   os.Getenv("DASHBOARD_SESSION_SECRET"),
@@ -119,6 +119,15 @@ func deliveryRetention() time.Duration {
 	configured := duration("SANDRONE_DELIVERY_RETENTION", minimum)
 	if configured < minimum {
 		return minimum
+	}
+	return configured
+}
+
+func requestTimeout() time.Duration {
+	const maximum = 5 * time.Minute
+	configured := duration("SANDRONE_REQUEST_TIMEOUT", maximum)
+	if configured > maximum {
+		return maximum
 	}
 	return configured
 }

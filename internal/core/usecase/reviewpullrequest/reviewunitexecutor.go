@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
@@ -51,19 +50,89 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 		result.externalCalls = externalCalls
 		result.budgetExhausted = externalCalls >= input.reviewerCallLimit
 	}
+	restoreCheckpoint := func(unit reviewworkflow.Unit) {
+		usage = usage.Add(llm.Usage{
+			PromptTokens:     unit.PromptTokens,
+			CompletionTokens: unit.CompletionTokens,
+			TotalTokens:      unit.TotalTokens,
+		})
+		toolExecutions += unit.ToolExecutions
+		trackReviewModel(result.modelsUsed, unit.Provider, unit.Model)
+		if unit.MultipleModels || unit.Provider == "multiple" || unit.Model == "multiple" {
+			result.multipleModels = true
+		}
+		if unit.Provider != "" || unit.Model != "" {
+			response.Provider = unit.Provider
+			response.Model = unit.Model
+			response.ModelLabel = ""
+			if unit.MultipleModels {
+				response.ModelLabel = "복수 모델"
+			}
+		}
+		captureResponse()
+	}
 	fail := func(message string, cause error) (reviewUnitExecutionResult, error) {
 		captureResponse()
 		result.errorMessage = message
 		return result, cause
 	}
-	units, err := e.deps.execution.SavePlan(ctx, input.runID, input.runLease, input.units, input.coverage, e.deps.clock.Now())
+	planSnapshot, err := e.deps.execution.SavePlan(ctx, input.runID, input.runLease, input.units, input.coverage, e.deps.clock.Now())
 	if err != nil {
 		return fail("리뷰 실행 계획을 저장하지 못했습니다", err)
 	}
-	input.units = units
-	reserveExternalCall := func(limit int) func() error {
-		return func() error {
-			reserved, reserveErr := e.deps.execution.ReserveExternalCall(ctx, input.runID, input.runLease, limit)
+	for _, splitUnit := range planSnapshot.SplitUnits {
+		usage = usage.Add(llm.Usage{
+			PromptTokens:     splitUnit.PromptTokens,
+			CompletionTokens: splitUnit.CompletionTokens,
+			TotalTokens:      splitUnit.TotalTokens,
+		})
+		toolExecutions += splitUnit.ToolExecutions
+		trackReviewModel(result.modelsUsed, splitUnit.Provider, splitUnit.Model)
+		if splitUnit.MultipleModels || splitUnit.Provider == "multiple" || splitUnit.Model == "multiple" {
+			result.multipleModels = true
+		}
+		if splitUnit.Provider != "" || splitUnit.Model != "" {
+			response.Provider = splitUnit.Provider
+			response.Model = splitUnit.Model
+		}
+	}
+	captureResponse()
+	workPlanner := newReviewUnitWorkPlanner(input.plan, input.coverage)
+	works, err := workPlanner.Build(planSnapshot.Leaves)
+	if err != nil {
+		return fail("저장된 리뷰 실행 계획을 복원하지 못했습니다", err)
+	}
+	batchNumber := 0
+	reservedRetryCalls := 0
+	for len(works) > 0 {
+		work := works[0]
+		works = works[1:]
+		batchNumber++
+		batch := work.files
+		unit := work.unit
+		futureReviewCalls := reservedRetryCalls
+		for _, future := range works {
+			if future.reservesCall() {
+				futureReviewCalls++
+			}
+		}
+		unitCallLimit := input.reviewerCallLimit - futureReviewCalls
+		if unitCallLimit < 0 {
+			unitCallLimit = 0
+		}
+		unitLeaseToken := ""
+		reserveExternalCall := func() error {
+			heartbeatAt := e.deps.clock.Now()
+			reserved, reserveErr := e.deps.execution.ReserveExternalCall(ctx, reviewworkflow.ExternalCallReservation{
+				RunID:              input.runID,
+				RunLeaseToken:      input.runLease,
+				UnitHash:           unit.Hash,
+				UnitLeaseToken:     unitLeaseToken,
+				Limit:              unitCallLimit,
+				HeartbeatAt:        heartbeatAt,
+				RunLeaseExpiresAt:  heartbeatAt.Add(reviewRunLease),
+				UnitLeaseExpiresAt: heartbeatAt.Add(reviewRunLease),
+			})
 			if reserveErr != nil {
 				return reserveErr
 			}
@@ -72,32 +141,15 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			}
 			return nil
 		}
-	}
-	for index, batch := range input.plan.Batches {
-		unit := input.units[index]
-		futureReviewCalls := 0
-		for futureIndex := index + 1; futureIndex < len(input.units); futureIndex++ {
-			if input.units[futureIndex].Status != reviewworkflow.UnitStatusSucceeded {
-				futureReviewCalls++
-			}
-		}
-		unitCallLimit := input.reviewerCallLimit - futureReviewCalls
-		if unitCallLimit < 0 {
-			unitCallLimit = 0
-		}
-		unitBudget := llm.NewScopedDurableExternalCallBudget(input.maxCalls, externalCalls, unitCallLimit, reserveExternalCall(unitCallLimit))
+		unitBudget := llm.NewScopedDurableExternalCallBudget(input.maxCalls, externalCalls, unitCallLimit, reserveExternalCall)
 		messages := llm.MaskMessages(input.planner.Messages(batch, input.promptConfig), e.deps.masker.Mask)
 		batchRequest := input.request.WithMessages(messages)
+		batchPolicy := input.planner.RoutePolicy.BatchPolicy(batch, input.includeFileNotes)
+		batchRequest.MaxOutputTokens = batchPolicy.MaxOutputTokens
+		batchRequest.RequiredOutputTokens = batchPolicy.RequiredOutputTokens
+		canSplit := workPlanner.CanSplit(work, input.planner.RoutePolicy)
+		batchRequest.FailFastOnIncomplete = false
 		batchRequest.ExternalCallBudget = unitBudget
-		promptFiles := input.planner.maskedFiles(batch)
-		if input.includeFileNotes {
-			batchRequest.ResponseValidation.RequiredPaths = make([]string, 0, len(promptFiles))
-			for _, file := range promptFiles {
-				batchRequest.ResponseValidation.RequiredPaths = append(batchRequest.ResponseValidation.RequiredPaths, file.Path)
-			}
-			sort.Strings(batchRequest.ResponseValidation.RequiredPaths)
-		}
-		batchRequest.ResponseValidation.Validator = reviewGroundingValidator(promptFiles, input.config.MinSeverity, e.deps.masker.Mask)
 		executor := e.toolExecutor(input.target, input.config.MaxExtraReads, input.paths)
 		var toolDefinitions []llm.Tool
 		if executor != nil {
@@ -108,10 +160,48 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			return fail("리뷰 unit 입력 hash를 만들지 못했습니다", err)
 		}
 		unitStartedAt := e.deps.clock.Now()
+		if work.terminalFailure(inputHash) {
+			restoreCheckpoint(unit)
+			transitionCoverage(input.coverage, unit.Hash, reviewworkflow.CoverageStatusFailed, nil)
+			result.failed = append(result.failed, batch...)
+			e.deps.logger.Info("결정적으로 실패한 리뷰 unit을 다시 호출하지 않습니다", "target", input.target.Reference(), "batch", batchNumber, "unit", unit.OrderKey)
+			continue
+		}
+		if work.terminalDeferred(inputHash) {
+			restoreCheckpoint(unit)
+			transitionCoverage(input.coverage, unit.Hash, reviewworkflow.CoverageStatusDeferred, nil)
+			e.deps.logger.Info("호출 예산으로 보류된 리뷰 unit을 다시 호출하지 않습니다", "target", input.target.Reference(), "batch", batchNumber, "unit", unit.OrderKey)
+			continue
+		}
+		if work.deferredRetry(inputHash, unitStartedAt) {
+			restoreCheckpoint(unit)
+			transitionCoverage(input.coverage, unit.Hash, reviewworkflow.CoverageStatusFailed, nil)
+			result.failed = append(result.failed, batch...)
+			result.retryable = true
+			reservedRetryCalls++
+			if result.retryAt.IsZero() || unit.RetryAt.Before(result.retryAt) {
+				result.retryAt = *unit.RetryAt
+			}
+			e.deps.logger.Info("리뷰 unit 재시도 시각까지 호출을 보류합니다", "target", input.target.Reference(), "batch", batchNumber, "unit", unit.OrderKey, "retry_at", unit.RetryAt)
+			continue
+		}
 		claim, err := e.deps.execution.StartUnit(ctx, input.runID, input.runLease, unit.Hash, inputHash, unitStartedAt, unitStartedAt.Add(reviewUnitLease))
 		if err != nil {
 			return fail("리뷰 unit을 시작하지 못했습니다", err)
 		}
+		if claim.Waiting {
+			restoreCheckpoint(unit)
+			transitionCoverage(input.coverage, unit.Hash, reviewworkflow.CoverageStatusFailed, nil)
+			result.failed = append(result.failed, batch...)
+			result.retryable = true
+			reservedRetryCalls++
+			if result.retryAt.IsZero() || claim.Result.RetryAt.Before(result.retryAt) {
+				result.retryAt = claim.Result.RetryAt
+			}
+			e.deps.logger.Info("리뷰 unit 재시도 시각까지 호출을 보류합니다", "target", input.target.Reference(), "batch", batchNumber, "unit", unit.OrderKey, "retry_at", claim.Result.RetryAt)
+			continue
+		}
+		unitLeaseToken = claim.LeaseToken
 		if claim.Completed {
 			finishedAt := claim.Result.FinishedAt
 			if finishedAt.IsZero() {
@@ -137,7 +227,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			captureResponse()
 			transitionCoverage(input.coverage, unit.Hash, reviewworkflow.CoverageStatusReviewed, &finishedAt)
 			result.reviewed = append(result.reviewed, batch...)
-			e.deps.logger.Info("저장된 리뷰 unit 결과를 재사용했습니다", "target", input.target.Reference(), "batch", index+1, "cross_run", claim.Reused)
+			e.deps.logger.Info("저장된 리뷰 unit 결과를 재사용했습니다", "target", input.target.Reference(), "batch", batchNumber, "unit", unit.OrderKey, "cross_run", claim.Reused)
 			continue
 		}
 		usage = usage.Add(claim.Result.Usage)
@@ -154,10 +244,26 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			}
 		}
 		captureResponse()
+		if input.planner.RoutePolicy.ShouldSplit(batch, messagesSize(messages), input.includeFileNotes) && canSplit && reviewUnitRefinementFitsBudget(works, externalCalls, input.reviewerCallLimit, reservedRetryCalls) {
+			refinedAt := e.deps.clock.Now()
+			children, refined, refineErr := e.refineUnit(ctx, input, workPlanner, work, claim.LeaseToken, inputHash, reviewworkflow.UnitResult{Error: "provider_capacity_refinement"}, refinedAt)
+			if refineErr != nil {
+				return fail("리뷰 unit 용량 분할을 저장하지 못했습니다", refineErr)
+			}
+			if refined {
+				works = prependReviewUnitWorks(works, children)
+				e.deps.logger.Info("프로바이더 입력·출력 용량에 맞춰 리뷰 unit을 분할했습니다", "target", input.target.Reference(), "unit", unit.OrderKey, "children", len(children))
+				continue
+			}
+		}
 
 		batchResponse, batchErr := e.deps.completer.Complete(ctx, batchRequest, executor)
 		externalCalls = unitBudget.Used()
 		if batchErr != nil {
+			if errors.Is(batchErr, reviewworkflow.ErrRunSuperseded) {
+				return fail("더 최신인 리뷰 실행이 현재 unit을 대체했습니다", batchErr)
+			}
+			completionFailure, hasCompletionFailure := llm.AsCompletionFailure(batchErr)
 			deferredByBudget := errors.Is(batchErr, llm.ErrExternalCallBudgetExhausted) && batchResponse.Provider == ""
 			maskedBatchErr := errors.New(e.deps.masker.Mask(batchErr.Error()))
 			usage = usage.Add(batchResponse.Usage)
@@ -168,8 +274,43 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			trackReviewModel(result.modelsUsed, batchResponse.Provider, batchResponse.Model)
 			result.multipleModels = result.multipleModels || batchResponse.ModelLabel == "복수 모델"
 			captureResponse()
-			e.deps.logger.Warn("일부 배치를 리뷰하지 못했습니다", "target", input.target.Reference(), "batch", index+1, "error", maskedBatchErr)
+			e.deps.logger.Warn("일부 배치를 리뷰하지 못했습니다", "target", input.target.Reference(), "batch", batchNumber, "unit", unit.OrderKey, "error", maskedBatchErr)
 			unitFinishedAt := e.deps.clock.Now()
+			if hasCompletionFailure && completionFailure.Adaptable && reviewUnitRefinementFitsBudget(works, externalCalls, input.reviewerCallLimit, reservedRetryCalls) {
+				children, refined, refineErr := e.refineUnit(ctx, input, workPlanner, work, claim.LeaseToken, inputHash, reviewworkflow.UnitResult{
+					Provider:       batchResponse.Provider,
+					Model:          batchResponse.Model,
+					MultipleModels: batchResponse.ModelLabel == "복수 모델",
+					Usage:          batchResponse.Usage,
+					ToolExecutions: batchResponse.ToolExecutions,
+					Error:          maskedBatchErr.Error(),
+				}, unitFinishedAt)
+				if refineErr != nil {
+					return fail("실패한 리뷰 unit 분할을 저장하지 못했습니다", refineErr)
+				}
+				if refined {
+					batchResponse.Content = ""
+					response.Content = ""
+					result.response.Content = ""
+					works = prependReviewUnitWorks(works, children)
+					e.deps.logger.Info("응답 용량·형식 실패 후 리뷰 unit을 더 작게 분할했습니다", "target", input.target.Reference(), "unit", unit.OrderKey, "children", len(children))
+					continue
+				}
+			}
+			contextRetryable := errors.Is(batchErr, context.Canceled) || errors.Is(batchErr, context.DeadlineExceeded)
+			unitRetryable := contextRetryable || hasCompletionFailure && completionFailure.Retryable && !completionFailure.BudgetExhausted
+			unitRetryAt := time.Time{}
+			if unitRetryable {
+				if contextRetryable {
+					unitRetryAt = unitFinishedAt.Add(time.Minute)
+				} else {
+					unitRetryAt = completionFailure.NextAttemptAt
+				}
+				result.retryable = true
+				if result.retryAt.IsZero() || unitRetryAt.Before(result.retryAt) {
+					result.retryAt = unitRetryAt
+				}
+			}
 			unitStatus := reviewworkflow.UnitStatusFailed
 			coverageStatus := reviewworkflow.CoverageStatusFailed
 			if deferredByBudget {
@@ -184,6 +325,8 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 				MultipleModels: batchResponse.ModelLabel == "복수 모델",
 				Usage:          batchResponse.Usage,
 				ToolExecutions: batchResponse.ToolExecutions,
+				Retryable:      unitRetryable,
+				RetryAt:        unitRetryAt,
 				Error:          maskedBatchErr.Error(),
 				FinishedAt:     unitFinishedAt,
 			}); err != nil {
@@ -192,6 +335,12 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			transitionCoverage(input.coverage, unit.Hash, coverageStatus, nil)
 			if !deferredByBudget {
 				result.failed = append(result.failed, batch...)
+			}
+			if unitRetryable {
+				reservedRetryCalls++
+			}
+			if contextRetryable {
+				break
 			}
 			continue
 		}
@@ -221,10 +370,10 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 		result.response.Content = ""
 		if parseErr == nil {
 			batchResult = boundedBatchResult(batch, batchResult, input.includeFileNotes)
-			parseErr = validateBatchResult(batch, batchResult, report, input.includeFileNotes)
+			parseErr = validateBatchResult(batchResult, report)
 		}
 		if parseErr != nil {
-			e.deps.logger.Warn("일부 배치의 응답을 해석하지 못했습니다", "target", input.target.Reference(), "batch", index+1, "error", parseErr)
+			e.deps.logger.Warn("일부 배치의 응답을 해석하지 못했습니다", "target", input.target.Reference(), "batch", batchNumber, "unit", unit.OrderKey, "error", parseErr)
 			unitFinishedAt := e.deps.clock.Now()
 			if err := e.finishUnitCheckpoint(ctx, input.runID, input.runLease, unit.Hash, claim.LeaseToken, reviewworkflow.UnitResult{
 				Status:         reviewworkflow.UnitStatusFailed,
@@ -252,7 +401,8 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 		if minimumSeverityCandidates > 0 && len(batchResult.Findings) == 0 {
 			e.deps.logger.Warn("게시 기준을 충족한 지적의 diff 근거를 확정하지 못했습니다",
 				"target", input.target.Reference(),
-				"batch", index+1,
+				"batch", batchNumber,
+				"unit", unit.OrderKey,
 				"provider", batchResponse.Provider,
 				"candidates", minimumSeverityCandidates,
 				"unknown_file", batchEvidenceReport.UnknownFile,
@@ -278,7 +428,8 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 		transitionCoverage(input.coverage, unit.Hash, reviewworkflow.CoverageStatusReviewed, &unitFinishedAt)
 		e.deps.logger.Info("배치 리뷰 결과",
 			"target", input.target.Reference(),
-			"batch", index+1,
+			"batch", batchNumber,
+			"unit", unit.OrderKey,
 			"provider", batchResponse.Provider,
 			"files", len(batch),
 			"raw_findings", report.RawFindings,

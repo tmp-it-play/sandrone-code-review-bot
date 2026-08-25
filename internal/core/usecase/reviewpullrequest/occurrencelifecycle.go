@@ -12,7 +12,7 @@ const maximumLifecycleContentBytes = 1024 * 1024
 const maximumLifecycleContentReads = 32
 const maximumLifecycleRevalidations = 500
 
-func (u *UseCase) revalidateFindingOccurrences(ctx context.Context, target pullrequest.Target, files []pullrequest.ChangedFile) error {
+func (u *UseCase) revalidateFindingOccurrences(ctx context.Context, target pullrequest.Target, files []pullrequest.ChangedFile, runID uint64, runLease string) error {
 	currentPaths := make(map[string]struct{}, len(files))
 	removedPaths := make(map[string]struct{}, len(files))
 	for _, file := range files {
@@ -83,6 +83,9 @@ func (u *UseCase) revalidateFindingOccurrences(ctx context.Context, target pullr
 			}
 			contentReads++
 			content, contentErr := u.deps.Source.FileContent(ctx, target, occurrence.Path, target.HeadSHA)
+			if renewErr := u.renewReviewRun(ctx, runID, runLease); renewErr != nil {
+				return renewErr
+			}
 			state.certain = contentErr == nil && len(content) <= maximumLifecycleContentBytes
 			if state.certain {
 				state.content = u.deps.Masker.Mask(content)

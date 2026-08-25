@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -30,7 +32,10 @@ func (c *InstructionCollector) Instructions(ctx context.Context, target pullrequ
 	if len(patterns) == 0 {
 		patterns = setting.DefaultInstructionFiles()
 	}
-	paths := c.resolve(ctx, target, patterns)
+	paths, err := c.resolve(ctx, target, patterns)
+	if err != nil {
+		return instruction.Collection{}, err
+	}
 	budget := instruction.NewBudget(config.Sandrone.MaxInstructionChars)
 	collection := instruction.Collection{}
 	seen := map[string]struct{}{}
@@ -41,7 +46,10 @@ func (c *InstructionCollector) Instructions(ctx context.Context, target pullrequ
 		}
 		body, err := c.readFirst(ctx, target, path)
 		if err != nil {
-			continue
+			if errors.Is(err, outbound.ErrRepositoryContentNotFound) {
+				continue
+			}
+			return collection, fmt.Errorf("리뷰 지침 %s을 읽지 못했습니다: %w", c.masker.Mask(path), err)
 		}
 		body = c.masker.Mask(body)
 		digest := fingerprint(body)
@@ -63,7 +71,7 @@ func (c *InstructionCollector) Instructions(ctx context.Context, target pullrequ
 	return collection, nil
 }
 
-func (c *InstructionCollector) resolve(ctx context.Context, target pullrequest.Target, patterns []string) []string {
+func (c *InstructionCollector) resolve(ctx context.Context, target pullrequest.Target, patterns []string) ([]string, error) {
 	var tree []string
 	treeLoaded := false
 	resolved := make([]string, 0, len(patterns))
@@ -77,7 +85,11 @@ func (c *InstructionCollector) resolve(ctx context.Context, target pullrequest.T
 			continue
 		}
 		if !treeLoaded {
-			tree = c.listFirst(ctx, target)
+			var err error
+			tree, err = c.listFirst(ctx, target)
+			if err != nil {
+				return nil, err
+			}
 			treeLoaded = true
 		}
 		matched := make([]string, 0, 8)
@@ -95,7 +107,7 @@ func (c *InstructionCollector) resolve(ctx context.Context, target pullrequest.T
 			resolved = append(resolved, path)
 		}
 	}
-	return resolved
+	return resolved, nil
 }
 
 func fingerprint(body string) string {
@@ -111,18 +123,21 @@ func (c *InstructionCollector) readFirst(ctx context.Context, target pullrequest
 		if err == nil {
 			return body, nil
 		}
+		if !errors.Is(err, outbound.ErrRepositoryContentNotFound) {
+			return "", err
+		}
 		lastErr = err
 	}
 	return "", lastErr
 }
 
-func (c *InstructionCollector) listFirst(ctx context.Context, target pullrequest.Target) []string {
+func (c *InstructionCollector) listFirst(ctx context.Context, target pullrequest.Target) ([]string, error) {
 	for _, ref := range target.PolicyRefs() {
 		paths, err := c.content.Paths(ctx, target, ref)
 		if err == nil {
-			return paths
+			return paths, nil
 		}
-		c.logger.Warn("저장소 파일 목록을 읽지 못했습니다", "target", target.FullName(), "ref", refLabel(ref), "error", err)
+		return nil, fmt.Errorf("저장소 파일 목록을 읽지 못했습니다: %w", err)
 	}
-	return nil
+	return nil, nil
 }

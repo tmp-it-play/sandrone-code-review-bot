@@ -26,6 +26,7 @@ func (h *SummaryHandler) ProcessTask(ctx context.Context, task *asynq.Task) erro
 		return fmt.Errorf("작업을 해석하지 못했습니다: %w", asynq.SkipRetry)
 	}
 	payload.Attempt = attemptNumber(ctx)
+	payload.FinalizationAttempt = isFinalizationAttempt(ctx)
 	payload.FinalAttempt = isFinalAttempt(ctx)
 	startedAt := time.Now()
 	err := h.usecase.Execute(ctx, payload)

@@ -3,6 +3,7 @@ package chain
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/parsing"
@@ -13,9 +14,13 @@ func validateSemanticResponse(validation llm.ResponseValidation, content string)
 	switch validation.Policy {
 	case "":
 	case llm.ResponseValidationReviewResult:
-		err = (parsing.ReviewResponseValidator{RequiredPaths: validation.RequiredPaths}).Validate(content)
+		err = (parsing.ReviewResponseValidator{}).Validate(content)
 	case llm.ResponseValidationSummaryResult:
 		err = (parsing.SummaryResponseValidator{RequiredPaths: validation.RequiredPaths}).Validate(content)
+	case llm.ResponseValidationNonEmpty:
+		if strings.TrimSpace(content) == "" {
+			err = errors.New("응답 본문이 비어 있습니다")
+		}
 	default:
 		err = fmt.Errorf("알 수 없는 결과 검증 정책: %s", validation.Policy)
 	}

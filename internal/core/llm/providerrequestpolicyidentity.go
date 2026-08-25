@@ -9,6 +9,7 @@ type ProviderRequestPolicyIdentity struct {
 	ThinkingEnabled       *bool
 	ParallelToolCalls     *bool
 	MaxOutputTokens       int
+	UsableOutputTokens    int
 	MaxCompletionTokens   bool
 	ForceJSONWithTools    bool
 	StripEmptyThought     bool

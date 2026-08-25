@@ -7,6 +7,7 @@ type CoverageItem struct {
 	RunID            uint64
 	UnitID           *uint64
 	UnitHash         string
+	InitialUnitHash  string
 	Key              string
 	Kind             CoverageKind
 	Path             string

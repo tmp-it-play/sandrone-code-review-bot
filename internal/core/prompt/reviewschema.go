@@ -1,6 +1,11 @@
 package prompt
 
-func agenticReviewSchema(includeFileNotes bool) string {
+import "fmt"
+
+func agenticReviewSchema(includeFileNotes bool, maxFindings int) string {
+	if maxFindings < 1 {
+		maxFindings = 8
+	}
 	files := ""
 	fileRule := ""
 	overviewRule := "이번 요청의 <changed_files>에 실린 변경을 1~2문장으로 요약한다. 내부 배치나 검토 단위를 언급하지 않는다."
@@ -11,6 +16,7 @@ func agenticReviewSchema(includeFileNotes bool) string {
 	}
 	return `출력은 아래 JSON 하나만 낸다. 코드 블록 표시, 인사, 감탄, 설명을 JSON 밖에 덧붙이지 않는다.
 JSON 키, severity 값, 파일 경로는 번역하거나 문체에 맞게 바꾸지 않는다.
+findings는 중요도가 높은 순서로 최대 ` + fmt.Sprintf("%d", maxFindings) + `개만 포함한다.
 
 {
   "summary": {

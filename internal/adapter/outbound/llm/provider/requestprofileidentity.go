@@ -12,6 +12,10 @@ func (p RequestProfile) Identity(request llm.Request) llm.ProviderRequestPolicyI
 	if p.OutputTokenLimit > 0 && maxOutputTokens > p.OutputTokenLimit {
 		maxOutputTokens = p.OutputTokenLimit
 	}
+	usableOutputTokens := maxOutputTokens
+	if p.StructuredOutputPercent > 0 && p.StructuredOutputPercent < 100 {
+		usableOutputTokens = maxOutputTokens * p.StructuredOutputPercent / 100
+	}
 	identity := llm.ProviderRequestPolicyIdentity{
 		Temperature:           temperature,
 		TopP:                  cloneFloat(p.TopP),
@@ -20,6 +24,7 @@ func (p RequestProfile) Identity(request llm.Request) llm.ProviderRequestPolicyI
 		ThinkingEnabled:       cloneBool(p.ThinkingEnabled),
 		ParallelToolCalls:     cloneBool(p.ParallelToolCalls),
 		MaxOutputTokens:       maxOutputTokens,
+		UsableOutputTokens:    usableOutputTokens,
 		MaxCompletionTokens:   p.UseMaxCompletionTokens,
 		ForceJSONWithTools:    p.ForceJSONWithTools,
 		StripEmptyThought:     p.StripLeadingEmptyThought,
