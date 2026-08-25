@@ -10,6 +10,7 @@ type RunResult struct {
 	Status                  RunStatus
 	ReviewOutcome           review.Outcome
 	Error                   string
+	SupersedingHeadSHA      string
 	TerminalAt              time.Time
 	ExpiresAt               time.Time
 	AdvanceWatermark        bool

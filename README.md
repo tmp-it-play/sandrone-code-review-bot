@@ -20,7 +20,7 @@ Sandrone Code Review Bot은 GitHub Pull Request의 변경 내용을 요약하고
 
 ## 사용법
 
-새 PR이 열리거나 Draft PR이 리뷰 준비 상태로 바뀌면 자동 리뷰가 실행됩니다. 기본 설정에서는 이후 커밋이 추가되어도 자동으로 다시 리뷰하지 않습니다.
+새 PR이 열리거나 Draft PR이 리뷰 준비 상태로 바뀌면 자동 리뷰가 실행됩니다. 기본 설정에서는 이후 커밋이 추가되어도 자동으로 다시 리뷰하지 않습니다. 다만 자동 리뷰가 활성화된 상태에서 진행 중인 리뷰의 head가 변경되면 오래된 실행을 중단하고 최신 head에서 대체 리뷰를 시작합니다.
 
 ### 명령
 
@@ -106,7 +106,7 @@ sandrone:
 | 설정                        |        기본값 | 설명                                                                       |
 |-----------------------------|--------------:|----------------------------------------------------------------------------|
 | `sandrone.autoReview`       |        `true` | 새 PR의 자동 리뷰를 켜거나 끕니다.                                         |
-| `sandrone.autoReviewOnPush` |       `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다.                              |
+| `sandrone.autoReviewOnPush` |       `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다. 진행 중인 리뷰의 head 변경은 이 설정과 무관하게 대체 실행됩니다. |
 | `sandrone.summaryPlacement` | `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다. |
 | `sandrone.maxReviewBatches` |           `8` | 큰 PR을 의미 단위로 나누어 검토할 최대 횟수입니다.                          |
 

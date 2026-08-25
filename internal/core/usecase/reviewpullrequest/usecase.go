@@ -128,6 +128,13 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		}
 	}
 	snapshotObservedAt := task.SnapshotObservedAt
+	activityBoundary := task.RequestReceivedAt
+	if activityBoundary.IsZero() {
+		activityBoundary = snapshotObservedAt
+	}
+	if activityBoundary.IsZero() {
+		activityBoundary = startedAt
+	}
 	stale := target.HeadSHA != "" && target.HeadSHA != request.HeadSHA
 	if target.HeadSHA == "" {
 		target.HeadSHA = request.HeadSHA
@@ -193,9 +200,9 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		var actualStatus reviewworkflow.RunStatus
 		var finishErr error
 		if resumePublishing {
-			actualStatus, finishErr = u.supersedePublishedReview(ctx, target, reviewworkflow.PublicationMarker(run.Key), run.ID, "", detail)
+			actualStatus, finishErr = u.supersedePublishedReview(ctx, target, reviewworkflow.PublicationMarker(run.Key), run.ID, "", request.HeadSHA, detail)
 		} else {
-			actualStatus, finishErr = u.finishWorkflow(ctx, run.ID, "", reviewworkflow.RunStatusSuperseded, detail, false)
+			actualStatus, finishErr = u.finishWorkflowSupersededByHead(ctx, run.ID, "", request.HeadSHA, detail)
 		}
 		if finishErr != nil {
 			return fail("오래된 리뷰 실행을 종료하지 못했습니다", finishErr)
@@ -204,7 +211,18 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		*outcome = reviewOutcomeOf(actualStatus)
 		return nil
 	}
-	if reason, skipped := skipReason(task, config); skipped {
+	reason, skipped := skipReason(task, config, false)
+	if skipped && task.Trigger == review.TriggerPullRequestPushed && config.Sandrone.AutoReview {
+		continuesRegisteredReview, lookupErr := u.deps.Runs.HasRegisteredReviewContinuation(ctx, run, activityBoundary)
+		if lookupErr != nil {
+			return fail("등록된 리뷰 실행의 연속성을 확인하지 못했습니다", lookupErr)
+		}
+		reason, skipped = skipReason(task, config, continuesRegisteredReview)
+		if continuesRegisteredReview {
+			u.deps.Logger.Info("등록된 리뷰 실행을 현재 head에서 계속합니다", "target", target.Reference(), "run", run.ID, "head", run.HeadSHA)
+		}
+	}
+	if skipped {
 		u.deps.Logger.Info("설정에 따라 자동 리뷰를 건너뜁니다", "target", target.Reference(), "reason", reason)
 		if _, finishErr := u.finishWorkflow(ctx, run.ID, "", reviewworkflow.RunStatusSkipped, reason, false); finishErr != nil {
 			return fail("건너뛴 리뷰 실행을 저장하지 못했습니다", finishErr)
@@ -219,12 +237,13 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 	if registrationState.HeadSHA != target.HeadSHA || registrationState.BaseSHA != target.BaseSHA {
 		detail := "리뷰 실행 등록 전에 base 또는 head가 변경되었습니다"
+		supersedingHeadSHA := changedHeadSHA(target.HeadSHA, registrationState.HeadSHA)
 		var actualStatus reviewworkflow.RunStatus
 		var finishErr error
 		if resumePublishing {
-			actualStatus, finishErr = u.supersedePublishedReview(ctx, target, reviewworkflow.PublicationMarker(run.Key), run.ID, "", detail)
+			actualStatus, finishErr = u.supersedePublishedReview(ctx, target, reviewworkflow.PublicationMarker(run.Key), run.ID, "", supersedingHeadSHA, detail)
 		} else {
-			actualStatus, finishErr = u.finishWorkflow(ctx, run.ID, "", reviewworkflow.RunStatusSuperseded, detail, false)
+			actualStatus, finishErr = u.finishWorkflowSupersededByHead(ctx, run.ID, "", supersedingHeadSHA, detail)
 		}
 		if finishErr != nil {
 			return fail("오래된 리뷰 실행을 종료하지 못했습니다", finishErr)
@@ -239,7 +258,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		var actualStatus reviewworkflow.RunStatus
 		var finishErr error
 		if resumePublishing {
-			actualStatus, finishErr = u.supersedePublishedReview(ctx, target, reviewworkflow.PublicationMarker(run.Key), run.ID, "", detail)
+			actualStatus, finishErr = u.supersedePublishedReview(ctx, target, reviewworkflow.PublicationMarker(run.Key), run.ID, "", "", detail)
 		} else {
 			actualStatus, finishErr = u.finishWorkflow(ctx, run.ID, "", reviewworkflow.RunStatusSuperseded, detail, false)
 		}
@@ -319,7 +338,8 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			} else if storedPublication.Status == reviewworkflow.ReviewPublicationStatusPrepared {
 				if publishErr := u.publishPreparedReview(ctx, target, run.ID, runLease, storedPublication); errors.Is(publishErr, publication.ErrTargetChanged) {
 					detail := "저장된 리뷰 게시 payload 재개 직전에 base 또는 head가 변경되었습니다"
-					actualStatus, finishErr := u.finishWorkflow(ctx, run.ID, runLease, reviewworkflow.RunStatusSuperseded, detail, false)
+					supersedingHeadSHA := u.resolveSupersedingHeadSHA(ctx, target)
+					actualStatus, finishErr := u.finishWorkflowSupersededByHead(ctx, run.ID, runLease, supersedingHeadSHA, detail)
 					if finishErr != nil {
 						return fail("재개 중 대체된 리뷰 실행을 종료하지 못했습니다", finishErr)
 					}
@@ -522,7 +542,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 	if latest.HeadSHA != target.HeadSHA || latest.BaseSHA != target.BaseSHA {
 		detail := "게시 전에 base 또는 head가 변경되었습니다"
-		if _, finishErr := u.finishWorkflow(ctx, run.ID, runLease, reviewworkflow.RunStatusSuperseded, detail, false); finishErr != nil {
+		if _, finishErr := u.finishWorkflowSupersededByHead(ctx, run.ID, runLease, changedHeadSHA(target.HeadSHA, latest.HeadSHA), detail); finishErr != nil {
 			return fail("오래된 리뷰 실행을 종료하지 못했습니다", finishErr)
 		}
 		u.save(ctx, task, startedAt, review.OutcomeSuperseded, detail, response, 0, 0, run.ID)
@@ -549,7 +569,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 	if confirmed.HeadSHA != target.HeadSHA || confirmed.BaseSHA != target.BaseSHA {
 		detail := "게시 권한을 얻은 뒤 base 또는 head가 변경되었습니다"
-		if _, finishErr := u.finishWorkflow(ctx, run.ID, runLease, reviewworkflow.RunStatusSuperseded, detail, false); finishErr != nil {
+		if _, finishErr := u.finishWorkflowSupersededByHead(ctx, run.ID, runLease, changedHeadSHA(target.HeadSHA, confirmed.HeadSHA), detail); finishErr != nil {
 			return fail("오래된 리뷰 실행을 종료하지 못했습니다", finishErr)
 		}
 		u.save(ctx, task, startedAt, review.OutcomeSuperseded, detail, response, 0, 0, run.ID)
@@ -574,7 +594,8 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 	if publishErr := u.prepareAndPublishReview(ctx, target, run.ID, runLease, publicationMarker, view, placed, attribution, style, finalization); errors.Is(publishErr, publication.ErrTargetChanged) {
 		detail := "리뷰 게시 요청 직전에 base 또는 head가 변경되었습니다"
-		actualStatus, finishErr := u.finishWorkflow(ctx, run.ID, runLease, reviewworkflow.RunStatusSuperseded, detail, false)
+		supersedingHeadSHA := u.resolveSupersedingHeadSHA(ctx, target)
+		actualStatus, finishErr := u.finishWorkflowSupersededByHead(ctx, run.ID, runLease, supersedingHeadSHA, detail)
 		if finishErr != nil {
 			return fail("게시 직전에 대체된 리뷰 실행을 종료하지 못했습니다", finishErr)
 		}
@@ -668,11 +689,20 @@ func invalidatedReviewBody(detail string) string {
 	return "⚠️ 이 리뷰는 게시 과정에서 더 최신인 실행 또는 PR 기준점이 확인되어 무효화되었습니다.\n\n" + detail
 }
 
-func (u *UseCase) supersedePublishedReview(ctx context.Context, target pullrequest.Target, marker string, runID uint64, leaseToken string, detail string) (reviewworkflow.RunStatus, error) {
+func (u *UseCase) supersedePublishedReview(ctx context.Context, target pullrequest.Target, marker string, runID uint64, leaseToken string, supersedingHeadSHA string, detail string) (reviewworkflow.RunStatus, error) {
 	if err := u.deps.Publisher.InvalidatePublication(ctx, target, marker, invalidatedReviewBody(detail)); err != nil {
 		return reviewworkflow.RunStatusPublishing, err
 	}
-	return u.finishWorkflow(ctx, runID, leaseToken, reviewworkflow.RunStatusSuperseded, detail, false)
+	return u.finishWorkflowSupersededByHead(ctx, runID, leaseToken, supersedingHeadSHA, detail)
+}
+
+func (u *UseCase) resolveSupersedingHeadSHA(ctx context.Context, target pullrequest.Target) string {
+	current, err := u.deps.Source.PullRequest(ctx, target)
+	if err != nil {
+		u.deps.Logger.Warn("대체 head를 확인하지 못했습니다", "target", target.Reference(), "error", err)
+		return ""
+	}
+	return changedHeadSHA(target.HeadSHA, current.HeadSHA)
 }
 
 func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, task job.ReviewJob, notice review.Notice) {
@@ -749,12 +779,15 @@ func (u *UseCase) reviewRecord(task job.ReviewJob, startedAt time.Time, outcome 
 	}
 }
 
-func skipReason(task job.ReviewJob, config setting.RepoConfig) (string, bool) {
+func skipReason(task job.ReviewJob, config setting.RepoConfig, continuesRegisteredReview bool) (string, bool) {
 	if !task.Trigger.IsAutomatic() {
 		return "", false
 	}
 	if !config.Sandrone.AutoReview {
 		return "sandrone.autoReview가 켜져 있지 않습니다", true
+	}
+	if task.Trigger == review.TriggerPullRequestPushed && continuesRegisteredReview {
+		return "", false
 	}
 	if task.Trigger == review.TriggerPullRequestPushed && !config.Sandrone.AutoReviewOnPush {
 		return "sandrone.autoReviewOnPush가 꺼져 있습니다", true

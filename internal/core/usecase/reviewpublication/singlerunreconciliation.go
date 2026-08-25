@@ -51,7 +51,7 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 		if err != nil {
 			return err
 		}
-		return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "게시 조정 전에 base 또는 head가 변경되었습니다", false, invalidation)
+		return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "게시 조정 전에 base 또는 head가 변경되었습니다", changedHeadSHA(run.HeadSHA, current.HeadSHA), false, invalidation)
 	}
 	marker := reviewworkflow.PublicationMarker(run.Key)
 	storedPublication, storedPublicationFound, err := r.deps.Publications.ReviewPublication(ctx, run.ID, leaseToken)
@@ -69,7 +69,7 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 		if run.HeartbeatAt.After(r.deps.Clock.Now().Add(-r.config.OrphanAfter)) {
 			return nil
 		}
-		return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusFailed, "7일 동안 GitHub 게시 marker를 확인하지 못했습니다", false, nil)
+		return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusFailed, "7일 동안 GitHub 게시 marker를 확인하지 못했습니다", "", false, nil)
 	}
 	_, found, err := r.deps.Reviews.ByRunID(ctx, run.ID)
 	if err != nil {
@@ -88,7 +88,7 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 		}
 	} else if storedPublication.Status == reviewworkflow.ReviewPublicationStatusPrepared {
 		if err := r.publishPreparedPublication(ctx, target, run.ID, leaseToken, storedPublication); errors.Is(err, publication.ErrTargetChanged) {
-			return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "저장된 리뷰 게시 payload 재개 직전에 base 또는 head가 변경되었습니다", false, nil)
+			return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "저장된 리뷰 게시 payload 재개 직전에 base 또는 head가 변경되었습니다", r.resolveSupersedingHeadSHA(ctx, target), false, nil)
 		} else if err != nil {
 			return r.resolveUnverified(ctx, run, leaseToken, err)
 		}
@@ -102,7 +102,7 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 		if err != nil {
 			return err
 		}
-		return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "리뷰 게시 재개 중 base 또는 head가 변경되었습니다", false, invalidation)
+		return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "리뷰 게시 재개 중 base 또는 head가 변경되었습니다", changedHeadSHA(run.HeadSHA, confirmed.HeadSHA), false, invalidation)
 	}
 	finalization := reviewworkflow.ReviewPublicationFinalization{
 		Status:           reviewworkflow.RunStatusPartial,
@@ -112,5 +112,21 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 	if storedPublicationFound && storedPublication.PayloadHash != "" {
 		finalization = storedPublication.Finalization
 	}
-	return r.finishWithLease(ctx, run, leaseToken, finalization.Status, finalization.Detail, finalization.AdvanceWatermark, nil)
+	return r.finishWithLease(ctx, run, leaseToken, finalization.Status, finalization.Detail, "", finalization.AdvanceWatermark, nil)
+}
+
+func (r *Reconciler) resolveSupersedingHeadSHA(ctx context.Context, target pullrequest.Target) string {
+	current, err := r.deps.Source.PullRequest(ctx, target)
+	if err != nil {
+		r.deps.Logger.Warn("대체 head를 확인하지 못했습니다", "target", target.Reference(), "error", err)
+		return ""
+	}
+	return changedHeadSHA(target.HeadSHA, current.HeadSHA)
+}
+
+func changedHeadSHA(previous string, current string) string {
+	if current == "" || current == previous {
+		return ""
+	}
+	return current
 }

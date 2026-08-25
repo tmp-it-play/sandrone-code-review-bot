@@ -15,6 +15,7 @@ type ReviewJob struct {
 	CommentID          int64
 	InThread           bool
 	RequestIdentity    string
+	RequestReceivedAt  time.Time
 	SnapshotObservedAt time.Time
 	SnapshotOrderKey   string
 	Attempt            int

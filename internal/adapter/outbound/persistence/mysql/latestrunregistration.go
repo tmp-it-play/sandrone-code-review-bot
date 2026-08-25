@@ -36,15 +36,19 @@ func registerLatestRun(transaction *gorm.DB, run model.ReviewRun, registeredAt t
 	if latestRunIsNewer(state, run) {
 		return false, false, nil
 	}
+	latestRunAt := registeredAt
+	if state.LatestRunID == run.ID && state.LatestRunAt != nil {
+		latestRunAt = *state.LatestRunAt
+	}
 	claimActive := state.PublishingRunID != 0 && state.PublishingLeaseExpiresAt != nil && state.PublishingLeaseExpiresAt.After(registeredAt)
 	if claimActive {
-		if state.LatestRunID != run.ID {
+		if state.LatestRunID != run.ID || state.LatestRunAt == nil {
 			updated := transaction.Model(&model.PullRequestState{}).Where("id = ?", state.ID).Updates(map[string]any{
 				"latest_run_id":      run.ID,
 				"latest_head_sha":    run.HeadSHA,
 				"latest_observed_at": snapshotObservedAt,
 				"latest_order_key":   run.SnapshotOrderKey,
-				"latest_run_at":      registeredAt,
+				"latest_run_at":      latestRunAt,
 				"updated_at":         registeredAt,
 			})
 			if updated.Error != nil {
@@ -61,7 +65,7 @@ func registerLatestRun(transaction *gorm.DB, run model.ReviewRun, registeredAt t
 		"latest_head_sha":             run.HeadSHA,
 		"latest_observed_at":          snapshotObservedAt,
 		"latest_order_key":            run.SnapshotOrderKey,
-		"latest_run_at":               registeredAt,
+		"latest_run_at":               latestRunAt,
 		"publishing_run_id":           0,
 		"publishing_head_sha":         "",
 		"publishing_lease_token":      "",

@@ -56,18 +56,18 @@ func (u *UseCase) finalizePublishedReview(ctx context.Context, target pullreques
 		return reviewworkflow.RunStatusPublishing, err
 	}
 	if publishedState.HeadSHA != target.HeadSHA || publishedState.BaseSHA != target.BaseSHA {
-		return u.supersedePublishedReview(ctx, target, marker, runID, runLease, "리뷰 게시 중 base 또는 head가 변경되었습니다")
+		return u.supersedePublishedReview(ctx, target, marker, runID, runLease, changedHeadSHA(target.HeadSHA, publishedState.HeadSHA), "리뷰 게시 중 base 또는 head가 변경되었습니다")
 	}
 	publicationCheckedAt := u.deps.Clock.Now()
 	if err := u.deps.Runs.RenewRun(ctx, runID, runLease, publicationCheckedAt, publicationCheckedAt.Add(reviewRunLease)); err != nil {
 		if errors.Is(err, reviewworkflow.ErrRunSuperseded) {
-			return u.supersedePublishedReview(ctx, target, marker, runID, runLease, "리뷰 게시 중 더 최신인 실행이 확인되었습니다")
+			return u.supersedePublishedReview(ctx, target, marker, runID, runLease, "", "리뷰 게시 중 더 최신인 실행이 확인되었습니다")
 		}
 		return reviewworkflow.RunStatusPublishing, err
 	}
 	actualStatus, err := u.finishWorkflow(ctx, runID, runLease, desiredStatus, detail, advanceWatermark)
 	if errors.Is(err, reviewworkflow.ErrRunSuperseded) {
-		return u.supersedePublishedReview(ctx, target, marker, runID, runLease, "리뷰 실행 완료 중 더 최신인 실행이 확인되었습니다")
+		return u.supersedePublishedReview(ctx, target, marker, runID, runLease, "", "리뷰 실행 완료 중 더 최신인 실행이 확인되었습니다")
 	}
 	return actualStatus, err
 }

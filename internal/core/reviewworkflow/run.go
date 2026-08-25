@@ -30,6 +30,7 @@ type Run struct {
 	SkippedCoverage    int
 	ExternalCalls      int
 	ErrorSummary       string
+	SupersedingHeadSHA string
 	StartedAt          time.Time
 	HeartbeatAt        time.Time
 	TerminalAt         *time.Time

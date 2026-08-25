@@ -26,6 +26,7 @@ type ReviewRun struct {
 	SkippedCoverage    int
 	ExternalCalls      int    `gorm:"not null;default:0"`
 	ErrorSummary       string `gorm:"size:1000"`
+	SupersedingHeadSHA string `gorm:"size:64;not null;default:''"`
 	StartedAt          time.Time
 	HeartbeatAt        time.Time  `gorm:"index"`
 	TerminalAt         *time.Time `gorm:"index"`

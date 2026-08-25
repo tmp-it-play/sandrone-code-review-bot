@@ -17,7 +17,7 @@ func (r *Reconciler) resolveUnverified(ctx context.Context, run reviewworkflow.R
 	invalidation := r.deferredInvalidation(run, invalidationBody(detail), cause)
 	finishContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	if err := r.finishWithLease(finishContext, run, leaseToken, reviewworkflow.RunStatusFailed, detail, false, invalidation); err != nil {
+	if err := r.finishWithLease(finishContext, run, leaseToken, reviewworkflow.RunStatusFailed, detail, "", false, invalidation); err != nil {
 		return errors.Join(cause, err)
 	}
 	r.deps.Logger.Warn("GitHub 게시 결과를 확정하지 못해 리뷰 실행을 종료했습니다", "run", run.ID, "error", cause)
@@ -46,12 +46,13 @@ func (r *Reconciler) finishSuperseded(ctx context.Context, run reviewworkflow.Ru
 	return err
 }
 
-func (r *Reconciler) finishWithLease(ctx context.Context, run reviewworkflow.Run, leaseToken string, status reviewworkflow.RunStatus, detail string, advanceWatermark bool, invalidation *reviewworkflow.PublicationInvalidation) error {
+func (r *Reconciler) finishWithLease(ctx context.Context, run reviewworkflow.Run, leaseToken string, status reviewworkflow.RunStatus, detail string, supersedingHeadSHA string, advanceWatermark bool, invalidation *reviewworkflow.PublicationInvalidation) error {
 	now := r.deps.Clock.Now()
 	finishContext, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	_, err := r.deps.Runs.FinishRun(finishContext, run.ID, reviewworkflow.RunResult{
 		Status:                  status,
 		Error:                   detail,
+		SupersedingHeadSHA:      supersedingHeadSHA,
 		TerminalAt:              now,
 		ExpiresAt:               now.Add(r.config.Retention),
 		AdvanceWatermark:        advanceWatermark,

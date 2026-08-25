@@ -188,6 +188,16 @@ func (r *ReviewRunStore) FinishRun(ctx context.Context, runID uint64, result rev
 				return summaryErr
 			}
 		}
+		supersedingHeadSHA := ""
+		if status == reviewworkflow.RunStatusSuperseded {
+			supersedingHeadSHA = result.SupersedingHeadSHA
+			if supersedingHeadSHA == run.HeadSHA {
+				supersedingHeadSHA = ""
+			}
+			if supersedingHeadSHA == "" && stateErr == nil && state.LatestHeadSHA != run.HeadSHA {
+				supersedingHeadSHA = state.LatestHeadSHA
+			}
+		}
 		projectionOutcome := reviewOutcomeForRunStatus(status)
 		if status == result.Status && result.ReviewOutcome != "" {
 			projectionOutcome = result.ReviewOutcome
@@ -198,18 +208,19 @@ func (r *ReviewRunStore) FinishRun(ctx context.Context, runID uint64, result rev
 		updated := transaction.Model(&model.ReviewRun{}).
 			Where("id = ? AND lease_token = ? AND status NOT IN ?", runID, finishLeaseToken, terminalRunStatuses()).
 			Updates(map[string]any{
-				"status":            string(status),
-				"total_coverage":    summary.Total,
-				"reviewed_coverage": summary.Reviewed,
-				"failed_coverage":   summary.Failed,
-				"deferred_coverage": summary.Deferred + summary.Pending,
-				"skipped_coverage":  summary.Skipped,
-				"error_summary":     boundedText(result.Error, 1000),
-				"heartbeat_at":      result.TerminalAt,
-				"terminal_at":       result.TerminalAt,
-				"expires_at":        result.ExpiresAt,
-				"lease_token":       "",
-				"lease_expires_at":  nil,
+				"status":               string(status),
+				"total_coverage":       summary.Total,
+				"reviewed_coverage":    summary.Reviewed,
+				"failed_coverage":      summary.Failed,
+				"deferred_coverage":    summary.Deferred + summary.Pending,
+				"skipped_coverage":     summary.Skipped,
+				"error_summary":        boundedText(result.Error, 1000),
+				"superseding_head_sha": supersedingHeadSHA,
+				"heartbeat_at":         result.TerminalAt,
+				"terminal_at":          result.TerminalAt,
+				"expires_at":           result.ExpiresAt,
+				"lease_token":          "",
+				"lease_expires_at":     nil,
 			})
 		if updated.Error != nil {
 			return updated.Error

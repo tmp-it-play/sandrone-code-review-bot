@@ -112,7 +112,7 @@ func (w *WebhookInboxWorker) process(ctx context.Context, delivery webhookinbox.
 		w.reject(ctx, delivery, parseErr)
 		return
 	}
-	action, routeErr := w.router.Route(processContext, event, delivery.RequestIdentity)
+	action, routeErr := w.router.Route(processContext, event, delivery.RequestIdentity, delivery.ReceivedAt)
 	cancel()
 	if routeErr != nil {
 		w.metrics.ObserveWebhook(delivery.EventType, action+"_retry")

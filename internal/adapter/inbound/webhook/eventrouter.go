@@ -3,6 +3,7 @@ package webhook
 import (
 	"context"
 	"fmt"
+	"time"
 
 	gh "github.com/google/go-github/v90/github"
 	inboundcommand "github.com/it-play/sandrone-code-review-bot/internal/adapter/inbound/command"
@@ -30,10 +31,10 @@ func NewEventRouter(queue outbound.Queue, commands *handlecommand.UseCase, parse
 	}
 }
 
-func (r *EventRouter) Route(ctx context.Context, event any, requestIdentity string) (string, error) {
+func (r *EventRouter) Route(ctx context.Context, event any, requestIdentity string, receivedAt time.Time) (string, error) {
 	switch payload := event.(type) {
 	case *gh.PullRequestEvent:
-		return r.pullRequest(ctx, payload, requestIdentity)
+		return r.pullRequest(ctx, payload, requestIdentity, receivedAt)
 	case *gh.IssueCommentEvent:
 		return r.issueComment(ctx, payload, requestIdentity)
 	case *gh.PullRequestReviewCommentEvent:
@@ -47,7 +48,7 @@ func (r *EventRouter) Route(ctx context.Context, event any, requestIdentity stri
 	}
 }
 
-func (r *EventRouter) pullRequest(ctx context.Context, payload *gh.PullRequestEvent, requestIdentity string) (string, error) {
+func (r *EventRouter) pullRequest(ctx context.Context, payload *gh.PullRequestEvent, requestIdentity string, receivedAt time.Time) (string, error) {
 	action := payload.GetAction()
 	if payload.GetPullRequest().GetDraft() && action != "ready_for_review" {
 		return action, nil
@@ -63,6 +64,7 @@ func (r *EventRouter) pullRequest(ctx context.Context, payload *gh.PullRequestEv
 	task := job.ReviewJob{
 		Target:             target,
 		RequestIdentity:    requestIdentity,
+		RequestReceivedAt:  receivedAt,
 		SnapshotObservedAt: payload.GetPullRequest().GetUpdatedAt().Time,
 		SnapshotOrderKey:   "automatic",
 	}
