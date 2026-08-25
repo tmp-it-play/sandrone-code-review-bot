@@ -10,12 +10,13 @@ import (
 )
 
 var triggerLabels = map[review.Trigger]string{
-	review.TriggerPullRequestOpened: "PR 열림",
-	review.TriggerPullRequestPushed: "푸시",
-	review.TriggerCommandReview:     "리뷰 명령",
-	review.TriggerCommandSummary:    "요약 명령",
-	review.TriggerCommandReply:      "스레드 답글",
-	review.TriggerDashboardRerun:    "수동 재실행",
+	review.TriggerPullRequestOpened:      "PR 열림",
+	review.TriggerPullRequestDraftOpened: "Draft PR 열림",
+	review.TriggerPullRequestPushed:      "푸시",
+	review.TriggerCommandReview:          "리뷰 명령",
+	review.TriggerCommandSummary:         "요약 명령",
+	review.TriggerCommandReply:           "스레드 답글",
+	review.TriggerDashboardRerun:         "수동 재실행",
 }
 
 var outcomeLabels = map[review.Outcome]string{

@@ -50,7 +50,8 @@ func (r *EventRouter) Route(ctx context.Context, event any, requestIdentity stri
 
 func (r *EventRouter) pullRequest(ctx context.Context, payload *gh.PullRequestEvent, requestIdentity string, receivedAt time.Time) (string, error) {
 	action := payload.GetAction()
-	if payload.GetPullRequest().GetDraft() && action != "ready_for_review" {
+	draft := payload.GetPullRequest().GetDraft()
+	if draft && action != "opened" && action != "ready_for_review" {
 		return action, nil
 	}
 	target := pullrequest.Target{
@@ -69,7 +70,13 @@ func (r *EventRouter) pullRequest(ctx context.Context, payload *gh.PullRequestEv
 		SnapshotOrderKey:   "automatic",
 	}
 	switch action {
-	case "opened", "reopened", "ready_for_review":
+	case "opened":
+		if draft {
+			task.Trigger = review.TriggerPullRequestDraftOpened
+		} else {
+			task.Trigger = review.TriggerPullRequestOpened
+		}
+	case "reopened", "ready_for_review":
 		task.Trigger = review.TriggerPullRequestOpened
 	case "synchronize":
 		task.Trigger = review.TriggerPullRequestPushed

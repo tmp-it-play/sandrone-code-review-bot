@@ -786,6 +786,9 @@ func skipReason(task job.ReviewJob, config setting.RepoConfig, continuesRegister
 	if !config.Sandrone.AutoReview {
 		return "sandrone.autoReview가 켜져 있지 않습니다", true
 	}
+	if task.Trigger == review.TriggerPullRequestDraftOpened && !config.Sandrone.AutoReviewOnDraft {
+		return "sandrone.autoReviewOnDraft가 꺼져 있습니다", true
+	}
 	if task.Trigger == review.TriggerPullRequestPushed && continuesRegisteredReview {
 		return "", false
 	}
