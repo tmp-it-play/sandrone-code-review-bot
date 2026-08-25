@@ -20,7 +20,7 @@ Sandrone Code Review Bot은 GitHub Pull Request의 변경 내용을 요약하고
 
 ## 사용법
 
-새 PR이 열리거나 Draft PR이 리뷰 준비 상태로 바뀌면 자동 리뷰가 실행됩니다.
+새 PR은 Draft 여부와 관계없이 열릴 때 자동 리뷰가 실행됩니다. Draft PR이 리뷰 준비 상태로 바뀐 때의 자동 리뷰도 실행됩니다.
 
 ### 명령
 
@@ -66,6 +66,7 @@ exclude:
 
 sandrone:
   autoReview: true
+  autoReviewOnDraft: true
   autoReviewOnPush: false
   summaryPlacement: new-comment
   maxReviewBatches: 8
@@ -103,12 +104,13 @@ sandrone:
 
 `language`, `tone`, `allowStrongTone`, `minSeverity` 같은 리뷰 설정은 모두 `sandrone:` 아래에서 Sandrone 전용값으로 다시 지정할 수 있습니다.
 
-| 설정                        |        기본값 | 설명                                                                       |
-|-----------------------------|--------------:|----------------------------------------------------------------------------|
-| `sandrone.autoReview`       |        `true` | 새 PR의 자동 리뷰를 켜거나 끕니다.                                         |
-| `sandrone.autoReviewOnPush` |       `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다.                              |
-| `sandrone.summaryPlacement` | `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다. |
-| `sandrone.maxReviewBatches` |           `8` | 큰 PR을 의미 단위로 나누어 검토할 최대 횟수입니다.                         |
+| 설정                         |        기본값 | 설명                                                                       |
+|------------------------------|--------------:|----------------------------------------------------------------------------|
+| `sandrone.autoReview`        |        `true` | 새 PR의 자동 리뷰를 켜거나 끕니다.                                         |
+| `sandrone.autoReviewOnDraft` |        `true` | Draft 상태로 열린 PR의 자동 리뷰를 켜거나 끕니다.                          |
+| `sandrone.autoReviewOnPush`  |       `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다.                              |
+| `sandrone.summaryPlacement`  | `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다. |
+| `sandrone.maxReviewBatches`  |           `8` | 큰 PR을 의미 단위로 나누어 검토할 최대 횟수입니다.                         |
 
 리뷰 설정과 지침 파일은 PR의 변경 브랜치가 아니라 고정된 base SHA에서 읽습니다. 저장소 설정으로도 비용 상한을 해제할 수 없으며 리뷰 배치는 `1~8`, 모델 출력은 최대 `8192` token, 추가 파일 읽기는 최대 `6`, 게시 finding은 전체 `25`건으로 제한됩니다.
 
