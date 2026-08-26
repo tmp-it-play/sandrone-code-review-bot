@@ -21,6 +21,8 @@ type Server struct {
 	templates *template.Template
 }
 
+const rerunTokenByteLength = 16
+
 func NewServer(deps Dependencies) (*Server, error) {
 	pattern := filepath.Join(deps.TemplateDir, "*.html")
 	templates, err := template.ParseGlob(pattern)
@@ -127,7 +129,12 @@ func (s *Server) reviewDetail(writer http.ResponseWriter, request *http.Request)
 	if err != nil {
 		s.deps.Logger.Warn("리뷰 지적을 읽지 못했습니다", "review", id, "error", err)
 	}
-	data := PageData{Title: "리뷰 상세", Active: "reviews", Review: toReviewView(record)}
+	rerunToken, err := newRerunToken()
+	if err != nil {
+		http.Error(writer, "재실행 요청 식별자를 만들지 못했습니다", http.StatusInternalServerError)
+		return
+	}
+	data := PageData{Title: "리뷰 상세", Active: "reviews", Review: toReviewView(record), RerunToken: rerunToken}
 	for _, finding := range findings {
 		data.Findings = append(data.Findings, FindingView{
 			Path:           finding.File,
@@ -154,6 +161,15 @@ func (s *Server) rerun(writer http.ResponseWriter, request *http.Request) {
 		http.NotFound(writer, request)
 		return
 	}
+	if err := request.ParseForm(); err != nil {
+		http.Error(writer, "재실행 요청을 읽지 못했습니다", http.StatusBadRequest)
+		return
+	}
+	rerunToken := request.PostFormValue("rerun_token")
+	if !validRerunToken(rerunToken) {
+		http.Error(writer, "재실행 요청 식별자가 올바르지 않습니다", http.StatusBadRequest)
+		return
+	}
 	target := pullrequest.Target{
 		Owner:      record.Owner,
 		Repository: record.Repository,
@@ -165,12 +181,7 @@ func (s *Server) rerun(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	target.InstallationID = installationID
-	requestID := make([]byte, 16)
-	if _, err := rand.Read(requestID); err != nil {
-		http.Error(writer, "재실행 요청 식별자를 만들지 못했습니다", http.StatusInternalServerError)
-		return
-	}
-	requestIdentity := "dashboard:" + strconv.FormatUint(id, 10) + ":" + hex.EncodeToString(requestID)
+	requestIdentity := "dashboard:" + strconv.FormatUint(id, 10) + ":" + rerunToken
 	err = s.deps.Queue.EnqueueReview(request.Context(), job.ReviewJob{
 		Target:             target,
 		Trigger:            review.TriggerDashboardRerun,
@@ -183,6 +194,22 @@ func (s *Server) rerun(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	http.Redirect(writer, request, s.deps.BasePath+"/dashboard/reviews", http.StatusSeeOther)
+}
+
+func newRerunToken() (string, error) {
+	value := make([]byte, rerunTokenByteLength)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(value), nil
+}
+
+func validRerunToken(value string) bool {
+	if len(value) != hex.EncodedLen(rerunTokenByteLength) {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == rerunTokenByteLength
 }
 
 func (s *Server) providers(writer http.ResponseWriter, request *http.Request) {

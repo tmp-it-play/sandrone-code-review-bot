@@ -13,6 +13,7 @@
   {{if .Review.Detail}}<p class="error">{{.Review.Detail}}</p>{{end}}
 
   <form method="post" action="{{.Base}}/dashboard/reviews/{{.Review.ID}}/rerun">
+    <input type="hidden" name="rerun_token" value="{{.RerunToken}}">
     <button type="submit">이 PR 다시 리뷰</button>
   </form>
 

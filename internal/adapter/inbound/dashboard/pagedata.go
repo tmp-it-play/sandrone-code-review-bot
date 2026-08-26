@@ -12,4 +12,5 @@ type PageData struct {
 	Providers    []ProviderView
 	Commands     []CommandView
 	Queue        QueueView
+	RerunToken   string
 }
