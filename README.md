@@ -87,7 +87,7 @@ sandrone:
 | `exclude`             | 기본 제외 목록 | 리뷰에서 제외할 파일의 glob 패턴을 추가합니다.                               |
 | `threadReply`         |         `true` | 리뷰 스레드의 후속 답변을 켜거나 끕니다.                                     |
 
-최상위 리뷰 설정은 이 파일을 함께 사용하는 앱의 공통값입니다. `sandrone:` 아래에 같은 설정을 작성하면 Sandrone에서만 그 값으로 덮어씁니다.
+최상위 설정은 이 파일을 함께 사용하는 앱의 공통값입니다. `sandrone:` 아래에 같은 설정을 작성하면 Sandrone에서만 그 값으로 덮어씁니다.
 
 ```yaml
 tone: polite
@@ -103,16 +103,19 @@ sandrone:
 
 ### Sandrone 설정
 
-`language`, `tone`, `allowStrongTone`, `minSeverity` 같은 리뷰 설정은 모두 `sandrone:` 아래에서 Sandrone 전용값으로 다시 지정할 수 있습니다.
+`language`, `tone`, `allowStrongTone`, `minSeverity` 같은 리뷰 설정뿐 아니라 아래의 Sandrone 동작 설정도 최상위 공통값으로 작성할 수 있습니다. `sandrone:` 아래에 같은 키가 있으면 그 값을 우선하고, 둘 다 없으면 내장 기본값을 사용합니다.
 
 | 설정                            |        기본값 | 설명                                                                       |
 |---------------------------------|--------------:|----------------------------------------------------------------------------|
-| `sandrone.autoReview`           |        `true` | 새 PR의 자동 리뷰를 켜거나 끕니다.                                         |
-| `sandrone.autoReviewOnDraft`    |        `true` | Draft 상태로 열린 PR의 자동 리뷰를 켜거나 끕니다.                          |
-| `sandrone.autoReviewOnPush`     |       `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다.                              |
-| `sandrone.progressMessageTheme` | `programming` | 리뷰 처리 중 약 30초마다 바뀌는 진행 문구 묶음입니다. `programming`, `sandrone`, `stock`, `history` 중 하나입니다. |
-| `sandrone.summaryPlacement`     | `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다. |
-| `sandrone.maxReviewBatches`     |           `8` | 큰 PR을 의미 단위로 나누어 검토할 최대 횟수입니다.                         |
+| `autoReview`                    |        `true` | 새 PR의 자동 리뷰를 켜거나 끕니다.                                         |
+| `autoReviewOnDraft`             |        `true` | Draft 상태로 열린 PR의 자동 리뷰를 켜거나 끕니다.                          |
+| `autoReviewOnPush`              |       `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다.                              |
+| `progressMessageTheme`          | `programming` | 리뷰 처리 중 약 30초마다 바뀌는 진행 문구 묶음입니다. `programming`, `sandrone`, `stock`, `history` 중 하나입니다. |
+| `summaryPlacement`              | `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다. |
+| `providers`                     |           전체 | 리뷰에 사용할 provider 이름 목록입니다. 비워 두면 사용 가능한 provider를 모두 허용합니다. |
+| `maxInstructionChars`           |       `20000` | 저장소 지침에서 읽을 수 있는 전체 문자 수입니다.                            |
+| `maxReviewBatches`              |           `8` | 큰 PR을 의미 단위로 나누어 검토할 최대 횟수입니다.                         |
+| `instructionFiles`              | 기본 지침 목록 | 읽을 지침 파일 경로와 glob 목록입니다.                                     |
 
 리뷰 설정과 지침 파일은 PR 출발지 브랜치의 고정된 head SHA에서 읽습니다. 예를 들어 `develop` → `main` PR이면 `develop`의 head 커밋을 기준으로 합니다. 저장소 설정으로도 비용 상한을 해제할 수 없으며 리뷰 배치는 `1~8`, 모델 출력은 최대 `8192` token, 추가 파일 읽기는 최대 `6`, 게시 finding은 전체 `25`건으로 제한됩니다.
 

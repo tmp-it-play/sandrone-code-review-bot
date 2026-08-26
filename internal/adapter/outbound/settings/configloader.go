@@ -55,9 +55,10 @@ func (l *ConfigLoader) RepoConfig(ctx context.Context, target pullrequest.Target
 
 func merge(config setting.RepoConfig, raw rawConfig) setting.RepoConfig {
 	config = mergeReviewSetting(config, raw.Review)
+	config.Sandrone = mergeSandrone(config.Sandrone, raw.RootSandrone)
 	if raw.Sandrone != nil {
 		config = mergeReviewSetting(config, raw.Sandrone.Review)
-		config.Sandrone = mergeSandrone(config.Sandrone, *raw.Sandrone)
+		config.Sandrone = mergeSandrone(config.Sandrone, raw.Sandrone.Setting)
 	}
 	return config
 }
@@ -121,7 +122,7 @@ func mergeReviewSetting(config setting.RepoConfig, raw rawReviewSetting) setting
 	return config
 }
 
-func mergeSandrone(current setting.SandroneSetting, raw rawSandrone) setting.SandroneSetting {
+func mergeSandrone(current setting.SandroneSetting, raw rawSandroneSetting) setting.SandroneSetting {
 	if raw.AutoReview != nil {
 		current.AutoReview = *raw.AutoReview
 	}
@@ -141,8 +142,8 @@ func mergeSandrone(current setting.SandroneSetting, raw rawSandrone) setting.San
 			current.SummaryPlacement = placement
 		}
 	}
-	if len(raw.Providers) > 0 {
-		current.Providers = raw.Providers
+	if raw.Providers != nil {
+		current.Providers = append([]string(nil), (*raw.Providers)...)
 	}
 	if raw.MaxInstructionChars != nil {
 		current.MaxInstructionChars = *raw.MaxInstructionChars
@@ -150,8 +151,8 @@ func mergeSandrone(current setting.SandroneSetting, raw rawSandrone) setting.San
 	if raw.MaxReviewBatches != nil {
 		current.MaxReviewBatches = *raw.MaxReviewBatches
 	}
-	if len(raw.InstructionFiles) > 0 {
-		current.InstructionFiles = raw.InstructionFiles
+	if raw.InstructionFiles != nil {
+		current.InstructionFiles = append([]string(nil), (*raw.InstructionFiles)...)
 	}
 	return current
 }
