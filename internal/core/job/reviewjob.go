@@ -18,6 +18,10 @@ type ReviewJob struct {
 	RequestReceivedAt  time.Time
 	SnapshotObservedAt time.Time
 	SnapshotOrderKey   string
+	ProgressCommentID  int64
+	ProgressMarker     string
+	ProgressNotBefore  time.Time
+	ReactionAdded      bool
 	Attempt            int
 	FinalAttempt       bool
 	Incremental        bool

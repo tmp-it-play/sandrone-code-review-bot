@@ -42,7 +42,18 @@ func (r *Reconciler) reconcileInvalidation(ctx context.Context, invalidation rev
 		attemptDeadline = invalidation.ExpiresAt
 	}
 	attemptContext, cancel := context.WithDeadline(ctx, attemptDeadline)
-	err := r.deps.Publisher.InvalidatePublication(attemptContext, target, invalidation.Marker, invalidation.Reason)
+	var err error
+	for _, marker := range invalidation.Markers() {
+		var invalidateErr error
+		if invalidation.UpsertsProgressComment(marker) {
+			invalidateErr = r.replaceTerminalProgressComment(attemptContext, target, marker, invalidation.ReasonFor(marker))
+		} else {
+			invalidateErr = r.deps.Publisher.InvalidatePublication(attemptContext, target, marker, invalidation.ReasonFor(marker))
+		}
+		if invalidateErr != nil {
+			err = errors.Join(err, invalidateErr)
+		}
+	}
 	cancel()
 	now = r.deps.Clock.Now()
 	storeContext, storeCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
@@ -54,10 +65,14 @@ func (r *Reconciler) reconcileInvalidation(ctx context.Context, invalidation rev
 		return
 	}
 	nextAttemptAt := now.Add(publicationInvalidationRetryDelay(invalidation.Attempts))
+	uncertainUntil := now.Add(reviewworkflow.PublicationInvalidationFenceDelay)
+	if uncertainUntil.After(nextAttemptAt) {
+		nextAttemptAt = uncertainUntil
+	}
 	if nextAttemptAt.After(invalidation.ExpiresAt) {
 		nextAttemptAt = invalidation.ExpiresAt
 	}
-	if retryErr := r.deps.Invalidations.RetryPublicationInvalidation(storeContext, invalidation.ID, invalidation.LeaseToken, now, nextAttemptAt, err.Error()); retryErr != nil {
+	if retryErr := r.deps.Invalidations.RetryPublicationInvalidation(storeContext, invalidation.ID, invalidation.LeaseToken, now, nextAttemptAt, uncertainUntil, err.Error()); retryErr != nil {
 		r.deps.Logger.Warn("게시 무효화 재시도를 저장하지 못했습니다", "run", invalidation.RunID, "error", errors.Join(err, retryErr))
 		return
 	}

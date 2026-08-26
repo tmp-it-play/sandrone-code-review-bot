@@ -15,6 +15,7 @@ type ReviewRun struct {
 	PromptVersion      string    `gorm:"size:40"`
 	ModelPolicyHash    string    `gorm:"size:64"`
 	RequestIdentity    string    `gorm:"size:160"`
+	ProgressMarker     string    `gorm:"size:128;not null;default:''"`
 	Trigger            string    `gorm:"size:40"`
 	Status             string    `gorm:"size:20;index"`
 	SnapshotObservedAt time.Time `gorm:"index"`

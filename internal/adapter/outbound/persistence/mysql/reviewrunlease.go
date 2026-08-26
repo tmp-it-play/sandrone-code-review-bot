@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -54,6 +55,11 @@ func (r *ReviewRunStore) AcquireRun(ctx context.Context, runID uint64, startedAt
 			lease.Token = ""
 			return nil
 		}
+		if err := requireProgressCommentOwnership(transaction, run, leaseNow); errors.Is(err, reviewworkflow.ErrRunSuperseded) {
+			return reviewworkflow.ErrRunSuperseded
+		} else if err != nil {
+			return err
+		}
 		status := reviewworkflow.RunStatusRunning
 		if reviewworkflow.RunStatus(run.Status) == reviewworkflow.RunStatusPublishing {
 			status = reviewworkflow.RunStatusPublishing
@@ -69,6 +75,11 @@ func (r *ReviewRunStore) AcquireRun(ctx context.Context, runID uint64, startedAt
 		if err := transaction.Model(&model.ReviewRun{}).Where("id = ?", runID).Updates(updates).Error; err != nil {
 			return err
 		}
+		if status != reviewworkflow.RunStatusPublishing {
+			if err := activateProgressCommentRefreshForUpdate(transaction, run, leaseNow); err != nil {
+				return err
+			}
+		}
 		lease.ExternalCalls = run.ExternalCalls
 		if lease.ExternalCalls < 0 {
 			lease.ExternalCalls = 0
@@ -76,6 +87,9 @@ func (r *ReviewRunStore) AcquireRun(ctx context.Context, runID uint64, startedAt
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, reviewworkflow.ErrRunSuperseded) {
+			return reviewworkflow.RunLease{}, reviewworkflow.ErrRunSuperseded
+		}
 		return reviewworkflow.RunLease{}, fmt.Errorf("리뷰 실행 lease를 얻지 못했습니다: %w", err)
 	}
 	if superseded {
@@ -92,6 +106,10 @@ func (r *ReviewRunStore) ResumeRun(ctx context.Context, runID uint64, leaseToken
 		if err := requireRunLease(transaction, runID, leaseToken); err != nil {
 			return err
 		}
+		var run model.ReviewRun
+		if err := transaction.First(&run, runID).Error; err != nil {
+			return err
+		}
 		updated := transaction.Model(&model.ReviewRun{}).
 			Where("id = ? AND lease_token = ? AND status = ?", runID, leaseToken, string(reviewworkflow.RunStatusPublishing)).
 			Updates(map[string]any{
@@ -104,9 +122,16 @@ func (r *ReviewRunStore) ResumeRun(ctx context.Context, runID uint64, leaseToken
 		if updated.RowsAffected != 1 {
 			return reviewworkflow.ErrRunLeased
 		}
-		return transaction.Model(&model.PullRequestState{}).
+		if err := transaction.Model(&model.PullRequestState{}).
 			Where("publishing_run_id = ? AND publishing_lease_token = ?", runID, leaseToken).
-			UpdateColumns(publicationClaimClearValues()).Error
+			UpdateColumns(publicationClaimClearValues()).Error; err != nil {
+			return err
+		}
+		currentAt, err := databaseTime(transaction)
+		if err != nil {
+			return err
+		}
+		return activateProgressCommentRefreshForUpdate(transaction, run, currentAt)
 	})
 	if err != nil {
 		return fmt.Errorf("게시 조정 실행을 리뷰 상태로 되돌리지 못했습니다: %w", err)
@@ -204,7 +229,10 @@ func (r *ReviewRunStore) ReleaseRun(ctx context.Context, runID uint64, leaseToke
 			}).Error; err != nil {
 			return err
 		}
-		if reviewworkflow.RunStatus(run.Status) != reviewworkflow.RunStatusPublishing || !leaseWasActive {
+		if reviewworkflow.RunStatus(run.Status) != reviewworkflow.RunStatusPublishing {
+			return activateProgressCommentRefreshForUpdate(transaction, run, leaseNow)
+		}
+		if !leaseWasActive {
 			return nil
 		}
 		return transaction.Model(&model.PullRequestState{}).

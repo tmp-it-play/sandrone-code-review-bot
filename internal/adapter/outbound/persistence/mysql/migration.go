@@ -39,6 +39,7 @@ func Migrate(database *gorm.DB) error {
 			&model.ProviderUsage{},
 			&model.CommandInvocation{},
 			&model.ReviewRun{},
+			&model.ProgressCommentOwnership{},
 			&model.ReviewUnit{},
 			&model.ReviewVerification{},
 			&model.CoverageItem{},
@@ -52,6 +53,9 @@ func Migrate(database *gorm.DB) error {
 			return fmt.Errorf("스키마를 반영하지 못했습니다: %w", err)
 		}
 		if err := backfillPullRequestStateReviewTimes(connection); err != nil {
+			return err
+		}
+		if err := backfillProgressCommentOwnerships(connection); err != nil {
 			return err
 		}
 		if err := backfillReviewVerificationCompletion(connection); err != nil {
@@ -88,6 +92,24 @@ func backfillPullRequestStateReviewTimes(database *gorm.DB) error {
 	result := database.Exec("UPDATE pull_request_states SET last_reviewed_at = updated_at WHERE last_reviewed_sha <> '' AND last_reviewed_at IS NULL")
 	if result.Error != nil {
 		return fmt.Errorf("기존 리뷰 보존 기준 시각을 복원하지 못했습니다: %w", result.Error)
+	}
+	return nil
+}
+
+func backfillProgressCommentOwnerships(database *gorm.DB) error {
+	result := database.Exec(`
+		INSERT INTO review_progress_comment_ownerships (marker, review_run_id, installation_id, owner, repository, number, refresh_sequence, create_not_before, next_refresh_at, refresh_expires_at, refresh_stop_requested_at, cleanup_lease_token, cleanup_lease_expires_at, created_at, updated_at)
+		SELECT selected.progress_marker, selected.id, selected.installation_id, selected.owner, selected.repository, selected.number, 0, NULL, NULL, selected.expires_at, selected.terminal_at, '', NULL, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+		FROM review_runs selected
+		INNER JOIN (
+			SELECT progress_marker, MAX(id) AS id
+			FROM review_runs
+			WHERE progress_marker <> ''
+			GROUP BY progress_marker
+		) latest ON latest.id = selected.id
+		ON DUPLICATE KEY UPDATE marker = review_progress_comment_ownerships.marker`)
+	if result.Error != nil {
+		return fmt.Errorf("진행 코멘트 소유권을 복원하지 못했습니다: %w", result.Error)
 	}
 	return nil
 }

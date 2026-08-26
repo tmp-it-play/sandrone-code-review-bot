@@ -17,33 +17,71 @@ const reviewTaskTimeout = 3 * time.Hour
 const conversationalTaskTimeout = 50 * time.Minute
 
 type Client struct {
-	client *asynq.Client
+	client    *asynq.Client
+	inspector *asynq.Inspector
 }
 
-func NewClient(client *asynq.Client) *Client {
-	return &Client{client: client}
+func NewClient(client *asynq.Client, inspector *asynq.Inspector) *Client {
+	return &Client{client: client, inspector: inspector}
 }
 
 func (c *Client) EnqueueReview(ctx context.Context, payload job.ReviewJob) error {
-	return c.enqueue(ctx, TaskReview, payload)
+	_, err := c.EnqueueReviewAdmission(ctx, payload)
+	return err
+}
+
+func (c *Client) EnqueueReviewAdmission(ctx context.Context, payload job.ReviewJob) (job.ReviewAdmission, error) {
+	accepted, err := c.enqueue(ctx, TaskReview, payload)
+	if err != nil {
+		return job.ReviewAdmission{}, err
+	}
+	if accepted {
+		return job.ReviewAdmission{Accepted: true}, nil
+	}
+	recoverable, err := c.progressRecoverable(payload)
+	if err != nil {
+		return job.ReviewAdmission{}, err
+	}
+	return job.ReviewAdmission{ProgressRecoverable: recoverable}, nil
 }
 
 func (c *Client) EnqueueSummary(ctx context.Context, payload job.SummaryJob) error {
-	return c.enqueue(ctx, TaskSummary, payload)
+	_, err := c.enqueue(ctx, TaskSummary, payload)
+	return err
+}
+
+func (c *Client) progressRecoverable(payload job.ReviewJob) (bool, error) {
+	id := deterministicTaskID(TaskReview, payload)
+	if id == "" || c.inspector == nil {
+		return false, nil
+	}
+	info, err := c.inspector.GetTaskInfo("default", id)
+	if err != nil {
+		return false, fmt.Errorf("기존 리뷰 작업을 확인하지 못했습니다: %w", err)
+	}
+	if info.State == asynq.TaskStateCompleted || info.State == asynq.TaskStateArchived {
+		return false, nil
+	}
+	var stored job.ReviewJob
+	if err := json.Unmarshal(info.Payload, &stored); err != nil {
+		return false, fmt.Errorf("기존 리뷰 작업을 읽지 못했습니다: %w", err)
+	}
+	return stored.ProgressMarker != "" && stored.ProgressMarker == payload.ProgressMarker, nil
 }
 
 func (c *Client) EnqueueReply(ctx context.Context, payload job.ReplyJob) error {
-	return c.enqueue(ctx, TaskReply, payload)
+	_, err := c.enqueue(ctx, TaskReply, payload)
+	return err
 }
 
 func (c *Client) Close() error {
 	return c.client.Close()
 }
 
-func (c *Client) enqueue(ctx context.Context, taskType string, payload any) error {
+func (c *Client) enqueue(ctx context.Context, taskType string, payload any) (bool, error) {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("작업을 직렬화하지 못했습니다: %w", err)
+		return false, fmt.Errorf("작업을 직렬화하지 못했습니다: %w", err)
 	}
 	task := asynq.NewTask(taskType, encoded)
 	options := []asynq.Option{
@@ -56,11 +94,11 @@ func (c *Client) enqueue(ctx context.Context, taskType string, payload any) erro
 	}
 	if _, err := c.client.EnqueueContext(ctx, task, options...); err != nil {
 		if errors.Is(err, asynq.ErrTaskIDConflict) {
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("작업을 큐에 넣지 못했습니다: %w", err)
+		return false, fmt.Errorf("작업을 큐에 넣지 못했습니다: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func timeoutFor(taskType string) time.Duration {

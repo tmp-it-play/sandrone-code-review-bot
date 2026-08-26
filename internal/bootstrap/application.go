@@ -29,6 +29,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/parsing"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/handlecommand"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/replythread"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/reviewenqueue"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/reviewpullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/summarizepullrequest"
 	"github.com/redis/go-redis/v9"
@@ -48,6 +49,7 @@ type Application struct {
 	cache               *redis.Client
 	reviewRetention     *maintenance.ReviewRetentionWorker
 	reviewPublication   *maintenance.ReviewPublicationWorker
+	progressComment     *maintenance.ProgressCommentWorker
 	webhookInbox        *maintenance.WebhookInboxWorker
 	webhookRecovery     *maintenance.WebhookDeliveryRecoveryWorker
 	occurrenceBootstrap *maintenance.FindingOccurrenceBootstrapWorker
@@ -85,13 +87,13 @@ func NewApplication(config Config) (*Application, error) {
 		Password: config.RedisPassword,
 		DB:       config.RedisDatabase,
 	}
-	queueClient := queueadapter.NewClient(asynq.NewClient(redisOptions))
+	inspector := asynq.NewInspector(redisOptions)
+	queueClient := queueadapter.NewClient(asynq.NewClient(redisOptions), inspector)
 	defer func() {
 		if releaseConstructionResources {
 			_ = queueClient.Close()
 		}
 	}()
-	inspector := asynq.NewInspector(redisOptions)
 	defer func() {
 		if releaseConstructionResources {
 			_ = inspector.Close()
@@ -117,7 +119,6 @@ func NewApplication(config Config) (*Application, error) {
 		settings.NewConfigLoader(contents, logger),
 		settings.NewInstructionCollector(contents, masker, logger),
 	)
-
 	reviews := mysql.NewReviewRepository(database)
 	reviewRuns := mysql.NewReviewRunStore(database)
 	reviewPublicationStore := mysql.NewReviewPublicationStore(database)
@@ -136,6 +137,15 @@ func NewApplication(config Config) (*Application, error) {
 	commands := mysql.NewCommandRepository(database)
 	webhookInboxRepository := mysql.NewWebhookInboxRepository(database)
 	cooldown := redisadapter.NewCooldown(cache)
+	reviewQueue := reviewenqueue.New(reviewenqueue.Dependencies{
+		Queue:     queueClient,
+		Settings:  settingSource,
+		Runs:      reviewRuns,
+		Publisher: publisher,
+		Renderer:  renderer,
+		Clock:     clock,
+		Logger:    logger,
+	})
 
 	completer := chain.New(buildProviders(config), cooldown, usageRepository, metrics, clock, logger, config.ProviderCooldown)
 	parser := parsing.ResultParser{}
@@ -156,6 +166,7 @@ func NewApplication(config Config) (*Application, error) {
 		Publications: reviewPublicationStore,
 		Findings:     findings,
 		State:        pullRequestState,
+		Progress:     reviewQueue,
 		Clock:        clock,
 		Parser:       parser,
 		Logger:       logger,
@@ -164,6 +175,7 @@ func NewApplication(config Config) (*Application, error) {
 	})
 	reviewRetention := maintenance.NewReviewRetentionWorker(reviewRetentionRepository, usageRepository, clock, logger, config.ReviewRetention)
 	reviewPublication := maintenance.NewReviewPublicationWorker(reviewRuns, reviewPublicationStore, reviewPublicationCandidates, publicationInvalidations, pullRequests, publisher, reviews, clock, logger, config.ReviewRetention)
+	progressComment := maintenance.NewProgressCommentWorker(reviewRuns, publisher, renderer, clock, logger)
 	occurrenceBootstrap := maintenance.NewFindingOccurrenceBootstrapWorker(occurrenceBootstrapRepository, logger)
 	summaryUseCase := summarizepullrequest.New(summarizepullrequest.Dependencies{
 		Source:       pullRequests,
@@ -199,13 +211,13 @@ func NewApplication(config Config) (*Application, error) {
 		Threads:     threads,
 		Publisher:   publisher,
 		Renderer:    renderer,
-		Queue:       queueClient,
+		Queue:       reviewQueue,
 		Commands:    commands,
 		Clock:       clock,
 		Logger:      logger,
 	})
 
-	router := webhook.NewEventRouter(queueClient, commandUseCase, inboundcommand.NewParser(botName), installations)
+	router := webhook.NewEventRouter(reviewQueue, commandUseCase, inboundcommand.NewParser(botName), installations)
 	webhookInbox := maintenance.NewWebhookInboxWorker(webhookInboxRepository, router, clock, masker, metrics, logger, config.DeliveryRetention)
 	webhookRecovery := maintenance.NewWebhookDeliveryRecoveryWorker(webhookDeliveryRecovery, clock, logger)
 	webhookHandler := webhook.NewHandler(config.WebhookSecret, webhookInboxRepository, clock, logger)
@@ -217,7 +229,7 @@ func NewApplication(config Config) (*Application, error) {
 		Usage:         usageRepository,
 		Commands:      commands,
 		Cooldown:      cooldown,
-		Queue:         queueClient,
+		Queue:         reviewQueue,
 		Inspector:     inspector,
 		BasePath:      config.BasePath,
 		Credentials:   dashboard.Credentials{Username: config.DashboardUsername, Password: config.DashboardPassword},
@@ -267,6 +279,7 @@ func NewApplication(config Config) (*Application, error) {
 		cache:               cache,
 		reviewRetention:     reviewRetention,
 		reviewPublication:   reviewPublication,
+		progressComment:     progressComment,
 		webhookInbox:        webhookInbox,
 		webhookRecovery:     webhookRecovery,
 		occurrenceBootstrap: occurrenceBootstrap,

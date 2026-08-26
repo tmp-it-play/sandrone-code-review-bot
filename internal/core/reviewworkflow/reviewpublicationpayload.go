@@ -24,8 +24,9 @@ func (p ReviewPublicationPayload) Bounded(marker string) ReviewPublicationPayloa
 	if p.Comments == nil {
 		p.Comments = make([]review.InlineComment, 0)
 	}
-	p.Body = boundedPublicationBody(p.Body, marker)
-	p.FallbackBody = boundedPublicationBody(p.FallbackBody, marker)
+	progressMarkers := ProgressMarkers(p.Body, marker)
+	p.Body = boundedPublicationBody(p.Body, marker, progressMarkers)
+	p.FallbackBody = boundedPublicationBody(p.FallbackBody, marker, progressMarkers)
 	return p
 }
 
@@ -56,7 +57,7 @@ func (p ReviewPublicationPayload) Validate(marker string) error {
 	return nil
 }
 
-func boundedPublicationBody(body string, marker string) string {
+func boundedPublicationBody(body string, marker string, progressMarkers []string) string {
 	if len(body) <= reviewPublicationBodyLimit {
 		return body
 	}
@@ -64,7 +65,8 @@ func boundedPublicationBody(body string, marker string) string {
 	if markerIndex < 0 {
 		return body
 	}
-	suffix := "\n\n_게시 본문이 길어 일부를 생략했습니다._\n" + marker
+	markers := append(append([]string{}, progressMarkers...), marker)
+	suffix := "\n\n_게시 본문이 길어 일부를 생략했습니다._\n" + strings.Join(markers, "\n")
 	limit := reviewPublicationBodyLimit - len(suffix)
 	if limit < 0 {
 		return body

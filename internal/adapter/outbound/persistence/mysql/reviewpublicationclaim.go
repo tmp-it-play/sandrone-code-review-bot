@@ -28,6 +28,9 @@ func (r *ReviewPublicationStore) ClaimPublication(ctx context.Context, runID uin
 		if err != nil {
 			return err
 		}
+		if err := stopProgressCommentRefreshForUpdate(transaction, run, leaseNow); err != nil {
+			return err
+		}
 		claimActive := state.PublishingRunID != 0 && state.PublishingLeaseExpiresAt != nil && state.PublishingLeaseExpiresAt.After(leaseNow)
 		claimOwned := state.PublishingRunID == run.ID && state.PublishingLeaseToken == runLeaseToken
 		if claimActive && !claimOwned {

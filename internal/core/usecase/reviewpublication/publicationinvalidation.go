@@ -2,26 +2,33 @@ package reviewpublication
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 )
 
-func (r *Reconciler) invalidatePublication(ctx context.Context, target pullrequest.Target, run reviewworkflow.Run, detail string) (*reviewworkflow.PublicationInvalidation, error) {
-	body := invalidationBody(detail)
-	err := r.deps.Publisher.InvalidatePublication(ctx, target, reviewworkflow.PublicationMarker(run.Key), body)
-	if err == nil {
-		return nil, nil
+func (r *Reconciler) publicationInvalidation(run reviewworkflow.Run, detail string, failure error) *reviewworkflow.PublicationInvalidation {
+	return r.deferredInvalidation(run, invalidationBody(detail), failure)
+}
+
+func (r *Reconciler) applyPublicationInvalidation(ctx context.Context, target pullrequest.Target, invalidation *reviewworkflow.PublicationInvalidation) error {
+	if invalidation == nil {
+		return nil
 	}
-	if run.HeartbeatAt.After(r.deps.Clock.Now().Add(-r.config.OrphanAfter)) {
-		return nil, err
+	if _, valid := reviewworkflow.ProgressMarkerForPublicationMarker(invalidation.Marker); !valid {
+		return nil
 	}
-	return r.deferredInvalidation(run, body, err), nil
+	return r.deps.Publisher.InvalidateReview(ctx, target, invalidation.Marker, invalidation.Reason)
 }
 
 func (r *Reconciler) deferredInvalidation(run reviewworkflow.Run, body string, failure error) *reviewworkflow.PublicationInvalidation {
 	now := r.deps.Clock.Now()
+	lastError := "게시 무효화 최종 확인 대기 중"
+	if failure != nil {
+		lastError = failure.Error()
+	}
 	return &reviewworkflow.PublicationInvalidation{
 		RunID:          run.ID,
 		InstallationID: run.InstallationID,
@@ -29,9 +36,10 @@ func (r *Reconciler) deferredInvalidation(run reviewworkflow.Run, body string, f
 		Repository:     run.Repository,
 		Number:         run.Number,
 		Marker:         reviewworkflow.PublicationMarker(run.Key),
+		ProgressMarker: strings.TrimSpace(run.ProgressMarker),
 		Reason:         body,
-		LastError:      failure.Error(),
-		NextAttemptAt:  now,
+		LastError:      lastError,
+		NextAttemptAt:  now.Add(reviewworkflow.PublicationInvalidationFenceDelay),
 		ExpiresAt:      now.Add(r.config.Retention),
 		CreatedAt:      now,
 		UpdatedAt:      now,

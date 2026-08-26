@@ -9,8 +9,13 @@ import (
 
 type ReviewRunRepository interface {
 	ReviewRunLifecycleRepository
+	ProgressCommentRefreshRepository
 	CreateOrGetRun(ctx context.Context, run reviewworkflow.Run) (reviewworkflow.Run, error)
+	FinishDetachedProgressFailure(ctx context.Context, run reviewworkflow.Run, result reviewworkflow.RunResult) (uint64, reviewworkflow.RunStatus, error)
 	HasRegisteredReviewContinuation(ctx context.Context, run reviewworkflow.Run, activityBoundary time.Time) (bool, error)
-	ResumeRun(ctx context.Context, runID uint64, leaseToken string, resumedAt time.Time) error
+	OwnsProgressMarker(ctx context.Context, runID uint64, marker string) (bool, error)
+	ClaimProgressCommentMutation(ctx context.Context, runID uint64, marker string, claimedAt time.Time, leaseExpiresAt time.Time) (string, bool, error)
+	CompleteProgressCommentMutation(ctx context.Context, marker string, leaseToken string, completedAt time.Time) error
+	FenceProgressCommentMutation(ctx context.Context, marker string, leaseToken string, failedAt time.Time, uncertainUntil time.Time) error
 	RenewRun(ctx context.Context, runID uint64, leaseToken string, heartbeatAt time.Time, leaseExpiresAt time.Time) error
 }

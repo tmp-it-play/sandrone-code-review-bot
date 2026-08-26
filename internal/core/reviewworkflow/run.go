@@ -19,6 +19,7 @@ type Run struct {
 	PromptVersion      string
 	ModelPolicyHash    string
 	RequestIdentity    string
+	ProgressMarker     string
 	Trigger            review.Trigger
 	Status             RunStatus
 	SnapshotObservedAt time.Time

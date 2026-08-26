@@ -17,6 +17,7 @@ func NewReconciler(deps ReconcilerDependencies, config ReconcilerConfig) *Reconc
 		publications: New(Dependencies{
 			Publisher: deps.Publisher,
 			Receipts:  deps.Publications,
+			Ownership: deps.Runs,
 			Clock:     deps.Clock,
 			Logger:    deps.Logger,
 		}),

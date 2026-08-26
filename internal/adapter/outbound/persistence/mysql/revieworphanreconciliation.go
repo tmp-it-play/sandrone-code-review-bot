@@ -92,6 +92,21 @@ func (r *ReviewRetentionRepository) ReconcileOrphans(ctx context.Context, staleB
 					UpdateColumns(publicationClaimClearValues()).Error; err != nil {
 					return err
 				}
+				progressMarker := run.ProgressMarker
+				if progressMarker == "" {
+					progressMarker = reviewworkflow.ProgressMarker(run.RunKey)
+				}
+				finalization := reviewworkflow.NewTerminalProgressFinalization(progressMarker)
+				if finalization != nil {
+					if invalidation := finalization.Invalidation(reviewworkflow.RunStatusFailed, terminalAt, expiresAt); invalidation != nil {
+						if err := persistPublicationInvalidation(transaction, run, *invalidation, terminalAt, expiresAt); err != nil {
+							return err
+						}
+					}
+				}
+				if err := stopProgressCommentRefreshForUpdate(transaction, run, terminalAt); err != nil {
+					return err
+				}
 				if err := updateReviewProjection(transaction, run, review.OutcomeFailed, "7일 동안 게시 결과를 확인하지 못해 종료됨", terminalAt); err != nil {
 					return err
 				}

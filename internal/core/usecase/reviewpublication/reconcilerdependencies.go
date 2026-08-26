@@ -7,7 +7,7 @@ import (
 )
 
 type ReconcilerDependencies struct {
-	Runs          outbound.ReviewRunLifecycleRepository
+	Runs          outbound.ReviewRunRepository
 	Publications  outbound.ReviewPublicationLifecycleRepository
 	Candidates    outbound.ReviewPublicationCandidateRepository
 	Invalidations outbound.ReviewPublicationInvalidationRepository

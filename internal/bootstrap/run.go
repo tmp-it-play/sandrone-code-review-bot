@@ -28,6 +28,7 @@ func (a *Application) Run(ctx context.Context) error {
 	for _, run := range []func(context.Context){
 		a.reviewRetention.Run,
 		a.reviewPublication.Run,
+		a.progressComment.Run,
 		a.webhookInbox.Run,
 		a.webhookRecovery.Run,
 		a.occurrenceBootstrap.Run,

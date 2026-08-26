@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
@@ -47,6 +48,7 @@ func newWorkflowRun(task job.ReviewJob, target pullrequest.Target, config settin
 		PromptVersion:      reviewPromptVersion,
 		ModelPolicyHash:    modelPolicyHash,
 		RequestIdentity:    requestIdentity,
+		ProgressMarker:     strings.TrimSpace(task.ProgressMarker),
 		Trigger:            task.Trigger,
 		Status:             reviewworkflow.RunStatusPlanning,
 		SnapshotObservedAt: snapshotObservedAt,

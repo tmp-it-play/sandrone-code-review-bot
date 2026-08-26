@@ -94,6 +94,9 @@ func (r *ReviewRetentionRepository) DeleteExpired(ctx context.Context, now time.
 			if err := transaction.Where("review_run_id IN ?", runIDs).Delete(&model.ReviewUnit{}).Error; err != nil {
 				return err
 			}
+			if err := transaction.Where("review_run_id IN ?", runIDs).Delete(&model.ProgressCommentOwnership{}).Error; err != nil {
+				return err
+			}
 			deleted := transaction.Where("id IN ?", runIDs).Delete(&model.ReviewRun{})
 			if deleted.Error != nil {
 				return deleted.Error

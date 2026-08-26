@@ -14,7 +14,7 @@ func (r *Reconciler) resolveUnverified(ctx context.Context, run reviewworkflow.R
 		return cause
 	}
 	detail := "7일 동안 GitHub 게시 결과를 확정하지 못했습니다"
-	invalidation := r.deferredInvalidation(run, invalidationBody(detail), cause)
+	invalidation := r.publicationInvalidation(run, detail, cause)
 	finishContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := r.finishWithLease(finishContext, run, leaseToken, reviewworkflow.RunStatusFailed, detail, "", false, invalidation); err != nil {
@@ -36,20 +36,23 @@ func (r *Reconciler) finishSuperseded(ctx context.Context, run reviewworkflow.Ru
 	now := r.deps.Clock.Now()
 	finishContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	_, err := r.deps.Runs.FinishRun(finishContext, run.ID, reviewworkflow.RunResult{
+	actualStatus, err := r.deps.Runs.FinishRun(finishContext, run.ID, reviewworkflow.RunResult{
 		Status:                  reviewworkflow.RunStatusSuperseded,
 		Error:                   detail,
 		TerminalAt:              now,
 		ExpiresAt:               now.Add(r.config.Retention),
 		PublicationInvalidation: invalidation,
 	})
+	if err == nil && actualStatus == reviewworkflow.RunStatusSuperseded {
+		r.applyInvalidationBestEffort(ctx, run, invalidation)
+	}
 	return err
 }
 
 func (r *Reconciler) finishWithLease(ctx context.Context, run reviewworkflow.Run, leaseToken string, status reviewworkflow.RunStatus, detail string, supersedingHeadSHA string, advanceWatermark bool, invalidation *reviewworkflow.PublicationInvalidation) error {
 	now := r.deps.Clock.Now()
 	finishContext, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	_, err := r.deps.Runs.FinishRun(finishContext, run.ID, reviewworkflow.RunResult{
+	actualStatus, err := r.deps.Runs.FinishRun(finishContext, run.ID, reviewworkflow.RunResult{
 		Status:                  status,
 		Error:                   detail,
 		SupersedingHeadSHA:      supersedingHeadSHA,
@@ -60,22 +63,14 @@ func (r *Reconciler) finishWithLease(ctx context.Context, run reviewworkflow.Run
 		PublicationInvalidation: invalidation,
 	})
 	finishCancel()
+	if err == nil && actualStatus == status {
+		r.applyInvalidationBestEffort(ctx, run, invalidation)
+	}
 	if errors.Is(err, reviewworkflow.ErrRunSuperseded) && status != reviewworkflow.RunStatusSuperseded {
-		target := pullrequest.Target{
-			InstallationID: run.InstallationID,
-			Owner:          run.Owner,
-			Repository:     run.Repository,
-			Number:         run.Number,
-			BaseSHA:        run.BaseSHA,
-			HeadSHA:        run.HeadSHA,
-		}
 		detail = "게시 결과 확정 중 더 최신인 리뷰 실행이 확인되었습니다"
-		invalidation, invalidateErr := r.invalidatePublication(ctx, target, run, detail)
-		if invalidateErr != nil {
-			return invalidateErr
-		}
+		invalidation = r.publicationInvalidation(run, detail, nil)
 		finalizeContext, finalizeCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		_, err = r.deps.Runs.FinishRun(finalizeContext, run.ID, reviewworkflow.RunResult{
+		actualStatus, err = r.deps.Runs.FinishRun(finalizeContext, run.ID, reviewworkflow.RunResult{
 			Status:                  reviewworkflow.RunStatusSuperseded,
 			Error:                   detail,
 			TerminalAt:              now,
@@ -84,6 +79,23 @@ func (r *Reconciler) finishWithLease(ctx context.Context, run reviewworkflow.Run
 			PublicationInvalidation: invalidation,
 		})
 		finalizeCancel()
+		if err == nil && actualStatus == reviewworkflow.RunStatusSuperseded {
+			r.applyInvalidationBestEffort(ctx, run, invalidation)
+		}
 	}
 	return err
+}
+
+func (r *Reconciler) applyInvalidationBestEffort(ctx context.Context, run reviewworkflow.Run, invalidation *reviewworkflow.PublicationInvalidation) {
+	target := pullrequest.Target{
+		InstallationID: run.InstallationID,
+		Owner:          run.Owner,
+		Repository:     run.Repository,
+		Number:         run.Number,
+		BaseSHA:        run.BaseSHA,
+		HeadSHA:        run.HeadSHA,
+	}
+	if err := r.applyPublicationInvalidation(ctx, target, invalidation); err != nil {
+		r.deps.Logger.Warn("게시된 리뷰를 즉시 무효화하지 못해 재조정을 기다립니다", "run", run.ID, "error", err)
+	}
 }

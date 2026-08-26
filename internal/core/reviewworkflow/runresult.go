@@ -15,5 +15,7 @@ type RunResult struct {
 	ExpiresAt               time.Time
 	AdvanceWatermark        bool
 	LeaseToken              string
+	DetachedFinalization    bool
 	PublicationInvalidation *PublicationInvalidation
+	TerminalProgress        *TerminalProgressFinalization
 }

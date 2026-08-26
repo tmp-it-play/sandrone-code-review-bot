@@ -24,6 +24,7 @@ type Dependencies struct {
 	Publications outbound.ReviewPublicationRepository
 	Findings     outbound.FindingRepository
 	State        outbound.PullRequestStateRepository
+	Progress     ProgressAdmission
 	Clock        outbound.Clock
 	Parser       parsing.ResultParser
 	Logger       *slog.Logger

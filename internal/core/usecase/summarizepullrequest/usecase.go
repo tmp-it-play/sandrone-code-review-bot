@@ -370,7 +370,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		},
 		Style:   review.Style{Emoji: config.Emoji, Tone: string(config.Tone)},
 		Trigger: task.Trigger,
-	}), u.deps.Renderer.Marker(), publicationMarker)
+	}), u.deps.Renderer.Marker(), publicationMarker, u.deps.Renderer.SummaryMarker())
 	releasePublicationLease = false
 	if err := withHeartbeat(func(placementContext context.Context) error {
 		return u.place(placementContext, target, config.Sandrone.SummaryPlacement, publicationMarker, body)
@@ -435,7 +435,7 @@ func (u *UseCase) place(ctx context.Context, target pullrequest.Target, placemen
 	case setting.SummaryPlacementPullRequestBody:
 		publishErr = u.deps.Publisher.UpdatePullRequestBody(ctx, target, u.deps.Renderer.Marker(), body)
 	case setting.SummaryPlacementUpdateComment:
-		commentID, found, err := u.deps.Publisher.FindComment(ctx, target, u.deps.Renderer.Marker())
+		commentID, found, err := u.deps.Publisher.FindComment(ctx, target, u.deps.Renderer.SummaryMarker())
 		if err != nil {
 			return err
 		}
@@ -472,16 +472,24 @@ func (u *UseCase) publicationExists(ctx context.Context, target pullrequest.Targ
 	return false, errors.Join(bodyErr, commentErr)
 }
 
-func summaryBodyWithMarker(body string, sectionMarker string, publicationMarker string) string {
-	if publicationMarker == "" {
+func summaryBodyWithMarker(body string, sectionMarker string, publicationMarker string, summaryMarker string) string {
+	markers := make([]string, 0, 2)
+	if publicationMarker != "" {
+		markers = append(markers, publicationMarker)
+	}
+	if summaryMarker != "" {
+		markers = append(markers, summaryMarker)
+	}
+	if len(markers) == 0 {
 		return body
 	}
+	markerBlock := strings.Join(markers, "\n")
 	closing := strings.Replace(sectionMarker, "<!-- ", "<!-- /", 1)
 	index := strings.LastIndex(body, closing)
 	if index < 0 {
-		return strings.TrimRight(body, "\n") + "\n" + publicationMarker
+		return strings.TrimRight(body, "\n") + "\n" + markerBlock
 	}
-	return body[:index] + publicationMarker + "\n" + body[index:]
+	return body[:index] + markerBlock + "\n" + body[index:]
 }
 
 func (u *UseCase) trim(files []pullrequest.ChangedFile, config setting.RepoConfig) []pullrequest.ChangedFile {
