@@ -38,16 +38,10 @@ func (t Target) ContentRefs() []string {
 }
 
 func (t Target) PolicyRefs() []string {
-	refs := make([]string, 0, 3)
-	for _, candidate := range []string{t.BaseSHA, t.BaseRef} {
-		if candidate == "" {
-			continue
-		}
-		if !containsRef(refs, candidate) {
-			refs = append(refs, candidate)
-		}
+	if t.HeadSHA != "" {
+		return []string{t.HeadSHA}
 	}
-	return append(refs, "")
+	return []string{""}
 }
 
 func containsRef(refs []string, candidate string) bool {

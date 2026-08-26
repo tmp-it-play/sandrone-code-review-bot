@@ -112,7 +112,7 @@ sandrone:
 | `sandrone.summaryPlacement`  | `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다. |
 | `sandrone.maxReviewBatches`  |           `8` | 큰 PR을 의미 단위로 나누어 검토할 최대 횟수입니다.                         |
 
-리뷰 설정과 지침 파일은 PR의 변경 브랜치가 아니라 고정된 base SHA에서 읽습니다. 저장소 설정으로도 비용 상한을 해제할 수 없으며 리뷰 배치는 `1~8`, 모델 출력은 최대 `8192` token, 추가 파일 읽기는 최대 `6`, 게시 finding은 전체 `25`건으로 제한됩니다.
+리뷰 설정과 지침 파일은 PR 출발지 브랜치의 고정된 head SHA에서 읽습니다. 예를 들어 `develop` → `main` PR이면 `develop`의 head 커밋을 기준으로 합니다. 저장소 설정으로도 비용 상한을 해제할 수 없으며 리뷰 배치는 `1~8`, 모델 출력은 최대 `8192` token, 추가 파일 읽기는 최대 `6`, 게시 finding은 전체 `25`건으로 제한됩니다.
 
 ## 문체 프리셋
 
