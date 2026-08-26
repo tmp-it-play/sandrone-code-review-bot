@@ -3,26 +3,28 @@ package job
 import (
 	"time"
 
+	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 )
 
 type ReviewJob struct {
-	Target             pullrequest.Target
-	Trigger            review.Trigger
-	Invoker            string
-	Instruction        string
-	CommentID          int64
-	InThread           bool
-	RequestIdentity    string
-	RequestReceivedAt  time.Time
-	SnapshotObservedAt time.Time
-	SnapshotOrderKey   string
-	ProgressCommentID  int64
-	ProgressMarker     string
-	ProgressNotBefore  time.Time
-	ReactionAdded      bool
-	Attempt            int
-	FinalAttempt       bool
-	Incremental        bool
+	Target               pullrequest.Target
+	Trigger              review.Trigger
+	Invoker              string
+	Instruction          string
+	CommentID            int64
+	InThread             bool
+	RequestIdentity      string
+	RequestReceivedAt    time.Time
+	SnapshotObservedAt   time.Time
+	SnapshotOrderKey     string
+	ProgressCommentID    int64
+	ProgressMarker       string
+	ProgressMessageTheme progresscomment.Theme
+	ProgressNotBefore    time.Time
+	ReactionAdded        bool
+	Attempt              int
+	FinalAttempt         bool
+	Incremental          bool
 }

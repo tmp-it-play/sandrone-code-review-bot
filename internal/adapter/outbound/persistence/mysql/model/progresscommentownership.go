@@ -9,6 +9,7 @@ type ProgressCommentOwnership struct {
 	Owner                  string     `gorm:"size:255;not null;default:''"`
 	Repository             string     `gorm:"size:255;not null;default:''"`
 	Number                 int        `gorm:"not null;default:0"`
+	ProgressMessageTheme   string     `gorm:"size:32;not null;default:programming"`
 	RefreshSequence        uint64     `gorm:"not null;default:0"`
 	CreateNotBefore        *time.Time `gorm:"index"`
 	NextRefreshAt          *time.Time `gorm:"index"`

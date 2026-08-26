@@ -8,6 +8,7 @@ import (
 
 type Dependencies struct {
 	Queue     AdmissionQueue
+	Source    outbound.PullRequestSource
 	Settings  outbound.SettingSource
 	Runs      outbound.ReviewRunRepository
 	Publisher outbound.ReviewPublisher

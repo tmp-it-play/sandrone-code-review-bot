@@ -23,19 +23,21 @@ func (r *ReviewRunStore) EnsureProgressCommentRefresh(ctx context.Context, refre
 	if refresh.NextRefreshAt.IsZero() || !refresh.ExpiresAt.After(refresh.NextRefreshAt) {
 		return false, fmt.Errorf("진행 코멘트 갱신 시간이 올바르지 않습니다")
 	}
+	theme := progresscomment.NormalizeTheme(refresh.MessageTheme)
 	entry := model.ProgressCommentOwnership{
-		Marker:            refresh.Marker,
-		InstallationID:    refresh.Target.InstallationID,
-		Owner:             refresh.Target.Owner,
-		Repository:        refresh.Target.Repository,
-		Number:            refresh.Target.Number,
-		RefreshSequence:   refresh.Sequence,
-		CreateNotBefore:   timePointer(refresh.CreateNotBefore),
-		NextRefreshAt:     timePointer(refresh.NextRefreshAt),
-		RefreshExpiresAt:  timePointer(refresh.ExpiresAt),
-		CleanupLeaseToken: "",
-		CreatedAt:         refresh.CreatedAt,
-		UpdatedAt:         refresh.CreatedAt,
+		Marker:               refresh.Marker,
+		InstallationID:       refresh.Target.InstallationID,
+		Owner:                refresh.Target.Owner,
+		Repository:           refresh.Target.Repository,
+		Number:               refresh.Target.Number,
+		ProgressMessageTheme: string(theme),
+		RefreshSequence:      refresh.Sequence,
+		CreateNotBefore:      timePointer(refresh.CreateNotBefore),
+		NextRefreshAt:        timePointer(refresh.NextRefreshAt),
+		RefreshExpiresAt:     timePointer(refresh.ExpiresAt),
+		CleanupLeaseToken:    "",
+		CreatedAt:            refresh.CreatedAt,
+		UpdatedAt:            refresh.CreatedAt,
 	}
 	active := false
 	err := r.database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
@@ -191,8 +193,9 @@ func (r *ReviewRunStore) RetryProgressCommentRefresh(ctx context.Context, refres
 
 func progressRefreshOf(entry model.ProgressCommentOwnership) progresscomment.Refresh {
 	return progresscomment.Refresh{
-		Marker: entry.Marker,
-		RunID:  entry.ReviewRunID,
+		Marker:       entry.Marker,
+		RunID:        entry.ReviewRunID,
+		MessageTheme: progresscomment.NormalizeTheme(progresscomment.Theme(entry.ProgressMessageTheme)),
 		Target: pullrequest.Target{
 			InstallationID: entry.InstallationID,
 			Owner:          entry.Owner,

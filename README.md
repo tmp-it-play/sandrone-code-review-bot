@@ -68,6 +68,7 @@ sandrone:
   autoReview: true
   autoReviewOnDraft: true
   autoReviewOnPush: false
+  progressMessageTheme: programming
   summaryPlacement: new-comment
   maxReviewBatches: 8
 ```
@@ -104,13 +105,14 @@ sandrone:
 
 `language`, `tone`, `allowStrongTone`, `minSeverity` 같은 리뷰 설정은 모두 `sandrone:` 아래에서 Sandrone 전용값으로 다시 지정할 수 있습니다.
 
-| 설정                         |        기본값 | 설명                                                                       |
-|------------------------------|--------------:|----------------------------------------------------------------------------|
-| `sandrone.autoReview`        |        `true` | 새 PR의 자동 리뷰를 켜거나 끕니다.                                         |
-| `sandrone.autoReviewOnDraft` |        `true` | Draft 상태로 열린 PR의 자동 리뷰를 켜거나 끕니다.                          |
-| `sandrone.autoReviewOnPush`  |       `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다.                              |
-| `sandrone.summaryPlacement`  | `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다. |
-| `sandrone.maxReviewBatches`  |           `8` | 큰 PR을 의미 단위로 나누어 검토할 최대 횟수입니다.                         |
+| 설정                            |        기본값 | 설명                                                                       |
+|---------------------------------|--------------:|----------------------------------------------------------------------------|
+| `sandrone.autoReview`           |        `true` | 새 PR의 자동 리뷰를 켜거나 끕니다.                                         |
+| `sandrone.autoReviewOnDraft`    |        `true` | Draft 상태로 열린 PR의 자동 리뷰를 켜거나 끕니다.                          |
+| `sandrone.autoReviewOnPush`     |       `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다.                              |
+| `sandrone.progressMessageTheme` | `programming` | 리뷰 처리 중 약 30초마다 바뀌는 진행 문구 묶음입니다. `programming`, `sandrone`, `stock`, `history` 중 하나입니다. |
+| `sandrone.summaryPlacement`     | `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다. |
+| `sandrone.maxReviewBatches`     |           `8` | 큰 PR을 의미 단위로 나누어 검토할 최대 횟수입니다.                         |
 
 리뷰 설정과 지침 파일은 PR 출발지 브랜치의 고정된 head SHA에서 읽습니다. 예를 들어 `develop` → `main` PR이면 `develop`의 head 커밋을 기준으로 합니다. 저장소 설정으로도 비용 상한을 해제할 수 없으며 리뷰 배치는 `1~8`, 모델 출력은 최대 `8192` token, 추가 파일 읽기는 최대 `6`, 게시 finding은 전체 `25`건으로 제한됩니다.
 

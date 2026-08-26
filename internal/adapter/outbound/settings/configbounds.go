@@ -3,6 +3,7 @@ package settings
 import (
 	"math"
 
+	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/setting"
 )
 
@@ -16,6 +17,7 @@ func boundRepoConfig(config setting.RepoConfig) setting.RepoConfig {
 	config.MaxSourceChars = boundedInt(config.MaxSourceChars, 0, defaults.MaxSourceChars, defaults.MaxSourceChars)
 	config.MaxExtraReads = boundedInt(config.MaxExtraReads, 0, defaults.MaxExtraReads, defaults.MaxExtraReads)
 	config.MaxInlineComments = boundedInt(config.MaxInlineComments, 0, defaults.MaxInlineComments, defaults.MaxInlineComments)
+	config.Sandrone.ProgressMessageTheme = progresscomment.NormalizeTheme(config.Sandrone.ProgressMessageTheme)
 	config.Sandrone.MaxInstructionChars = boundedInt(config.Sandrone.MaxInstructionChars, 0, defaults.Sandrone.MaxInstructionChars, defaults.Sandrone.MaxInstructionChars)
 	config.Sandrone.MaxReviewBatches = boundedInt(config.Sandrone.MaxReviewBatches, 1, defaults.Sandrone.MaxReviewBatches, defaults.Sandrone.MaxReviewBatches)
 	return config

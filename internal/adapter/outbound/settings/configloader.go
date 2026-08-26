@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/setting"
@@ -129,6 +130,11 @@ func mergeSandrone(current setting.SandroneSetting, raw rawSandrone) setting.San
 	}
 	if raw.AutoReviewOnPush != nil {
 		current.AutoReviewOnPush = *raw.AutoReviewOnPush
+	}
+	if raw.ProgressMessageTheme != nil {
+		if theme, ok := progresscomment.ParseTheme(*raw.ProgressMessageTheme); ok {
+			current.ProgressMessageTheme = theme
+		}
 	}
 	if raw.SummaryPlacement != nil {
 		if placement, ok := setting.ParseSummaryPlacement(*raw.SummaryPlacement); ok {

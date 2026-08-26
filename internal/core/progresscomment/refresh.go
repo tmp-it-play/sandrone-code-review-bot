@@ -13,6 +13,7 @@ type Refresh struct {
 	Marker          string
 	RunID           uint64
 	Target          pullrequest.Target
+	MessageTheme    Theme
 	Sequence        uint64
 	CreatedAt       time.Time
 	CreateNotBefore time.Time

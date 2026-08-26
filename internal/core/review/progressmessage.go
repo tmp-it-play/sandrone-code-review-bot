@@ -3,9 +3,11 @@ package review
 import (
 	"crypto/sha256"
 	"encoding/binary"
+
+	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
 )
 
-var progressMessages = [...]string{
+var sandroneProgressMessages = [...]string{
 	"「산드로네」가 파지오의 응축 광선 초점을 우아하게 조율하는 중...",
 	"「산드로네」가 파지오의 연산량 계기를 흘끗 보고 태엽을 한 칸 되감는 중...",
 	"「산드로네」가 파지오가 쏠 프리즘 탄환의 각도를 다시 계산하는 중...",
@@ -115,11 +117,25 @@ var progressMessageStrides = [...]uint64{
 	77, 79, 81, 83, 87, 89, 91, 93, 97,
 }
 
-func ProgressMessage(runKey string, sequence uint64) string {
+func ProgressMessage(theme progresscomment.Theme, runKey string, sequence uint64) string {
+	messages := progressMessagesForTheme(theme)
 	digest := sha256.Sum256([]byte(runKey))
-	messageCount := uint64(len(progressMessages))
+	messageCount := uint64(len(messages))
 	start := binary.BigEndian.Uint64(digest[:8]) % messageCount
 	stride := progressMessageStrides[binary.BigEndian.Uint64(digest[8:16])%uint64(len(progressMessageStrides))]
 	index := (start + sequence%messageCount*stride) % messageCount
-	return progressMessages[index]
+	return messages[index]
+}
+
+func progressMessagesForTheme(theme progresscomment.Theme) []string {
+	switch progresscomment.NormalizeTheme(theme) {
+	case progresscomment.ThemeSandrone:
+		return sandroneProgressMessages[:]
+	case progresscomment.ThemeStock:
+		return stockProgressMessages[:]
+	case progresscomment.ThemeHistory:
+		return historyProgressMessages[:]
+	default:
+		return programmingProgressMessages[:]
+	}
 }

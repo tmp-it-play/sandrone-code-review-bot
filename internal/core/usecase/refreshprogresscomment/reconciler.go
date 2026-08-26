@@ -103,7 +103,7 @@ func (r *Reconciler) apply(ctx context.Context, refresh progresscomment.Refresh,
 	if !valid {
 		return false, errors.New("진행 코멘트 갱신 marker가 올바르지 않습니다")
 	}
-	body := r.deps.Renderer.ProgressBody(review.ProgressMessage(key, refresh.Sequence), refresh.Marker)
+	body := r.deps.Renderer.ProgressBody(review.ProgressMessage(refresh.MessageTheme, key, refresh.Sequence), refresh.Marker)
 	commentID, exists, err := r.deps.Publisher.FindComment(ctx, refresh.Target, refresh.Marker)
 	if err != nil {
 		return false, err

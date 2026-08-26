@@ -26,17 +26,18 @@ func ensureProgressCommentOwnership(transaction *gorm.DB, run model.ReviewRun, c
 	ownershipErr := transaction.Where("marker = ?", run.ProgressMarker).First(&ownership).Error
 	if errors.Is(ownershipErr, gorm.ErrRecordNotFound) {
 		ownership = model.ProgressCommentOwnership{
-			Marker:           run.ProgressMarker,
-			ReviewRunID:      run.ID,
-			InstallationID:   run.InstallationID,
-			Owner:            run.Owner,
-			Repository:       run.Repository,
-			Number:           run.Number,
-			CreateNotBefore:  timePointer(currentAt),
-			NextRefreshAt:    timePointer(currentAt.Add(progresscomment.RefreshInterval)),
-			RefreshExpiresAt: timePointer(currentAt.Add(progresscomment.RefreshLifetime)),
-			CreatedAt:        currentAt,
-			UpdatedAt:        currentAt,
+			Marker:               run.ProgressMarker,
+			ReviewRunID:          run.ID,
+			InstallationID:       run.InstallationID,
+			Owner:                run.Owner,
+			Repository:           run.Repository,
+			Number:               run.Number,
+			ProgressMessageTheme: string(progresscomment.ThemeProgramming),
+			CreateNotBefore:      timePointer(currentAt),
+			NextRefreshAt:        timePointer(currentAt.Add(progresscomment.RefreshInterval)),
+			RefreshExpiresAt:     timePointer(currentAt.Add(progresscomment.RefreshLifetime)),
+			CreatedAt:            currentAt,
+			UpdatedAt:            currentAt,
 		}
 		created := transaction.Clauses(clause.OnConflict{DoNothing: true}).Create(&ownership)
 		if created.Error != nil {

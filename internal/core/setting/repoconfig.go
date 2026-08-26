@@ -1,6 +1,9 @@
 package setting
 
-import "github.com/it-play/sandrone-code-review-bot/internal/core/review"
+import (
+	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
+)
 
 type RepoConfig struct {
 	Language          string
@@ -43,14 +46,15 @@ func DefaultRepoConfig() RepoConfig {
 		MaxInlineComments: 25,
 		ThreadReply:       true,
 		Sandrone: SandroneSetting{
-			AutoReview:          true,
-			AutoReviewOnDraft:   true,
-			AutoReviewOnPush:    false,
-			SummaryPlacement:    SummaryPlacementNewComment,
-			Providers:           nil,
-			MaxInstructionChars: 20000,
-			MaxReviewBatches:    8,
-			InstructionFiles:    DefaultInstructionFiles(),
+			AutoReview:           true,
+			AutoReviewOnDraft:    true,
+			AutoReviewOnPush:     false,
+			ProgressMessageTheme: progresscomment.ThemeProgramming,
+			SummaryPlacement:     SummaryPlacementNewComment,
+			Providers:            nil,
+			MaxInstructionChars:  20000,
+			MaxReviewBatches:     8,
+			InstructionFiles:     DefaultInstructionFiles(),
 		},
 	}
 }

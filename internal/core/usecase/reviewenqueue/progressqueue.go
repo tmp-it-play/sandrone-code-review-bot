@@ -3,6 +3,7 @@ package reviewenqueue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -25,9 +26,12 @@ func New(deps Dependencies) *ProgressQueue {
 }
 
 func (q *ProgressQueue) EnqueueReview(ctx context.Context, task job.ReviewJob) error {
-	prepare := q.shouldPrepare(ctx, task)
+	prepare, theme, err := q.progressPreparation(ctx, &task)
+	if err != nil {
+		return err
+	}
 	if prepare {
-		q.prepareAdmission(&task)
+		q.prepareAdmission(&task, theme)
 	}
 	admission, err := q.deps.Queue.EnqueueReviewAdmission(ctx, task)
 	if err != nil || !prepare {
@@ -39,6 +43,7 @@ func (q *ProgressQueue) EnqueueReview(ctx context.Context, task job.ReviewJob) e
 	if !admission.Accepted && !admission.ProgressRecoverable {
 		return nil
 	}
+	task.ProgressMessageTheme = progresscomment.NormalizeTheme(admission.ProgressMessageTheme)
 	if !admission.Accepted {
 		q.deps.Logger.Info("이미 등록된 리뷰 작업의 진행 코멘트를 확인합니다", "target", task.Target.Reference())
 	}
@@ -65,6 +70,7 @@ func (q *ProgressQueue) ensureReviewProgress(ctx context.Context, task job.Revie
 	refreshActive, refreshErr := q.deps.Runs.EnsureProgressCommentRefresh(refreshContext, progresscomment.Refresh{
 		Marker:          task.ProgressMarker,
 		Target:          task.Target,
+		MessageTheme:    progresscomment.NormalizeTheme(task.ProgressMessageTheme),
 		Sequence:        1,
 		CreatedAt:       now,
 		CreateNotBefore: task.ProgressNotBefore,
@@ -89,20 +95,30 @@ func (q *ProgressQueue) EnqueueReply(ctx context.Context, task job.ReplyJob) err
 	return q.deps.Queue.EnqueueReply(ctx, task)
 }
 
-func (q *ProgressQueue) shouldPrepare(ctx context.Context, task job.ReviewJob) bool {
-	if !task.Trigger.IsAutomatic() {
-		return true
+func (q *ProgressQueue) progressPreparation(ctx context.Context, task *job.ReviewJob) (bool, progresscomment.Theme, error) {
+	theme := progresscomment.ThemeProgramming
+	if task.Target.HeadSHA == "" {
+		request, err := q.deps.Source.PullRequest(ctx, task.Target)
+		if err != nil {
+			return false, theme, fmt.Errorf("진행 코멘트 설정을 위한 Pull Request를 읽지 못했습니다: %w", err)
+		}
+		task.Target.BaseSHA = request.BaseSHA
+		task.Target.BaseRef = request.BaseRef
+		task.Target.HeadSHA = request.HeadSHA
 	}
 	config, err := q.deps.Settings.RepoConfig(ctx, task.Target)
 	if err != nil {
-		q.deps.Logger.Warn("즉시 진행 코멘트를 위한 자동 리뷰 설정을 읽지 못했습니다", "target", task.Target.Reference(), "error", err)
-		return true
+		return false, theme, fmt.Errorf("즉시 진행 코멘트를 위한 저장소 설정을 읽지 못했습니다: %w", err)
+	}
+	theme = progresscomment.NormalizeTheme(config.Sandrone.ProgressMessageTheme)
+	if !task.Trigger.IsAutomatic() {
+		return true, theme, nil
 	}
 	if !config.Sandrone.AutoReview {
-		return false
+		return false, theme, nil
 	}
 	if task.Trigger == review.TriggerPullRequestDraftOpened && !config.Sandrone.AutoReviewOnDraft {
-		return false
+		return false, theme, nil
 	}
 	if task.Trigger == review.TriggerPullRequestPushed && !config.Sandrone.AutoReviewOnPush {
 		activityBoundary := task.RequestReceivedAt
@@ -118,20 +134,21 @@ func (q *ProgressQueue) shouldPrepare(ctx context.Context, task job.ReviewJob) b
 		}, activityBoundary)
 		if continuationErr != nil {
 			q.deps.Logger.Warn("즉시 진행 코멘트를 위한 등록 리뷰 연속성을 확인하지 못했습니다", "target", task.Target.Reference(), "error", continuationErr)
-			return true
+			return true, theme, nil
 		}
-		return continues
+		return continues, theme, nil
 	}
-	return true
+	return true, theme, nil
 }
 
-func (q *ProgressQueue) prepareAdmission(task *job.ReviewJob) {
+func (q *ProgressQueue) prepareAdmission(task *job.ReviewJob, theme progresscomment.Theme) {
 	key := progressKey(*task)
 	if key == "" {
 		return
 	}
 	marker := reviewworkflow.ProgressMarker(key)
 	task.ProgressMarker = marker
+	task.ProgressMessageTheme = progresscomment.NormalizeTheme(theme)
 	task.ProgressNotBefore = q.deps.Clock.Now().Add(progressProducerTimeout + reviewworkflow.PublicationInvalidationFenceDelay)
 }
 
@@ -164,7 +181,7 @@ func (q *ProgressQueue) ensureProgressComment(ctx context.Context, task job.Revi
 		return errors.Join(producerContext.Err(), q.completeProgressMutation(ctx, marker, leaseToken))
 	}
 	key := progressKey(task)
-	body := q.deps.Renderer.ProgressBody(review.ProgressMessage(key, 0), marker)
+	body := q.deps.Renderer.ProgressBody(review.ProgressMessage(task.ProgressMessageTheme, key, 0), marker)
 	_, createErr := q.deps.Publisher.CreateComment(producerContext, task.Target, body)
 	if createErr == nil {
 		return q.completeProgressMutation(ctx, marker, leaseToken)

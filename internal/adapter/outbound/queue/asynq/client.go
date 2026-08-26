@@ -9,6 +9,7 @@ import (
 
 	"github.com/hibiken/asynq"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
 )
 
 const taskRetention = 30 * 24 * time.Hour
@@ -36,13 +37,13 @@ func (c *Client) EnqueueReviewAdmission(ctx context.Context, payload job.ReviewJ
 		return job.ReviewAdmission{}, err
 	}
 	if accepted {
-		return job.ReviewAdmission{Accepted: true}, nil
+		return job.ReviewAdmission{Accepted: true, ProgressMessageTheme: progresscomment.NormalizeTheme(payload.ProgressMessageTheme)}, nil
 	}
-	recoverable, err := c.progressRecoverable(payload)
+	admission, err := c.progressAdmission(payload)
 	if err != nil {
 		return job.ReviewAdmission{}, err
 	}
-	return job.ReviewAdmission{ProgressRecoverable: recoverable}, nil
+	return admission, nil
 }
 
 func (c *Client) EnqueueSummary(ctx context.Context, payload job.SummaryJob) error {
@@ -50,23 +51,27 @@ func (c *Client) EnqueueSummary(ctx context.Context, payload job.SummaryJob) err
 	return err
 }
 
-func (c *Client) progressRecoverable(payload job.ReviewJob) (bool, error) {
+func (c *Client) progressAdmission(payload job.ReviewJob) (job.ReviewAdmission, error) {
 	id := deterministicTaskID(TaskReview, payload)
 	if id == "" || c.inspector == nil {
-		return false, nil
+		return job.ReviewAdmission{}, nil
 	}
 	info, err := c.inspector.GetTaskInfo("default", id)
 	if err != nil {
-		return false, fmt.Errorf("기존 리뷰 작업을 확인하지 못했습니다: %w", err)
+		return job.ReviewAdmission{}, fmt.Errorf("기존 리뷰 작업을 확인하지 못했습니다: %w", err)
 	}
 	if info.State == asynq.TaskStateCompleted || info.State == asynq.TaskStateArchived {
-		return false, nil
+		return job.ReviewAdmission{}, nil
 	}
 	var stored job.ReviewJob
 	if err := json.Unmarshal(info.Payload, &stored); err != nil {
-		return false, fmt.Errorf("기존 리뷰 작업을 읽지 못했습니다: %w", err)
+		return job.ReviewAdmission{}, fmt.Errorf("기존 리뷰 작업을 읽지 못했습니다: %w", err)
 	}
-	return stored.ProgressMarker != "" && stored.ProgressMarker == payload.ProgressMarker, nil
+	recoverable := stored.ProgressMarker != "" && stored.ProgressMarker == payload.ProgressMarker
+	return job.ReviewAdmission{
+		ProgressRecoverable:  recoverable,
+		ProgressMessageTheme: progresscomment.NormalizeTheme(stored.ProgressMessageTheme),
+	}, nil
 }
 
 func (c *Client) EnqueueReply(ctx context.Context, payload job.ReplyJob) error {

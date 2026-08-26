@@ -139,6 +139,7 @@ func NewApplication(config Config) (*Application, error) {
 	cooldown := redisadapter.NewCooldown(cache)
 	reviewQueue := reviewenqueue.New(reviewenqueue.Dependencies{
 		Queue:     queueClient,
+		Source:    pullRequests,
 		Settings:  settingSource,
 		Runs:      reviewRuns,
 		Publisher: publisher,
