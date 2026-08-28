@@ -32,6 +32,7 @@ func (s *SessionStore) Issue(writer http.ResponseWriter, username string) {
 		Value:    base64.RawURLEncoding.EncodeToString([]byte(signed)),
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Unix(expiry, 0),
 	})
@@ -43,6 +44,7 @@ func (s *SessionStore) Clear(writer http.ResponseWriter) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   true,
 		MaxAge:   -1,
 	})
 }
