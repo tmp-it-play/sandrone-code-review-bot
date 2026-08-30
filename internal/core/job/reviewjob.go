@@ -10,6 +10,7 @@ import (
 
 type ReviewJob struct {
 	Target               pullrequest.Target
+	PreviousHeadSHA      string
 	Trigger              review.Trigger
 	Invoker              string
 	Instruction          string

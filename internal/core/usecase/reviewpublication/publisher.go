@@ -8,7 +8,7 @@ import (
 )
 
 type Publisher interface {
-	VerifyTarget(ctx context.Context, target pullrequest.Target) error
+	VerifyTarget(ctx context.Context, target pullrequest.Target) (pullrequest.Target, error)
 	PublicationExists(ctx context.Context, target pullrequest.Target, marker string) (bool, error)
 	SubmitReview(ctx context.Context, target pullrequest.Target, marker string, body string, comments []review.InlineComment) (int64, error)
 	CreateComment(ctx context.Context, target pullrequest.Target, body string) (int64, error)

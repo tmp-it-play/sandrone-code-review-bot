@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 )
 
@@ -12,6 +13,7 @@ type ReviewRunRepository interface {
 	ProgressCommentRefreshRepository
 	CreateOrGetRun(ctx context.Context, run reviewworkflow.Run) (reviewworkflow.Run, error)
 	FinishDetachedProgressFailure(ctx context.Context, run reviewworkflow.Run, result reviewworkflow.RunResult) (uint64, reviewworkflow.RunStatus, error)
+	LatestRunAnchor(ctx context.Context, target pullrequest.Target) (reviewworkflow.RunAnchor, bool, error)
 	HasRegisteredReviewContinuation(ctx context.Context, run reviewworkflow.Run, activityBoundary time.Time) (bool, error)
 	OwnsProgressMarker(ctx context.Context, runID uint64, marker string) (bool, error)
 	ClaimProgressCommentMutation(ctx context.Context, runID uint64, marker string, claimedAt time.Time, leaseExpiresAt time.Time) (string, bool, error)

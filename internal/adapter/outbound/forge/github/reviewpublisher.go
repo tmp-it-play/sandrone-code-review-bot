@@ -22,10 +22,10 @@ func NewReviewPublisher(clients *ClientFactory) *ReviewPublisher {
 	return &ReviewPublisher{clients: clients}
 }
 
-func (p *ReviewPublisher) VerifyTarget(ctx context.Context, target pullrequest.Target) error {
+func (p *ReviewPublisher) VerifyTarget(ctx context.Context, target pullrequest.Target) (pullrequest.Target, error) {
 	client, err := p.clients.Client(ctx, target.InstallationID)
 	if err != nil {
-		return err
+		return target, err
 	}
 	return verifyTarget(ctx, client, target)
 }
@@ -40,17 +40,21 @@ func (p *ReviewPublisher) SubmitReview(ctx context.Context, target pullrequest.T
 		return 0, err
 	}
 	if exists {
-		if err := verifyTarget(ctx, client, target); err != nil {
-			return 0, err
+		verifiedTarget, verifyErr := verifyTarget(ctx, client, target)
+		if verifyErr != nil {
+			return 0, verifyErr
 		}
+		target = verifiedTarget
 		if _, _, err := client.PullRequests.UpdateReview(ctx, target.Owner, target.Repository, target.Number, reviewID, review.SanitizePublicBody(body)); err != nil {
 			return 0, fmt.Errorf("기존 리뷰 본문을 갱신하지 못했습니다: %w", withGitHubRetryAt(err))
 		}
 		return reviewID, nil
 	}
-	if err := verifyTarget(ctx, client, target); err != nil {
-		return 0, err
+	verifiedTarget, verifyErr := verifyTarget(ctx, client, target)
+	if verifyErr != nil {
+		return 0, verifyErr
 	}
+	target = verifiedTarget
 	drafts := make([]*gh.DraftReviewComment, 0, len(comments))
 	for _, comment := range comments {
 		draft := &gh.DraftReviewComment{
@@ -117,17 +121,29 @@ func inlineReviewRejected(err error) bool {
 	return false
 }
 
-func verifyTarget(ctx context.Context, client *gh.Client, target pullrequest.Target) error {
+func verifyTarget(ctx context.Context, client *gh.Client, target pullrequest.Target) (pullrequest.Target, error) {
 	current, _, err := client.PullRequests.Get(ctx, target.Owner, target.Repository, target.Number)
 	if err != nil {
-		return fmt.Errorf("리뷰 게시 직전 PR 상태를 읽지 못했습니다: %w", withGitHubRetryAt(err))
+		return target, fmt.Errorf("리뷰 게시 직전 PR 상태를 읽지 못했습니다: %w", withGitHubRetryAt(err))
 	}
-	headChanged := target.HeadSHA != "" && current.GetHead().GetSHA() != target.HeadSHA
-	baseChanged := target.BaseSHA != "" && current.GetBase().GetSHA() != target.BaseSHA
-	if headChanged || baseChanged {
-		return publication.ErrTargetChanged
+	currentHeadSHA := current.GetHead().GetSHA()
+	currentBaseSHA := current.GetBase().GetSHA()
+	if target.BaseSHA != "" && currentBaseSHA != target.BaseSHA {
+		return target, publication.ErrTargetChanged
 	}
-	return nil
+	if target.HeadSHA != "" && currentHeadSHA != target.HeadSHA {
+		files, compareErr := changedFilesBetween(ctx, client, target, target.HeadSHA, currentHeadSHA)
+		if compareErr != nil {
+			return target, compareErr
+		}
+		if len(files) != 0 {
+			return target, publication.ErrTargetChanged
+		}
+	}
+	target.HeadSHA = currentHeadSHA
+	target.BaseSHA = currentBaseSHA
+	target.BaseRef = current.GetBase().GetRef()
+	return target, nil
 }
 
 func (p *ReviewPublisher) PublicationExists(ctx context.Context, target pullrequest.Target, marker string) (bool, error) {

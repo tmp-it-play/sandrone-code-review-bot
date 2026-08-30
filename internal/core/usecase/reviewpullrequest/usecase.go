@@ -193,8 +193,8 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		}
 	}
 	task.Instruction = u.deps.Masker.Mask(task.Instruction)
-	target := task.Target
-	request, err := u.deps.Source.PullRequest(ctx, target)
+	runTarget := task.Target
+	request, err := u.deps.Source.PullRequest(ctx, runTarget)
 	if err != nil {
 		return fail("Pull Request를 읽지 못했습니다", err)
 	}
@@ -222,14 +222,19 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if activityBoundary.IsZero() {
 		activityBoundary = startedAt
 	}
-	stale := target.HeadSHA != "" && target.HeadSHA != request.HeadSHA
-	if target.HeadSHA == "" {
-		target.HeadSHA = request.HeadSHA
+	staleHead := runTarget.HeadSHA != "" && runTarget.HeadSHA != request.HeadSHA
+	if runTarget.HeadSHA == "" {
+		runTarget.HeadSHA = request.HeadSHA
 	}
-	if target.BaseSHA == "" || !stale {
-		target.BaseSHA = request.BaseSHA
+	if runTarget.BaseSHA == "" || !staleHead {
+		runTarget.BaseSHA = request.BaseSHA
 	}
-	target.BaseRef = request.BaseRef
+	runTarget.BaseRef = request.BaseRef
+	target, targetMatches, targetMatchErr := u.rebindNoopHeadChange(ctx, runTarget, request)
+	if targetMatchErr != nil {
+		return fail("현재 head 이동의 실제 파일 변경을 확인하지 못했습니다", targetMatchErr)
+	}
+	stale := !targetMatches
 	task.Target = target
 
 	config, err := u.deps.Settings.RepoConfig(ctx, target)
@@ -265,7 +270,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if err != nil {
 		return fail("모델 정책 hash를 만들지 못했습니다", err)
 	}
-	runCandidate, err := newWorkflowRun(task, target, config, modelPolicyHash, startedAt, snapshotObservedAt)
+	runCandidate, err := newWorkflowRun(task, runTarget, config, modelPolicyHash, startedAt, snapshotObservedAt)
 	if err != nil {
 		return fail("리뷰 실행 식별자를 만들지 못했습니다", err)
 	}
@@ -346,7 +351,11 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if registrationErr != nil {
 		return fail("리뷰 실행 등록 전 Pull Request 상태를 확인하지 못했습니다", registrationErr)
 	}
-	if registrationState.HeadSHA != target.HeadSHA || registrationState.BaseSHA != target.BaseSHA {
+	registrationTarget, registrationMatches, registrationMatchErr := u.rebindNoopHeadChange(ctx, target, registrationState)
+	if registrationMatchErr != nil {
+		return fail("리뷰 실행 등록 전 head 이동의 실제 파일 변경을 확인하지 못했습니다", registrationMatchErr)
+	}
+	if !registrationMatches {
 		detail := "리뷰 실행 등록 전에 base 또는 head가 변경되었습니다"
 		supersedingHeadSHA := changedHeadSHA(target.HeadSHA, registrationState.HeadSHA)
 		var actualStatus reviewworkflow.RunStatus
@@ -372,6 +381,8 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		*outcome = reviewOutcomeOf(actualStatus)
 		return nil
 	}
+	target = registrationTarget
+	task.Target = target
 	leaseStartedAt := u.deps.Clock.Now()
 	acquiredRunLease, leaseErr := u.deps.Runs.AcquireRun(ctx, run.ID, leaseStartedAt, leaseStartedAt.Add(reviewRunLease))
 	if errors.Is(leaseErr, reviewworkflow.ErrRunSuperseded) {
@@ -801,7 +812,11 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if latestErr != nil {
 		return fail("게시 전 Pull Request 상태를 확인하지 못했습니다", latestErr)
 	}
-	if latest.HeadSHA != target.HeadSHA || latest.BaseSHA != target.BaseSHA {
+	latestTarget, latestMatches, latestMatchErr := u.rebindNoopHeadChange(ctx, target, latest)
+	if latestMatchErr != nil {
+		return fail("게시 전 head 이동의 실제 파일 변경을 확인하지 못했습니다", latestMatchErr)
+	}
+	if !latestMatches {
 		detail := "게시 전에 base 또는 head가 변경되었습니다"
 		actualStatus, finishErr := u.finishWorkflowSupersededByHeadWithProgress(ctx, run.ID, runLease, changedHeadSHA(target.HeadSHA, latest.HeadSHA), detail, progress)
 		if finishErr != nil {
@@ -818,6 +833,8 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		*outcome = review.OutcomeSuperseded
 		return nil
 	}
+	target = latestTarget
+	task.Target = target
 
 	publicationClaimedAt := u.deps.Clock.Now()
 	if claimErr := u.deps.Publications.ClaimPublication(ctx, run.ID, runLease, publicationClaimedAt, publicationClaimedAt.Add(reviewPublicationLease)); claimErr != nil {
@@ -845,7 +862,11 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if confirmedErr != nil {
 		return fail("게시 직전 Pull Request 상태를 확인하지 못했습니다", confirmedErr)
 	}
-	if confirmed.HeadSHA != target.HeadSHA || confirmed.BaseSHA != target.BaseSHA {
+	confirmedTarget, confirmedMatches, confirmedMatchErr := u.rebindNoopHeadChange(ctx, target, confirmed)
+	if confirmedMatchErr != nil {
+		return fail("게시 직전 head 이동의 실제 파일 변경을 확인하지 못했습니다", confirmedMatchErr)
+	}
+	if !confirmedMatches {
 		detail := "게시 권한을 얻은 뒤 base 또는 head가 변경되었습니다"
 		actualStatus, finishErr := u.finishWorkflowSupersededByHeadWithProgress(ctx, run.ID, runLease, changedHeadSHA(target.HeadSHA, confirmed.HeadSHA), detail, progress)
 		if finishErr != nil {
@@ -862,6 +883,8 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		*outcome = review.OutcomeSuperseded
 		return nil
 	}
+	target = confirmedTarget
+	task.Target = target
 
 	provisionalDetail := "GitHub 게시 결과 확인 대기 중"
 	if _, persistErr := u.saveWithFindings(ctx, task, startedAt, review.OutcomeUnavailable, provisionalDetail, response, len(placed.Inline()), len(placed.Fallback()), run.ID, run.StartedAt.Add(u.deps.Retention), placed.Findings); persistErr != nil {

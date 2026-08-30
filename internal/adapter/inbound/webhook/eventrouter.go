@@ -81,6 +81,7 @@ func (r *EventRouter) pullRequest(ctx context.Context, payload *gh.PullRequestEv
 	case "synchronize":
 		task.Trigger = review.TriggerPullRequestPushed
 		task.Incremental = true
+		task.PreviousHeadSHA = payload.GetBefore()
 	default:
 		return action, nil
 	}

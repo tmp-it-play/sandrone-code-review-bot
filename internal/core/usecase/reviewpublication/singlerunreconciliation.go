@@ -44,10 +44,15 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 	if err != nil {
 		return r.resolveUnverified(ctx, run, leaseToken, err)
 	}
-	if current.BaseSHA != run.BaseSHA || current.HeadSHA != run.HeadSHA {
+	currentTarget, currentTargetMatches, currentTargetErr := r.rebindNoopHeadChange(ctx, target, current)
+	if currentTargetErr != nil {
+		return r.resolveUnverified(ctx, run, leaseToken, currentTargetErr)
+	}
+	if !currentTargetMatches {
 		invalidation := r.publicationInvalidation(run, "게시 조정 전에 base 또는 head가 변경되었습니다", nil)
 		return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "게시 조정 전에 base 또는 head가 변경되었습니다", changedHeadSHA(run.HeadSHA, current.HeadSHA), false, invalidation)
 	}
+	target = currentTarget
 	marker := reviewworkflow.PublicationMarker(run.Key)
 	storedPublication, storedPublicationFound, err := r.deps.Publications.ReviewPublication(ctx, run.ID, leaseToken)
 	if err != nil {
@@ -95,7 +100,11 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 	if err != nil {
 		return r.resolveUnverified(ctx, run, leaseToken, err)
 	}
-	if confirmed.BaseSHA != run.BaseSHA || confirmed.HeadSHA != run.HeadSHA {
+	_, confirmedTargetMatches, confirmedTargetErr := r.rebindNoopHeadChange(ctx, target, confirmed)
+	if confirmedTargetErr != nil {
+		return r.resolveUnverified(ctx, run, leaseToken, confirmedTargetErr)
+	}
+	if !confirmedTargetMatches {
 		invalidation := r.publicationInvalidation(run, "리뷰 게시 재개 중 base 또는 head가 변경되었습니다", nil)
 		return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, "리뷰 게시 재개 중 base 또는 head가 변경되었습니다", changedHeadSHA(run.HeadSHA, confirmed.HeadSHA), false, invalidation)
 	}

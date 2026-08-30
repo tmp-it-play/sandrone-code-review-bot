@@ -26,6 +26,9 @@ func New(deps Dependencies) *ProgressQueue {
 }
 
 func (q *ProgressQueue) EnqueueReview(ctx context.Context, task job.ReviewJob) error {
+	if q.skipNoopHeadChange(ctx, task) {
+		return nil
+	}
 	prepare, theme, err := q.progressPreparation(ctx, &task)
 	if err != nil {
 		return err
@@ -51,6 +54,55 @@ func (q *ProgressQueue) EnqueueReview(ctx context.Context, task job.ReviewJob) e
 		q.deps.Logger.Warn("등록된 리뷰 작업의 진행 코멘트를 즉시 준비하지 못해 worker에서 다시 시도합니다", "target", task.Target.Reference(), "error", progressErr)
 	}
 	return nil
+}
+
+func (q *ProgressQueue) skipNoopHeadChange(ctx context.Context, task job.ReviewJob) bool {
+	if task.Trigger != review.TriggerPullRequestPushed || task.PreviousHeadSHA == "" || task.Target.HeadSHA == "" {
+		return false
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		anchor, latestFound, err := q.deps.Runs.LatestRunAnchor(ctx, task.Target)
+		if err != nil {
+			q.deps.Logger.Warn("최신 리뷰의 기준점을 확인하지 못해 리뷰 작업을 등록합니다", "target", task.Target.Reference(), "error", err)
+			return false
+		}
+		skip, comparisonBaseSHA, compareErr := q.evaluateNoopHeadChange(ctx, task, anchor, latestFound)
+		confirmedAnchor, confirmedFound, confirmErr := q.deps.Runs.LatestRunAnchor(ctx, task.Target)
+		if confirmErr != nil {
+			q.deps.Logger.Warn("head 변경 판단 후 최신 리뷰 기준점을 재확인하지 못해 리뷰 작업을 등록합니다", "target", task.Target.Reference(), "error", confirmErr)
+			return false
+		}
+		if latestFound != confirmedFound || anchor != confirmedAnchor {
+			continue
+		}
+		if compareErr != nil {
+			q.deps.Logger.Warn("push의 실제 파일 변경 여부를 확인하지 못해 리뷰 작업을 등록합니다", "target", task.Target.Reference(), "previous_head", comparisonBaseSHA, "head", task.Target.HeadSHA, "error", compareErr)
+			return false
+		}
+		if skip {
+			q.deps.Logger.Info("파일 변경이 없는 head 이동을 건너뜁니다", "target", task.Target.Reference(), "previous_head", comparisonBaseSHA, "head", task.Target.HeadSHA)
+		}
+		return skip
+	}
+	q.deps.Logger.Warn("head 변경 판단 중 최신 리뷰 기준점이 계속 바뀌어 리뷰 작업을 등록합니다", "target", task.Target.Reference())
+	return false
+}
+
+func (q *ProgressQueue) evaluateNoopHeadChange(ctx context.Context, task job.ReviewJob, anchor reviewworkflow.RunAnchor, latestFound bool) (bool, string, error) {
+	comparisonBaseSHA := task.PreviousHeadSHA
+	if latestFound {
+		if anchor.BaseSHA != task.Target.BaseSHA || anchor.ReplacementPending {
+			return false, comparisonBaseSHA, nil
+		}
+		if anchor.HeadSHA != "" {
+			comparisonBaseSHA = anchor.HeadSHA
+		}
+	}
+	if comparisonBaseSHA == task.Target.HeadSHA {
+		return true, comparisonBaseSHA, nil
+	}
+	files, err := q.deps.Source.ChangedFilesBetween(ctx, task.Target, comparisonBaseSHA, task.Target.HeadSHA)
+	return err == nil && len(files) == 0, comparisonBaseSHA, err
 }
 
 func (q *ProgressQueue) EnsureReviewProgress(ctx context.Context, task job.ReviewJob) error {

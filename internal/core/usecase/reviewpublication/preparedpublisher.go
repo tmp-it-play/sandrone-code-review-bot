@@ -27,10 +27,12 @@ func (p *PreparedPublisher) Publish(ctx context.Context, target pullrequest.Targ
 			return nil
 		}
 		if prepared.Channel == reviewworkflow.ReviewPublicationChannelComment && len(prepared.Payload.Comments) > 0 {
-			if err := p.deps.Publisher.VerifyTarget(ctx, target); err != nil {
+			verifiedTarget, err := p.deps.Publisher.VerifyTarget(ctx, target)
+			if err != nil {
 				return err
 			}
-			_, err := p.publishSummary(ctx, target, prepared, prepared.Payload.FallbackBody)
+			target = verifiedTarget
+			_, err = p.publishSummary(ctx, target, prepared, prepared.Payload.FallbackBody)
 			return err
 		}
 		_, _, err := p.publishEffects(ctx, target, prepared)
@@ -47,16 +49,20 @@ func (p *PreparedPublisher) Publish(ctx context.Context, target pullrequest.Targ
 }
 
 func (p *PreparedPublisher) publishEffects(ctx context.Context, target pullrequest.Target, prepared reviewworkflow.ReviewPublication) (string, int64, error) {
-	if err := p.deps.Publisher.VerifyTarget(ctx, target); err != nil {
+	verifiedTarget, err := p.deps.Publisher.VerifyTarget(ctx, target)
+	if err != nil {
 		return "", 0, err
 	}
+	target = verifiedTarget
 	commentID, err := p.publishSummary(ctx, target, prepared, prepared.Payload.Body)
 	if err != nil {
 		return "", 0, err
 	}
-	if err := p.deps.Publisher.VerifyTarget(ctx, target); err != nil {
+	verifiedTarget, err = p.deps.Publisher.VerifyTarget(ctx, target)
+	if err != nil {
 		return "", 0, err
 	}
+	target = verifiedTarget
 	if len(prepared.Payload.Comments) == 0 {
 		return reviewworkflow.ReviewPublicationChannelComment, commentID, nil
 	}
@@ -66,9 +72,11 @@ func (p *PreparedPublisher) publishEffects(ctx context.Context, target pullreque
 	}
 	if errors.Is(submitErr, publication.ErrInlineReviewRejected) {
 		p.deps.Logger.Warn("인라인 리뷰를 제출하지 못해 요약 코멘트에 지적을 포함합니다", "target", target.Reference(), "error", submitErr)
-		if err := p.deps.Publisher.VerifyTarget(ctx, target); err != nil {
-			return "", 0, errors.Join(submitErr, err)
+		verifiedTarget, verifyErr := p.deps.Publisher.VerifyTarget(ctx, target)
+		if verifyErr != nil {
+			return "", 0, errors.Join(submitErr, verifyErr)
 		}
+		target = verifiedTarget
 		fallbackID, commentErr := p.publishSummary(ctx, target, prepared, prepared.Payload.FallbackBody)
 		if commentErr != nil {
 			return "", 0, errors.Join(submitErr, commentErr)

@@ -75,6 +75,10 @@ func (s *PullRequestSource) ChangedFilesBetween(ctx context.Context, target pull
 	if err != nil {
 		return nil, err
 	}
+	return changedFilesBetween(ctx, client, target, baseSHA, headSHA)
+}
+
+func changedFilesBetween(ctx context.Context, client *gh.Client, target pullrequest.Target, baseSHA string, headSHA string) ([]pullrequest.ChangedFile, error) {
 	comparison, _, err := client.Repositories.CompareCommits(ctx, target.Owner, target.Repository, baseSHA, headSHA, &gh.ListOptions{PerPage: 100})
 	if err != nil {
 		return nil, fmt.Errorf("커밋 비교에 실패했습니다: %w", err)
