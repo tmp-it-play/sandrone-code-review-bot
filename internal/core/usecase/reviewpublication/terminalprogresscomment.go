@@ -14,20 +14,9 @@ func (r *Reconciler) replaceTerminalProgressComment(ctx context.Context, target 
 	if err != nil {
 		return err
 	}
-	if len(commentIDs) > 0 {
-		var updateErr error
-		for _, commentID := range commentIDs {
-			updateErr = errors.Join(updateErr, r.deps.Publisher.UpdateComment(ctx, target, commentID, body))
-		}
-		return updateErr
+	var updateErr error
+	for _, commentID := range commentIDs {
+		updateErr = errors.Join(updateErr, r.deps.Publisher.UpdateComment(ctx, target, commentID, body))
 	}
-	_, createErr := r.deps.Publisher.CreateComment(ctx, target, body)
-	if createErr == nil {
-		return nil
-	}
-	commentID, exists, reconcileErr := r.deps.Publisher.FindComment(ctx, target, marker)
-	if !exists {
-		return errors.Join(createErr, reconcileErr)
-	}
-	return errors.Join(createErr, reconcileErr, r.deps.Publisher.UpdateComment(ctx, target, commentID, body))
+	return updateErr
 }
