@@ -61,8 +61,14 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 
 func (r Renderer) ProgressBody(message string, marker string) string {
 	var builder strings.Builder
-	builder.WriteString(strings.TrimSpace(message))
-	builder.WriteString("\n\n[Sandrone Code Review Bot 저장소 바로가기](https://github.com/it-play/sandrone-code-review-bot)\n\n")
+	message = strings.TrimSpace(message)
+	fence := fenceFor(message)
+	builder.WriteString(fence)
+	builder.WriteString("\n")
+	builder.WriteString(message)
+	builder.WriteString("\n")
+	builder.WriteString(fence)
+	builder.WriteString("\n\n<sub>[Sandrone Code Review Bot 저장소 바로가기](https://github.com/it-play/sandrone-code-review-bot)</sub>\n\n")
 	builder.WriteString("> [!NOTE]\n")
 	builder.WriteString("> 인라인 리뷰 코멘트에서 `/pr-review-reply`를 입력하면 해당 지적의 해결 여부를 다시 확인하고 답합니다.\n\n")
 	builder.WriteString(strings.TrimSpace(marker))
