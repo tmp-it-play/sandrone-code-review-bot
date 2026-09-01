@@ -9,6 +9,7 @@ import (
 
 	gh "github.com/google/go-github/v90/github"
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/inbound/webhook"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/backoff"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/webhookinbox"
 )
@@ -22,6 +23,8 @@ const webhookInboxRejectRetention = 30 * 24 * time.Hour
 const webhookInboxOrphanAfter = 7 * 24 * time.Hour
 const webhookInboxConcurrency = 2
 const webhookInboxCleanupBatch = 100
+
+var webhookInboxBackoff = backoff.Policy{Initial: 5 * time.Second, Maximum: time.Hour}
 
 type WebhookInboxWorker struct {
 	repository outbound.WebhookInboxRepository
@@ -183,25 +186,8 @@ func webhookInboxFinalizeContext(parent context.Context) (context.Context, conte
 }
 
 func webhookInboxRetryDelay(deliveryID uint64, attempt int) time.Duration {
-	delays := []time.Duration{
-		5 * time.Second,
-		30 * time.Second,
-		time.Minute,
-		5 * time.Minute,
-		15 * time.Minute,
-		time.Hour,
-	}
 	if attempt < 1 {
 		attempt = 1
 	}
-	if attempt > len(delays) {
-		attempt = len(delays)
-	}
-	base := delays[attempt-1]
-	jitterRange := base / 5
-	if jitterRange <= 0 {
-		return base
-	}
-	jitter := time.Duration((deliveryID*1103515245 + uint64(attempt)) % uint64(jitterRange))
-	return base + jitter
+	return webhookInboxBackoff.Delay(attempt-1, deliveryID)
 }
