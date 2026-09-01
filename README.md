@@ -8,13 +8,16 @@ Sandrone Code Review Bot은 GitHub Pull Request의 변경 내용을 요약하고
 
 <sub>Sandrone Code Review Bot는 HoYoverse와 연관이 없습니다.Genshin Impact의 캐릭터 「산드로네」에 대한 콘텐츠와 소재의 트레이드마크와 저작권은 HoYoverse에 있습니다.</sub>
 
+[GitHub App 프로필]() · [개인정보처리방침](PRIVACY.md)
+
 ## 주요 기능
 
 - PR이 열리면 변경 내용을 요약하고 파일별 핵심 변경 사항을 정리합니다.
 - 문제가 있는 코드에는 원인과 영향을 설명하는 인라인 코멘트를 남깁니다.
 - 저장소의 `AGENTS.md`, `CLAUDE.md`, 기여 가이드 등을 읽고 프로젝트 규칙을 리뷰에 반영합니다.
 - 큰 PR도 여러 묶음으로 나누어 검토하고, 검토하지 못한 파일이 있으면 알려 줍니다.
-- 이미 지적한 문제는 다시 게시하지 않습니다.
+- 이미 지적한 문제와 같은 작업의 실패 안내는 다시 게시하지 않습니다.
+- 일시적인 외부 장애는 지수 백오프로 재시도합니다.
 - 명령이나 봇 멘션으로 리뷰, 요약, 후속 답변을 요청할 수 있습니다.
 - 저장소마다 리뷰 언어, 문체, 심각도, 대상 파일을 설정할 수 있습니다.
 
@@ -105,17 +108,17 @@ sandrone:
 
 `language`, `tone`, `allowStrongTone`, `minSeverity` 같은 리뷰 설정뿐 아니라 아래의 Sandrone 동작 설정도 최상위 공통값으로 작성할 수 있습니다. `sandrone:` 아래에 같은 키가 있으면 그 값을 우선하고, 둘 다 없으면 내장 기본값을 사용합니다.
 
-| 설정                            |        기본값 | 설명                                                                       |
-|---------------------------------|--------------:|----------------------------------------------------------------------------|
-| `autoReview`                    |        `true` | 새 PR의 자동 리뷰를 켜거나 끕니다.                                         |
-| `autoReviewOnDraft`             |        `true` | Draft 상태로 열린 PR의 자동 리뷰를 켜거나 끕니다.                          |
-| `autoReviewOnPush`              |       `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다.                              |
-| `progressMessageTheme`          | `programming` | 리뷰 처리 중 약 30초마다 바뀌는 진행 문구 묶음입니다. `programming`, `sandrone`, `stock`, `history` 중 하나입니다. |
-| `summaryPlacement`              | `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다. |
-| `providers`                     |           전체 | 리뷰에 사용할 provider 이름 목록입니다. 비워 두면 사용 가능한 provider를 모두 허용합니다. |
-| `maxInstructionChars`           |       `20000` | 저장소 지침에서 읽을 수 있는 전체 문자 수입니다.                            |
-| `maxReviewBatches`              |           `8` | 큰 PR을 의미 단위로 나누어 검토할 최대 횟수입니다.                         |
-| `instructionFiles`              | 기본 지침 목록 | 읽을 지침 파일 경로와 glob 목록입니다.                                     |
+| 설정                   |         기본값 | 설명                                                                                                               |
+|------------------------|---------------:|--------------------------------------------------------------------------------------------------------------------|
+| `autoReview`           |         `true` | 새 PR의 자동 리뷰를 켜거나 끕니다.                                                                                 |
+| `autoReviewOnDraft`    |         `true` | Draft 상태로 열린 PR의 자동 리뷰를 켜거나 끕니다.                                                                  |
+| `autoReviewOnPush`     |        `false` | 새 커밋이 추가될 때 변경분을 다시 리뷰합니다.                                                                      |
+| `progressMessageTheme` |  `programming` | 리뷰 처리 중 약 30초마다 바뀌는 진행 문구 묶음입니다. `programming`, `sandrone`, `stock`, `history` 중 하나입니다. |
+| `summaryPlacement`     |  `new-comment` | 요약 위치입니다. `new-comment`, `update-comment`, `pr-body` 중 하나입니다.                                         |
+| `providers`            |           전체 | 리뷰에 사용할 provider 이름 목록입니다. 비워 두면 사용 가능한 provider를 모두 허용합니다.                          |
+| `maxInstructionChars`  |        `20000` | 저장소 지침에서 읽을 수 있는 전체 문자 수입니다.                                                                   |
+| `maxReviewBatches`     |            `8` | 큰 PR을 의미 단위로 나누어 검토할 최대 횟수입니다.                                                                 |
+| `instructionFiles`     | 기본 지침 목록 | 읽을 지침 파일 경로와 glob 목록입니다.                                                                             |
 
 리뷰 설정과 지침 파일은 PR 출발지 브랜치의 고정된 head SHA에서 읽습니다. 예를 들어 `develop` → `main` PR이면 `develop`의 head 커밋을 기준으로 합니다. 저장소 설정으로도 비용 상한을 해제할 수 없으며 리뷰 배치는 `1~8`, 모델 출력은 최대 `8192` token, 추가 파일 읽기는 최대 `6`, 게시 finding은 전체 `25`건으로 제한됩니다.
 
