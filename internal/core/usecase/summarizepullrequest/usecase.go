@@ -149,12 +149,6 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 			return terminalFailure(message+" 재시도했지만 해결되지 않아 중단합니다.", cause, response)
 		}
 		u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
-		if task.Attempt == 0 {
-			marker := job.PublicationMarker("summary-retry-notice", task.Target, task.RequestIdentity, task.CommentID, task.InThread)
-			if notifyErr := notifyWithHeartbeat(review.Notice{Kind: review.NoticeRetrying, Message: message + " 잠시 후 다시 시도합니다."}, marker); notifyErr != nil {
-				u.deps.Logger.Warn("요약 재시도 안내를 남기지 못했습니다", "target", task.Target.Reference(), "error", notifyErr)
-			}
-		}
 		return fmt.Errorf("%s: %w", message, cause)
 	}
 	if publicationMarker != "" {
@@ -548,18 +542,12 @@ func (u *UseCase) fail(ctx context.Context, task job.SummaryJob, startedAt time.
 		response = responses[0]
 	}
 	u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
-	switch {
-	case task.FinalAttempt:
+	if task.FinalAttempt {
 		marker := job.PublicationMarker("summary-final-notice", task.Target, task.RequestIdentity, task.CommentID, task.InThread)
 		if err := u.notify(ctx, task.Target, review.Notice{Kind: review.NoticeFailed, Message: message + " 재시도했지만 해결되지 않아 중단합니다."}, marker); err != nil {
 			u.deps.Logger.Warn("요약 실패 안내를 남기지 못했습니다", "target", task.Target.Reference(), "error", err)
 		}
 		u.save(ctx, task, startedAt, review.OutcomeFailed, message, response)
-	case task.Attempt == 0:
-		marker := job.PublicationMarker("summary-retry-notice", task.Target, task.RequestIdentity, task.CommentID, task.InThread)
-		if err := u.notify(ctx, task.Target, review.Notice{Kind: review.NoticeRetrying, Message: message + " 잠시 후 다시 시도합니다."}, marker); err != nil {
-			u.deps.Logger.Warn("요약 재시도 안내를 남기지 못했습니다", "target", task.Target.Reference(), "error", err)
-		}
 	}
 	return fmt.Errorf("%s: %w", message, cause)
 }

@@ -104,22 +104,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 			return terminalFailure(message+" 재시도했지만 해결되지 않아 중단합니다.", cause)
 		}
 		u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
-		failed := fmt.Errorf("%s: %w", message, cause)
-		if task.Attempt != 0 {
-			return failed
-		}
-		ambiguous := false
-		notifyErr := withHeartbeat(func(notificationContext context.Context) error {
-			var failureErr error
-			failureErr, ambiguous = u.notifyFailure(notificationContext, task, review.Notice{Kind: review.NoticeRetrying, Message: message + " 잠시 후 다시 시도합니다."}, "reply-retry-notice", publicationLease)
-			return failureErr
-		})
-		failed = errors.Join(failed, notifyErr)
-		if ambiguous {
-			releasePublicationLease = false
-			return &job.RetryAtError{At: u.deps.Clock.Now().Add(replyPublicationRecoveryDelay), Cause: failed}
-		}
-		return failed
+		return fmt.Errorf("%s: %w", message, cause)
 	}
 	request, err := u.deps.Source.PullRequest(ctx, target)
 	if err != nil {

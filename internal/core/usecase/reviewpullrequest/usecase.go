@@ -131,7 +131,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			}
 			u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
 			if notice, announce := failureNotice(task.Attempt, task.FinalAttempt); announce && !publicationEffectsStarted && !publicationCompleted {
-				if announceErr := u.announce(ctx, task.Target, progress, notice); announceErr != nil {
+				if announceErr := u.announce(ctx, task.Target, task, progress, notice); announceErr != nil {
 					u.deps.Logger.Warn("리뷰 게시 실패 안내를 남기지 못했습니다", "target", task.Target.Reference(), "error", announceErr)
 				}
 			}
@@ -1088,8 +1088,7 @@ func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, task jo
 		return nil
 	}
 	body = progressResultBody(progress, body)
-	if _, err := u.deps.Publisher.CreateComment(ctx, target, body); err != nil {
-		u.markProgressMutationUncertain(progress, err)
+	if err := u.createNoticeComment(ctx, target, task, progress, body); err != nil {
 		return fmt.Errorf("안내 코멘트를 남기지 못했습니다: %w", err)
 	}
 	return nil
@@ -1098,7 +1097,7 @@ func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, task jo
 func (u *UseCase) fail(ctx context.Context, task job.ReviewJob, startedAt time.Time, message string, cause error, runID uint64, recordFailure bool, response llm.Response, progress *progressSession) error {
 	u.deps.Logger.Error(message, "target", task.Target.Reference(), "error", cause)
 	if notice, announce := failureNotice(task.Attempt, task.FinalAttempt); announce && (task.FinalAttempt || runID != 0) {
-		if err := u.announce(ctx, task.Target, progress, notice); err != nil {
+		if err := u.announce(ctx, task.Target, task, progress, notice); err != nil {
 			u.deps.Logger.Warn("실패 안내를 남기지 못했습니다", "target", task.Target.Reference(), "error", err)
 		}
 	}
@@ -1108,7 +1107,7 @@ func (u *UseCase) fail(ctx context.Context, task job.ReviewJob, startedAt time.T
 	return fmt.Errorf("%s: %w", message, cause)
 }
 
-func (u *UseCase) announce(ctx context.Context, target pullrequest.Target, progress *progressSession, notice review.Notice) error {
+func (u *UseCase) announce(ctx context.Context, target pullrequest.Target, task job.ReviewJob, progress *progressSession, notice review.Notice) error {
 	body := u.deps.Renderer.NoticeBody(notice)
 	replaced, replaceErr := u.replaceProgress(ctx, target, progress, body, true)
 	if replaceErr != nil {
@@ -1118,22 +1117,49 @@ func (u *UseCase) announce(ctx context.Context, target pullrequest.Target, progr
 		return nil
 	}
 	body = progressResultBody(progress, body)
-	if _, err := u.deps.Publisher.CreateComment(ctx, target, body); err != nil {
-		u.markProgressMutationUncertain(progress, err)
-		return err
+	return u.createNoticeComment(ctx, target, task, progress, body)
+}
+
+func (u *UseCase) createNoticeComment(ctx context.Context, target pullrequest.Target, task job.ReviewJob, progress *progressSession, body string) error {
+	marker := reviewNoticePublicationMarker(task, target)
+	_, exists, lookupErr := u.deps.Publisher.FindComment(ctx, target, marker)
+	if lookupErr != nil || exists {
+		return lookupErr
+	}
+	body = strings.TrimRight(body, "\n") + "\n" + marker
+	if _, createErr := u.deps.Publisher.CreateComment(ctx, target, body); createErr != nil {
+		if progress != nil {
+			u.markProgressMutationUncertain(progress, createErr)
+		}
+		_, reconciled, reconcileErr := u.deps.Publisher.FindComment(ctx, target, marker)
+		if reconciled {
+			return nil
+		}
+		return errors.Join(createErr, reconcileErr)
 	}
 	return nil
 }
 
-func failureNotice(attempt int, final bool) (review.Notice, bool) {
-	switch {
-	case final:
-		return review.Notice{Kind: review.NoticeFailed, Message: "리뷰를 완료하지 못했습니다. 재시도했지만 해결되지 않아 중단합니다."}, true
-	case attempt == 0:
-		return review.Notice{Kind: review.NoticeRetrying, Message: "리뷰를 완료하지 못했습니다. 잠시 후 다시 시도합니다."}, true
-	default:
-		return review.Notice{}, false
+func reviewNoticePublicationMarker(task job.ReviewJob, target pullrequest.Target) string {
+	identity := workflowRequestIdentity(task)
+	if identity == "" {
+		identity = strings.Join([]string{
+			string(task.Trigger),
+			task.Target.BaseSHA,
+			task.Target.HeadSHA,
+			task.RequestReceivedAt.UTC().Format(time.RFC3339Nano),
+			task.SnapshotObservedAt.UTC().Format(time.RFC3339Nano),
+			task.SnapshotOrderKey,
+		}, "\x00")
 	}
+	return job.PublicationMarker("review-final-notice", target, identity, task.CommentID, task.InThread)
+}
+
+func failureNotice(_ int, final bool) (review.Notice, bool) {
+	if final {
+		return review.Notice{Kind: review.NoticeFailed, Message: "리뷰를 완료하지 못했습니다. 재시도했지만 해결되지 않아 중단합니다."}, true
+	}
+	return review.Notice{}, false
 }
 
 func (u *UseCase) save(ctx context.Context, task job.ReviewJob, startedAt time.Time, outcome review.Outcome, detail string, response llm.Response, inline int, fallback int, runID uint64) uint64 {
