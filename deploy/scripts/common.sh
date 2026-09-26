@@ -137,11 +137,3 @@ cleanup_old_deploy_images() {
     fi
   done <<< "$image_rows"
 }
-
-schedule_deploy_cleanup() {
-  if [ "$DEPLOY_ROOT" != "/tmp/sandrone-deploy" ]; then
-    echo "Refusing to remove unexpected deploy directory: $DEPLOY_ROOT" >&2
-    return
-  fi
-  nohup sh -c "sleep 3; rm -rf -- '$DEPLOY_ROOT'" >/dev/null 2>&1 &
-}

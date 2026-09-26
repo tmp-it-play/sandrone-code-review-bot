@@ -10,7 +10,6 @@ cleanup_failed_start() {
     if [ "$START_ATTEMPTED" -eq 1 ]; then
       docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
     fi
-    schedule_deploy_cleanup
   fi
   exit "$status"
 }

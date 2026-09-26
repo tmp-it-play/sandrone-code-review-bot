@@ -9,9 +9,6 @@ finish() {
   status="$?"
   trap - EXIT TERM HUP INT
   logout
-  if [ "$status" -ne 0 ]; then
-    schedule_deploy_cleanup
-  fi
   exit "$status"
 }
 trap finish EXIT

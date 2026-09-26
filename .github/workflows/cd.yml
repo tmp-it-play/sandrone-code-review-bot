@@ -194,18 +194,9 @@ jobs:
         run: |
           set -euo pipefail
           remote_script='set -euo pipefail
-          deploy_root=/tmp/sandrone-deploy
-          cleanup() {
-            status="$?"
-            trap - EXIT HUP INT TERM
-            if [ "$deploy_root" = "/tmp/sandrone-deploy" ]; then
-              rm -rf -- "$deploy_root"
-            fi
-            exit "$status"
-          }
-          trap cleanup EXIT
+          deploy_root="$HOME/Downloads/sandrone"
           trap "exit 124" HUP INT TERM
-          if [ "$deploy_root" != "/tmp/sandrone-deploy" ]; then
+          if [ -z "$HOME" ] || [ "$deploy_root" != "$HOME/Downloads/sandrone" ]; then
             exit 1
           fi
           rm -rf -- "$deploy_root"

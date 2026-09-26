@@ -7,7 +7,6 @@ cleanup_validation() {
   if [ "$status" -ne 0 ]; then
     docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   fi
-  schedule_deploy_cleanup
   exit "$status"
 }
 trap cleanup_validation EXIT
@@ -35,5 +34,3 @@ fi
 if ! cleanup_old_deploy_images; then
   echo "Deployment image cleanup did not complete" >&2
 fi
-
-echo "Scheduled cleanup of the deploy directory: $DEPLOY_ROOT"
