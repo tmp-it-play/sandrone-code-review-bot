@@ -37,11 +37,6 @@ if [ ! -f "$DEPLOY_ROOT/compose.yaml" ]; then
   exit 1
 fi
 
-if ! docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then
-  echo "External Docker network is unavailable: $DOCKER_NETWORK" >&2
-  exit 1
-fi
-
 run_compose() {
   docker compose \
     --project-name "$COMPOSE_PROJECT_NAME" \

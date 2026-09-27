@@ -25,10 +25,9 @@ concurrency:
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
   CONTAINER_NAME: sandrone
-  DOCKER_NETWORK: infra-net
   HOST_PORT: "10105"
   BASE_PATH: /sandrone
-  REDIS_ADDR: redis:6379
+  REDIS_ADDR: host.docker.internal:6379
   DASHBOARD_USERNAME: admin
 
 jobs:
@@ -169,7 +168,6 @@ jobs:
             printf 'IMAGE=%s\n' "${IMAGE_NAME}:${GITHUB_SHA}"
             printf 'REVISION=%s\n' "$GITHUB_SHA"
             printf 'CONTAINER_NAME=%s\n' "$CONTAINER_NAME"
-            printf 'DOCKER_NETWORK=%s\n' "$DOCKER_NETWORK"
             printf 'HOST_PORT=%s\n' "$HOST_PORT"
             printf 'BASE_PATH=%s\n' "$BASE_PATH"
             printf 'STOP_TIMEOUT=%s\n' "180"

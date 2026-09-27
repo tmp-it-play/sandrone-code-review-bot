@@ -17,8 +17,8 @@ services:
       - "${HOST_PORT:-8080}:8080"
     labels:
       org.opencontainers.image.revision: ${REVISION:-development}
-    networks:
-      - sandrone
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- \"http://127.0.0.1:8080$${SANDRONE_BASE_PATH:-}/healthz\""]
       interval: 30s
@@ -28,11 +28,6 @@ services:
       granite:
         endpoint_var: LOCAL_AI_BASE_URL
         model_var: LOCAL_AI_MODEL
-
-networks:
-  sandrone:
-    external: true
-    name: ${DOCKER_NETWORK:-sandrone}
 
 models:
   granite:
