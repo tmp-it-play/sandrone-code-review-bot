@@ -114,7 +114,7 @@ func (r *Reconciler) apply(ctx context.Context, refresh progresscomment.Refresh,
 	if now.Before(refresh.CreateNotBefore) {
 		return false, nil
 	}
-	_, createErr := r.deps.Publisher.CreateComment(ctx, refresh.Target, r.deps.Renderer.ProgressBody(message, refresh.Marker))
+	_, createErr := r.deps.Publisher.CreateComment(ctx, refresh.Target, r.deps.Renderer.ProgressBody(refresh.Marker))
 	if createErr == nil {
 		return true, r.deps.Checks.Show(ctx, refresh.Target, refresh.Marker, message)
 	}

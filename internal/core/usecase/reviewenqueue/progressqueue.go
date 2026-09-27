@@ -234,7 +234,7 @@ func (q *ProgressQueue) ensureProgressComment(ctx context.Context, task job.Revi
 	}
 	key := progressKey(task)
 	message := review.ProgressMessage(task.ProgressMessageTheme, key, 0)
-	_, createErr := q.deps.Publisher.CreateComment(producerContext, task.Target, q.deps.Renderer.ProgressBody(message, marker))
+	_, createErr := q.deps.Publisher.CreateComment(producerContext, task.Target, q.deps.Renderer.ProgressBody(marker))
 	if createErr == nil {
 		if checkErr := q.deps.Checks.Show(producerContext, task.Target, marker, message); checkErr != nil {
 			q.deps.Logger.Warn("진행 체크를 만들지 못해 갱신 주기에서 다시 시도합니다", "target", task.Target.Reference(), "error", checkErr)
