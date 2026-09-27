@@ -25,7 +25,7 @@ concurrency:
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
   CONTAINER_NAME: sandrone
-  DOCKER_NETWORK: readygsm-net
+  DOCKER_NETWORK: infra-net
   HOST_PORT: "10105"
   BASE_PATH: /sandrone
   REDIS_ADDR: redis:6379
