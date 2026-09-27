@@ -14,7 +14,7 @@ type ReviewPublicationWorker struct {
 	reconciler *reviewpublication.Reconciler
 }
 
-func NewReviewPublicationWorker(runs outbound.ReviewRunRepository, publications outbound.ReviewPublicationLifecycleRepository, candidates outbound.ReviewPublicationCandidateRepository, invalidations outbound.ReviewPublicationInvalidationRepository, source outbound.PullRequestSource, publisher outbound.ReviewPublisher, reviews outbound.ReviewRepository, clock outbound.Clock, logger *slog.Logger, retention time.Duration) *ReviewPublicationWorker {
+func NewReviewPublicationWorker(runs outbound.ReviewRunRepository, publications outbound.ReviewPublicationLifecycleRepository, candidates outbound.ReviewPublicationCandidateRepository, invalidations outbound.ReviewPublicationInvalidationRepository, source outbound.PullRequestSource, publisher outbound.ReviewPublisher, checks reviewpublication.ProgressCheck, reviews outbound.ReviewRepository, clock outbound.Clock, logger *slog.Logger, retention time.Duration) *ReviewPublicationWorker {
 	return &ReviewPublicationWorker{
 		interval: 10 * time.Minute,
 		reconciler: reviewpublication.NewReconciler(
@@ -25,6 +25,7 @@ func NewReviewPublicationWorker(runs outbound.ReviewRunRepository, publications 
 				Invalidations: invalidations,
 				Source:        source,
 				Publisher:     publisher,
+				Checks:        checks,
 				Reviews:       reviews,
 				Clock:         clock,
 				Logger:        logger,

@@ -49,6 +49,7 @@ func New(deps Dependencies) *UseCase {
 			Publisher: deps.Publisher,
 			Receipts:  deps.Publications,
 			Ownership: deps.Runs,
+			Checks:    deps.Checks,
 			Clock:     deps.Clock,
 			Logger:    deps.Logger,
 		}),
@@ -1077,7 +1078,7 @@ func (u *UseCase) resolveSupersedingHeadSHA(ctx context.Context, target pullrequ
 
 func (u *UseCase) notify(ctx context.Context, target pullrequest.Target, task job.ReviewJob, progress *progressSession, notice review.Notice) error {
 	body := u.deps.Renderer.NoticeBody(notice)
-	replaced, replaceErr := u.replaceProgress(ctx, target, progress, body, !task.Trigger.IsAutomatic())
+	replaced, replaceErr := u.replaceProgress(ctx, target, progress, body, notice.Message, !task.Trigger.IsAutomatic())
 	if replaceErr != nil {
 		return replaceErr
 	}
@@ -1109,7 +1110,7 @@ func (u *UseCase) fail(ctx context.Context, task job.ReviewJob, startedAt time.T
 
 func (u *UseCase) announce(ctx context.Context, target pullrequest.Target, task job.ReviewJob, progress *progressSession, notice review.Notice) error {
 	body := u.deps.Renderer.NoticeBody(notice)
-	replaced, replaceErr := u.replaceProgress(ctx, target, progress, body, true)
+	replaced, replaceErr := u.replaceProgress(ctx, target, progress, body, notice.Message, true)
 	if replaceErr != nil {
 		return replaceErr
 	}

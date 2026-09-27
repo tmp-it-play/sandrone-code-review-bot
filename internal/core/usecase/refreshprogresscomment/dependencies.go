@@ -10,6 +10,7 @@ type Dependencies struct {
 	Refreshes outbound.ProgressCommentRefreshRepository
 	Publisher outbound.ReviewPublisher
 	Renderer  outbound.Renderer
+	Checks    ProgressCheck
 	Clock     outbound.Clock
 	Logger    *slog.Logger
 }

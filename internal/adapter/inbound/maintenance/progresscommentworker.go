@@ -18,13 +18,14 @@ type ProgressCommentWorker struct {
 const progressCommentMutationTimeout = 20 * time.Second
 const progressCommentStoreTimeout = 10 * time.Second
 
-func NewProgressCommentWorker(refreshes outbound.ProgressCommentRefreshRepository, publisher outbound.ReviewPublisher, renderer outbound.Renderer, clock outbound.Clock, logger *slog.Logger) *ProgressCommentWorker {
+func NewProgressCommentWorker(refreshes outbound.ProgressCommentRefreshRepository, publisher outbound.ReviewPublisher, renderer outbound.Renderer, checks refreshprogresscomment.ProgressCheck, clock outbound.Clock, logger *slog.Logger) *ProgressCommentWorker {
 	return &ProgressCommentWorker{
 		interval: 6 * time.Second,
 		reconciler: refreshprogresscomment.New(refreshprogresscomment.Dependencies{
 			Refreshes: refreshes,
 			Publisher: publisher,
 			Renderer:  renderer,
+			Checks:    checks,
 			Clock:     clock,
 			Logger:    logger,
 		}, refreshprogresscomment.Config{

@@ -25,6 +25,7 @@ type Dependencies struct {
 	Findings     outbound.FindingRepository
 	State        outbound.PullRequestStateRepository
 	Progress     ProgressAdmission
+	Checks       ProgressCheck
 	Clock        outbound.Clock
 	Parser       parsing.ResultParser
 	Logger       *slog.Logger

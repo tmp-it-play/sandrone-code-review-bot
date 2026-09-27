@@ -103,20 +103,20 @@ func (r *Reconciler) apply(ctx context.Context, refresh progresscomment.Refresh,
 	if !valid {
 		return false, errors.New("진행 코멘트 갱신 marker가 올바르지 않습니다")
 	}
-	body := r.deps.Renderer.ProgressBody(review.ProgressMessage(refresh.MessageTheme, key, refresh.Sequence), refresh.Marker)
-	commentID, exists, err := r.deps.Publisher.FindComment(ctx, refresh.Target, refresh.Marker)
+	message := review.ProgressMessage(refresh.MessageTheme, key, refresh.Sequence)
+	_, exists, err := r.deps.Publisher.FindComment(ctx, refresh.Target, refresh.Marker)
 	if err != nil {
 		return false, err
 	}
 	if exists {
-		return true, r.deps.Publisher.UpdateComment(ctx, refresh.Target, commentID, body)
+		return false, r.deps.Checks.Show(ctx, refresh.Target, refresh.Marker, message)
 	}
 	if now.Before(refresh.CreateNotBefore) {
 		return false, nil
 	}
-	_, createErr := r.deps.Publisher.CreateComment(ctx, refresh.Target, body)
+	_, createErr := r.deps.Publisher.CreateComment(ctx, refresh.Target, r.deps.Renderer.ProgressBody(message, refresh.Marker))
 	if createErr == nil {
-		return true, nil
+		return true, r.deps.Checks.Show(ctx, refresh.Target, refresh.Marker, message)
 	}
 	_, reconciled, reconcileErr := r.deps.Publisher.FindComment(ctx, refresh.Target, refresh.Marker)
 	if reconciled {

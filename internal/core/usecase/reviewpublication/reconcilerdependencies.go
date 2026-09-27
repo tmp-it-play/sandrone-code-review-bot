@@ -13,6 +13,7 @@ type ReconcilerDependencies struct {
 	Invalidations outbound.ReviewPublicationInvalidationRepository
 	Source        outbound.PullRequestSource
 	Publisher     outbound.ReviewPublisher
+	Checks        ProgressCheck
 	Reviews       outbound.ReviewRepository
 	Clock         outbound.Clock
 	Logger        *slog.Logger

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 )
 
@@ -18,5 +19,6 @@ func (r *Reconciler) replaceTerminalProgressComment(ctx context.Context, target 
 	for _, commentID := range commentIDs {
 		updateErr = errors.Join(updateErr, r.deps.Publisher.UpdateComment(ctx, target, commentID, body))
 	}
+	r.deps.Checks.Complete(context.WithoutCancel(ctx), target, []string{marker}, progresscomment.CheckConclusionNeutral, reason)
 	return updateErr
 }

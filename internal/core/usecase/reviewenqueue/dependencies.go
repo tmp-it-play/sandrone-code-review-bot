@@ -13,6 +13,7 @@ type Dependencies struct {
 	Runs      outbound.ReviewRunRepository
 	Publisher outbound.ReviewPublisher
 	Renderer  outbound.Renderer
+	Checks    ProgressCheck
 	Clock     outbound.Clock
 	Logger    *slog.Logger
 }

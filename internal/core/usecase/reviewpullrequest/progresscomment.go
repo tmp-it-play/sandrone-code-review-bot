@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
@@ -65,7 +66,7 @@ func (u *UseCase) markProgressMutationUncertain(session *progressSession, err er
 	}
 }
 
-func (u *UseCase) replaceProgress(ctx context.Context, target pullrequest.Target, progress *progressSession, body string, createMissing bool) (bool, error) {
+func (u *UseCase) replaceProgress(ctx context.Context, target pullrequest.Target, progress *progressSession, body string, checkMessage string, createMissing bool) (bool, error) {
 	if progress == nil {
 		return false, nil
 	}
@@ -87,6 +88,7 @@ func (u *UseCase) replaceProgress(ctx context.Context, target pullrequest.Target
 	if !owned {
 		return true, nil
 	}
+	u.deps.Checks.Complete(context.WithoutCancel(ctx), target, progress.Markers(), progresscomment.CheckConclusionNeutral, checkMessage)
 	body = progressResultBody(progress, body)
 	cachedID := progress.CommentID()
 	lookupContext, lookupCancel := context.WithTimeout(context.WithoutCancel(ctx), progressUpdateTimeout)
@@ -217,7 +219,7 @@ func (u *UseCase) reconcileTerminalProgress(ctx context.Context, target pullrequ
 		progress = &progressSession{marker: reviewworkflow.ProgressMarker(run.Key), runID: run.ID}
 	}
 	progress.SetRunID(run.ID)
-	_, err := u.replaceProgress(ctx, target, progress, u.deps.Renderer.NoticeBody(notice), false)
+	_, err := u.replaceProgress(ctx, target, progress, u.deps.Renderer.NoticeBody(notice), notice.Message, false)
 	return err
 }
 

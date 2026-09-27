@@ -28,6 +28,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/adapter/outbound/system"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/parsing"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/handlecommand"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/progresscheck"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/replythread"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/reviewenqueue"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/reviewpullrequest"
@@ -111,6 +112,7 @@ func NewApplication(config Config) (*Application, error) {
 	publisher := githubadapter.NewReviewPublisher(clients)
 	threads := githubadapter.NewThreadPublisher(clients)
 	reactions := githubadapter.NewReactionPublisher(clients)
+	progressCheckPublisher := githubadapter.NewProgressCheckPublisher(clients)
 	permissions := githubadapter.NewPermissionChecker(clients)
 	tools := githubadapter.NewToolExecutorFactory(contents, masker, 16000)
 	renderer := markdown.NewRenderer(botName)
@@ -121,6 +123,11 @@ func NewApplication(config Config) (*Application, error) {
 	)
 	reviews := mysql.NewReviewRepository(database)
 	reviewRuns := mysql.NewReviewRunStore(database)
+	progressChecks := progresscheck.New(progresscheck.Dependencies{
+		Checks: progressCheckPublisher,
+		Runs:   reviewRuns,
+		Logger: logger,
+	})
 	reviewPublicationStore := mysql.NewReviewPublicationStore(database)
 	reviewExecutionStore := mysql.NewReviewExecutionStore(database)
 	reviewVerificationStore := mysql.NewReviewVerificationStore(database)
@@ -144,6 +151,7 @@ func NewApplication(config Config) (*Application, error) {
 		Runs:      reviewRuns,
 		Publisher: publisher,
 		Renderer:  renderer,
+		Checks:    progressChecks,
 		Clock:     clock,
 		Logger:    logger,
 	})
@@ -168,6 +176,7 @@ func NewApplication(config Config) (*Application, error) {
 		Findings:     findings,
 		State:        pullRequestState,
 		Progress:     reviewQueue,
+		Checks:       progressChecks,
 		Clock:        clock,
 		Parser:       parser,
 		Logger:       logger,
@@ -175,8 +184,8 @@ func NewApplication(config Config) (*Application, error) {
 		LLMMaxCalls:  config.LLMMaxCalls,
 	})
 	reviewRetention := maintenance.NewReviewRetentionWorker(reviewRetentionRepository, usageRepository, clock, logger, config.ReviewRetention)
-	reviewPublication := maintenance.NewReviewPublicationWorker(reviewRuns, reviewPublicationStore, reviewPublicationCandidates, publicationInvalidations, pullRequests, publisher, reviews, clock, logger, config.ReviewRetention)
-	progressComment := maintenance.NewProgressCommentWorker(reviewRuns, publisher, renderer, clock, logger)
+	reviewPublication := maintenance.NewReviewPublicationWorker(reviewRuns, reviewPublicationStore, reviewPublicationCandidates, publicationInvalidations, pullRequests, publisher, progressChecks, reviews, clock, logger, config.ReviewRetention)
+	progressComment := maintenance.NewProgressCommentWorker(reviewRuns, publisher, renderer, progressChecks, clock, logger)
 	occurrenceBootstrap := maintenance.NewFindingOccurrenceBootstrapWorker(occurrenceBootstrapRepository, logger)
 	summaryUseCase := summarizepullrequest.New(summarizepullrequest.Dependencies{
 		Source:       pullRequests,

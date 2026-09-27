@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 )
@@ -90,6 +91,14 @@ func (p *PreparedPublisher) publishEffects(ctx context.Context, target pullreque
 }
 
 func (p *PreparedPublisher) publishSummary(ctx context.Context, target pullrequest.Target, prepared reviewworkflow.ReviewPublication, body string) (int64, error) {
+	commentID, err := p.publishSummaryComment(ctx, target, prepared, body)
+	if err == nil {
+		p.deps.Checks.Complete(context.WithoutCancel(ctx), target, summaryProgressMarkers(prepared, body), progresscomment.CheckConclusionSuccess, reviewCompletedCheckMessage)
+	}
+	return commentID, err
+}
+
+func (p *PreparedPublisher) publishSummaryComment(ctx context.Context, target pullrequest.Target, prepared reviewworkflow.ReviewPublication, body string) (int64, error) {
 	sharedMarker := sharedProgressMarker(prepared)
 	if sharedMarker == "" {
 		commentID, _, _, err := p.publishSummaryEffect(ctx, target, prepared, body, "")
@@ -182,6 +191,14 @@ func (p *PreparedPublisher) updateSummaryComments(ctx context.Context, target pu
 		}
 	}
 	return commentIDs[len(commentIDs)-1], true, mutationAttempted, updateErr
+}
+
+func summaryProgressMarkers(prepared reviewworkflow.ReviewPublication, body string) []string {
+	markers := reviewworkflow.ProgressMarkers(body, prepared.Marker)
+	if canonicalMarker, ok := reviewworkflow.ProgressMarkerForPublicationMarker(prepared.Marker); ok {
+		markers = append([]string{canonicalMarker}, markers...)
+	}
+	return markers
 }
 
 func sharedProgressMarker(prepared reviewworkflow.ReviewPublication) string {
