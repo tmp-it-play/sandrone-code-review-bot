@@ -10,7 +10,7 @@ Sandrone Code Review Bot is an AI code review bot that summarizes the changes in
 
 [한국어](README.md)
 
-[GitHub App profile](https://github.com/apps/sandrone-code-review-bot) · [Privacy policy](PRIVACY.md)
+[GitHub App profile](https://github.com/apps/sandrone-code-review) · [Privacy policy](PRIVACY.md)
 
 ## Features
 

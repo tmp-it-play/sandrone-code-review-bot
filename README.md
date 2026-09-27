@@ -10,7 +10,7 @@ Sandrone Code Review Bot은 GitHub Pull Request의 변경 내용을 요약하고
 
 [English](README.en.md)
 
-[GitHub App 프로필](https://github.com/apps/sandrone-code-review-bot) · [개인정보처리방침](PRIVACY.md)
+[GitHub App 프로필](https://github.com/apps/sandrone-code-review) · [개인정보처리방침](PRIVACY.md)
 
 ## 주요 기능
 
