@@ -30,6 +30,7 @@ func (r *ReviewRunStore) EnsureProgressCommentRefresh(ctx context.Context, refre
 		Owner:                refresh.Target.Owner,
 		Repository:           refresh.Target.Repository,
 		Number:               refresh.Target.Number,
+		HeadSHA:              refresh.Target.HeadSHA,
 		ProgressMessageTheme: string(theme),
 		RefreshSequence:      refresh.Sequence,
 		CreateNotBefore:      timePointer(refresh.CreateNotBefore),
@@ -64,6 +65,9 @@ func (r *ReviewRunStore) EnsureProgressCommentRefresh(ctx context.Context, refre
 				"repository":      refresh.Target.Repository,
 				"number":          refresh.Target.Number,
 				"updated_at":      refresh.CreatedAt,
+			}
+			if refresh.Target.HeadSHA != "" {
+				updates["head_sha"] = refresh.Target.HeadSHA
 			}
 			if stored.RefreshSequence < refresh.Sequence {
 				updates["refresh_sequence"] = refresh.Sequence
@@ -201,6 +205,7 @@ func progressRefreshOf(entry model.ProgressCommentOwnership) progresscomment.Ref
 			Owner:          entry.Owner,
 			Repository:     entry.Repository,
 			Number:         entry.Number,
+			HeadSHA:        entry.HeadSHA,
 		},
 		Sequence:        entry.RefreshSequence,
 		CreatedAt:       entry.CreatedAt,
