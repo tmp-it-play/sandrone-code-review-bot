@@ -120,7 +120,7 @@ func alertKind(kind review.NoticeKind) string {
 	switch kind {
 	case review.NoticeFailed, review.NoticeUnavailable:
 		return "CAUTION"
-	case review.NoticeRetrying, review.NoticeRejected:
+	case review.NoticeRetrying, review.NoticeRejected, review.NoticeSuperseded:
 		return "WARNING"
 	default:
 		return "NOTE"

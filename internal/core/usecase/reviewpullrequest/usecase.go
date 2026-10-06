@@ -105,7 +105,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 				*outcome = reviewOutcomeOf(actualStatus)
 				return nil
 			}
-			if notifyErr := u.notify(ctx, task.Target, task, progress, review.Notice{Kind: review.NoticeSkipped, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
+			if notifyErr := u.notify(ctx, task.Target, task, progress, review.Notice{Kind: review.NoticeSuperseded, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
 				return fmt.Errorf("대체된 리뷰의 진행 코멘트를 정리하지 못했습니다: %w", errors.Join(cause, notifyErr))
 			}
 			u.save(ctx, task, startedAt, review.OutcomeSuperseded, detail, failureResponse, 0, 0, activeRunID)
@@ -310,7 +310,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			return nil
 		}
 		if progress != nil {
-			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSkipped, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
+			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSuperseded, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
 				return fmt.Errorf("대체된 리뷰의 진행 코멘트를 정리하지 못했습니다: %w", notifyErr)
 			}
 		}
@@ -374,7 +374,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			return nil
 		}
 		if progress != nil && !resumePublishing {
-			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSkipped, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
+			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSuperseded, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
 				return fmt.Errorf("대체된 리뷰의 진행 코멘트를 정리하지 못했습니다: %w", notifyErr)
 			}
 		}
@@ -403,7 +403,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			return nil
 		}
 		if progress != nil && !resumePublishing {
-			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSkipped, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
+			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSuperseded, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
 				return fmt.Errorf("대체된 리뷰의 진행 코멘트를 정리하지 못했습니다: %w", notifyErr)
 			}
 		}
@@ -612,7 +612,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			return nil
 		}
 		if actualStatus == reviewworkflow.RunStatusSuperseded {
-			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSkipped, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
+			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSuperseded, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
 				return fmt.Errorf("대체된 리뷰의 진행 코멘트를 정리하지 못했습니다: %w", notifyErr)
 			}
 			u.save(ctx, task, startedAt, review.OutcomeSuperseded, detail, llm.Response{}, 0, 0, run.ID)
@@ -729,7 +729,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			return nil
 		}
 		if actualStatus == reviewworkflow.RunStatusSuperseded {
-			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSkipped, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
+			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSuperseded, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
 				return fmt.Errorf("대체된 리뷰의 진행 코멘트를 정리하지 못했습니다: %w", notifyErr)
 			}
 			u.save(ctx, task, startedAt, review.OutcomeSuperseded, detail, response, 0, 0, run.ID)
@@ -801,7 +801,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 				return nil
 			}
 			u.save(ctx, task, startedAt, review.OutcomeSuperseded, detail, response, 0, 0, run.ID)
-			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSkipped, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
+			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSuperseded, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
 				return fmt.Errorf("대체된 리뷰의 진행 코멘트를 정리하지 못했습니다: %w", notifyErr)
 			}
 			*outcome = review.OutcomeSuperseded
@@ -828,7 +828,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			return nil
 		}
 		u.save(ctx, task, startedAt, review.OutcomeSuperseded, detail, response, 0, 0, run.ID)
-		if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSkipped, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
+		if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSuperseded, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
 			return fmt.Errorf("대체된 리뷰의 진행 코멘트를 정리하지 못했습니다: %w", notifyErr)
 		}
 		*outcome = review.OutcomeSuperseded
@@ -850,7 +850,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 				return nil
 			}
 			u.save(ctx, task, startedAt, review.OutcomeSuperseded, detail, response, 0, 0, run.ID)
-			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSkipped, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
+			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSuperseded, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
 				return fmt.Errorf("대체된 리뷰의 진행 코멘트를 정리하지 못했습니다: %w", notifyErr)
 			}
 			*outcome = review.OutcomeSuperseded
@@ -878,7 +878,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			return nil
 		}
 		u.save(ctx, task, startedAt, review.OutcomeSuperseded, detail, response, 0, 0, run.ID)
-		if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSkipped, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
+		if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeSuperseded, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}); notifyErr != nil {
 			return fmt.Errorf("대체된 리뷰의 진행 코멘트를 정리하지 못했습니다: %w", notifyErr)
 		}
 		*outcome = review.OutcomeSuperseded

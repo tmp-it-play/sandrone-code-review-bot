@@ -8,4 +8,5 @@ const (
 	NoticeFailed      NoticeKind = "failed"
 	NoticeUnavailable NoticeKind = "unavailable"
 	NoticeSkipped     NoticeKind = "skipped"
+	NoticeSuperseded  NoticeKind = "superseded"
 )

@@ -35,7 +35,7 @@ func terminalProgressBody(status RunStatus) string {
 	case RunStatusSkipped:
 		return "> [!NOTE]\n> 리뷰할 변경 사항이 없어 이번 리뷰를 종료했습니다."
 	case RunStatusSuperseded:
-		return "> [!NOTE]\n> 더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."
+		return "> [!WARNING]\n> 더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."
 	case RunStatusFailed:
 		return "> [!CAUTION]\n> 리뷰를 완료하지 못해 이번 실행을 종료했습니다."
 	case RunStatusCancelled:

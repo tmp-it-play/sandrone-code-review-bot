@@ -228,7 +228,7 @@ func terminalProgressNotice(status reviewworkflow.RunStatus) (review.Notice, boo
 	case reviewworkflow.RunStatusSkipped:
 		return review.Notice{Kind: review.NoticeSkipped, Message: "리뷰할 변경 사항이 없어 이번 리뷰를 종료했습니다."}, true
 	case reviewworkflow.RunStatusSuperseded:
-		return review.Notice{Kind: review.NoticeSkipped, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}, true
+		return review.Notice{Kind: review.NoticeSuperseded, Message: "더 최신 변경이 감지되어 이 리뷰를 종료했습니다. 최신 리뷰 실행이 이어서 처리합니다."}, true
 	case reviewworkflow.RunStatusFailed:
 		return review.Notice{Kind: review.NoticeFailed, Message: "리뷰를 완료하지 못해 이번 실행을 종료했습니다."}, true
 	case reviewworkflow.RunStatusCancelled:
