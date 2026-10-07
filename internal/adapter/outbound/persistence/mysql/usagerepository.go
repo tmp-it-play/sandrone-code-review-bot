@@ -66,6 +66,8 @@ func (r *UsageRepository) Snapshot(ctx context.Context) ([]usage.Snapshot, error
 			snapshot.Succeeded += row.Total
 		case "quota", "rate_limited":
 			snapshot.QuotaBlocked += row.Total
+		case "budget_exhausted", "budget_unavailable":
+			snapshot.InternalBlocked += row.Total
 		default:
 			snapshot.Failed += row.Total
 		}
@@ -113,7 +115,7 @@ func (r *UsageRepository) attachLastFailure(ctx context.Context, byProvider map[
 	for provider, snapshot := range byProvider {
 		var row model.ProviderUsage
 		err := r.database.WithContext(ctx).
-			Where("provider = ?", provider).
+			Where("provider = ? AND outcome NOT IN ?", provider, []string{"budget_exhausted", "budget_unavailable"}).
 			Order("occurred_at DESC").
 			Order("id DESC").
 			First(&row).Error

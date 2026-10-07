@@ -281,11 +281,12 @@ func (s *Server) providerViews(ctx context.Context) []ProviderView {
 	byName := map[string]ProviderView{}
 	for _, snapshot := range snapshots {
 		view := ProviderView{
-			Name:         snapshot.Provider,
-			Succeeded:    snapshot.Succeeded,
-			Failed:       snapshot.Failed,
-			QuotaBlocked: snapshot.QuotaBlocked,
-			LastUsedAt:   formatTime(snapshot.LastUsedAt),
+			Name:            snapshot.Provider,
+			Succeeded:       snapshot.Succeeded,
+			Failed:          snapshot.Failed,
+			QuotaBlocked:    snapshot.QuotaBlocked,
+			InternalBlocked: snapshot.InternalBlocked,
+			LastUsedAt:      formatTime(snapshot.LastUsedAt),
 			LastFailure: failureLabel(
 				snapshot.LastFailureKind,
 				snapshot.LastFailureStatus,

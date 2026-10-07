@@ -7,6 +7,7 @@ type Snapshot struct {
 	Succeeded                             int
 	Failed                                int
 	QuotaBlocked                          int
+	InternalBlocked                       int
 	LastUsedAt                            time.Time
 	CooldownEnds                          time.Time
 	LastFailureKind                       string

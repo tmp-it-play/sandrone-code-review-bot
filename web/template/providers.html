@@ -2,19 +2,19 @@
 {{template "nav" .}}
 <main>
   <h1>프로바이더</h1>
-  <p class="sub">위에서부터 순서대로 시도하고, 한도에 걸리면 다음으로 넘어간다. 응답 수치는 설정된 120~180일 보존 기간 안에서 누적하고 최근 호출이 성공하면 실패 사유를 표시하지 않는다.</p>
+  <p class="sub">위에서부터 순서대로 시도하고, 한도에 걸리면 다음으로 넘어간다. 응답 수치는 설정된 120~180일 보존 기간 안에서 누적한다. 내부 중단은 앱의 호출 예산 소진 또는 예약 오류다. 최근 외부 호출이 성공하면 실패 사유를 표시하지 않는다.</p>
   <table>
-    <thead><tr><th>순위</th><th>이름</th><th>성공 응답</th><th>실패 응답</th><th>한도 차단</th><th>최근 사용</th><th>최근 호출 실패</th><th>쿨다운</th></tr></thead>
+    <thead><tr><th>순위</th><th>이름</th><th>성공 응답</th><th>실패 응답</th><th>한도 차단</th><th>내부 중단</th><th>최근 사용</th><th>최근 호출 실패</th><th>쿨다운</th></tr></thead>
     <tbody>
     {{range .Providers}}
       <tr>
-        <td>{{.Order}}</td><td>{{.Name}}</td><td>{{.Succeeded}}</td><td>{{.Failed}}</td><td>{{.QuotaBlocked}}</td>
+        <td>{{.Order}}</td><td>{{.Name}}</td><td>{{.Succeeded}}</td><td>{{.Failed}}</td><td>{{.QuotaBlocked}}</td><td>{{.InternalBlocked}}</td>
         <td>{{if .LastUsedAt}}{{.LastUsedAt}}{{else}}-{{end}}</td>
         <td>{{if .LastFailure}}{{.LastFailure}}<br><span class="muted">{{.LastFailureAt}}</span>{{else}}-{{end}}</td>
         <td>{{if .CooldownEnds}}<span class="badge failed">{{.CooldownEnds}}까지</span>{{else}}-{{end}}</td>
       </tr>
     {{else}}
-      <tr><td colspan="8" class="empty">설정된 프로바이더가 없습니다.</td></tr>
+      <tr><td colspan="9" class="empty">설정된 프로바이더가 없습니다.</td></tr>
     {{end}}
     </tbody>
   </table>
