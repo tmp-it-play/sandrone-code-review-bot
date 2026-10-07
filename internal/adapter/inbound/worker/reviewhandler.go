@@ -3,11 +3,13 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/job"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/reviewpullrequest"
 )
 
@@ -34,5 +36,8 @@ func (h *ReviewHandler) ProcessTask(ctx context.Context, task *asynq.Task) error
 		label = string(outcome)
 	}
 	h.metrics.ObserveJob("review", label, time.Since(startedAt))
+	if errors.Is(err, reviewworkflow.ErrPlanChanged) {
+		return errors.Join(err, asynq.SkipRetry)
+	}
 	return err
 }

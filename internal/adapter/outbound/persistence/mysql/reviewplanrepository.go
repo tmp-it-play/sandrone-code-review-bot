@@ -52,18 +52,18 @@ func (r *ReviewExecutionStore) SavePlan(ctx context.Context, runID uint64, runLe
 		if err != nil {
 			return err
 		}
-		if storedHash != expectedHash {
-			return errors.New("이미 저장된 리뷰 계획과 새 계획이 다릅니다")
+		if run.InitialPlanHash != "" && run.InitialPlanHash != storedHash {
+			return fmt.Errorf("%w: 저장된 초기 계획 hash가 일치하지 않습니다", reviewworkflow.ErrPlanChanged)
 		}
-		if run.InitialPlanHash != "" && run.InitialPlanHash != expectedHash {
-			return errors.New("리뷰 실행의 초기 계획 hash가 일치하지 않습니다")
+		if storedHash != expectedHash && !legacyCoverageStructureMatches(coverageEntries, preparedCoverage) {
+			return reviewworkflow.ErrPlanChanged
 		}
 		updated := transaction.Model(&model.ReviewRun{}).
 			Where("id = ? AND lease_token = ? AND status IN ?", runID, runLeaseToken, []string{string(reviewworkflow.RunStatusPlanning), string(reviewworkflow.RunStatusRunning)}).
 			Updates(map[string]any{
 				"status":            string(reviewworkflow.RunStatusRunning),
 				"heartbeat_at":      plannedAt,
-				"initial_plan_hash": expectedHash,
+				"initial_plan_hash": storedHash,
 			})
 		if updated.Error != nil {
 			return updated.Error
@@ -82,6 +82,7 @@ func (r *ReviewExecutionStore) SavePlan(ctx context.Context, runID uint64, runLe
 		stored = reviewworkflow.PlanSnapshot{
 			Leaves:     mapReviewUnits(leafEntries),
 			SplitUnits: mapReviewUnits(splitEntries),
+			Coverage:   initialPlanCoverage(coverageEntries),
 		}
 		return nil
 	})

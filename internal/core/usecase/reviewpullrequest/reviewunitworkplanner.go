@@ -15,8 +15,11 @@ type reviewUnitWorkPlanner struct {
 	coverage    []reviewworkflow.CoverageItem
 }
 
-func newReviewUnitWorkPlanner(plan batching.Plan, coverage []reviewworkflow.CoverageItem) *reviewUnitWorkPlanner {
+func newReviewUnitWorkPlanner(files []pullrequest.ChangedFile, plan batching.Plan, coverage []reviewworkflow.CoverageItem) *reviewUnitWorkPlanner {
 	filesByPath := map[string]pullrequest.ChangedFile{}
+	for _, file := range files {
+		filesByPath[file.Path] = file
+	}
 	for _, batch := range plan.Batches {
 		for _, file := range batch {
 			filesByPath[file.Path] = file

@@ -27,6 +27,7 @@ type Config struct {
 	Providers         map[string]ProviderConfig
 	ProviderCooldown  time.Duration
 	RequestTimeout    time.Duration
+	ReviewTimeout     time.Duration
 	LLMMaxCalls       int
 	DashboardUsername string
 	DashboardPassword string
@@ -50,6 +51,7 @@ func LoadConfig() (Config, error) {
 		WorkerConcurrency: number("SANDRONE_WORKER_CONCURRENCY", 2),
 		ProviderCooldown:  duration("SANDRONE_PROVIDER_COOLDOWN", 15*time.Minute),
 		RequestTimeout:    requestTimeout(),
+		ReviewTimeout:     reviewTimeout(),
 		LLMMaxCalls:       boundedNumber("SANDRONE_LLM_MAX_CALLS_PER_OPERATION", 24, 1, 24),
 		DashboardUsername: os.Getenv("DASHBOARD_USERNAME"),
 		DashboardPassword: os.Getenv("DASHBOARD_PASSWORD"),
@@ -124,12 +126,17 @@ func deliveryRetention() time.Duration {
 }
 
 func requestTimeout() time.Duration {
-	const maximum = 5 * time.Minute
+	const maximum = 3 * time.Minute
 	configured := duration("SANDRONE_REQUEST_TIMEOUT", maximum)
 	if configured > maximum {
 		return maximum
 	}
 	return configured
+}
+
+func reviewTimeout() time.Duration {
+	configured := duration("SANDRONE_REVIEW_TIMEOUT", 30*time.Minute)
+	return min(configured, 2*time.Hour)
 }
 
 func privateKey() ([]byte, error) {

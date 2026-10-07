@@ -49,6 +49,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 		result.response = response
 		result.externalCalls = externalCalls
 		result.budgetExhausted = externalCalls >= input.reviewerCallLimit
+		result.timeBudgetExhausted = result.timeBudgetExhausted || !input.request.Deadline.IsZero() && !e.deps.clock.Now().Before(input.request.Deadline)
 	}
 	restoreCheckpoint := func(unit reviewworkflow.Unit) {
 		usage = usage.Add(llm.Usage{
@@ -80,6 +81,10 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 	if err != nil {
 		return fail("리뷰 실행 계획을 저장하지 못했습니다", err)
 	}
+	if len(planSnapshot.Coverage) != len(input.coverage) {
+		return fail("저장된 리뷰 범위를 복원하지 못했습니다", reviewworkflow.ErrPlanChanged)
+	}
+	copy(input.coverage, planSnapshot.Coverage)
 	for _, splitUnit := range planSnapshot.SplitUnits {
 		usage = usage.Add(llm.Usage{
 			PromptTokens:     splitUnit.PromptTokens,
@@ -97,7 +102,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 		}
 	}
 	captureResponse()
-	workPlanner := newReviewUnitWorkPlanner(input.plan, input.coverage)
+	workPlanner := newReviewUnitWorkPlanner(input.files, input.plan, input.coverage)
 	works, err := workPlanner.Build(planSnapshot.Leaves)
 	if err != nil {
 		return fail("저장된 리뷰 실행 계획을 복원하지 못했습니다", err)
@@ -244,7 +249,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			}
 		}
 		captureResponse()
-		if input.planner.RoutePolicy.ShouldSplit(batch, messagesSize(messages), input.includeFileNotes) && canSplit && reviewUnitRefinementFitsBudget(works, externalCalls, input.reviewerCallLimit, reservedRetryCalls) {
+		if !result.timeBudgetExhausted && input.planner.RoutePolicy.ShouldSplit(batch, messagesSize(messages), input.includeFileNotes) && canSplit && reviewUnitRefinementFitsBudget(works, externalCalls, input.reviewerCallLimit, reservedRetryCalls) {
 			refinedAt := e.deps.clock.Now()
 			children, refined, refineErr := e.refineUnit(ctx, input, workPlanner, work, claim.LeaseToken, inputHash, reviewworkflow.UnitResult{Error: "provider_capacity_refinement"}, refinedAt)
 			if refineErr != nil {
@@ -265,6 +270,8 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			}
 			completionFailure, hasCompletionFailure := llm.AsCompletionFailure(batchErr)
 			deferredByBudget := errors.Is(batchErr, llm.ErrExternalCallBudgetExhausted) && batchResponse.Provider == ""
+			deferredByTime := errors.Is(batchErr, llm.ErrCompletionDeadline)
+			result.timeBudgetExhausted = result.timeBudgetExhausted || deferredByTime
 			maskedBatchErr := errors.New(e.deps.masker.Mask(batchErr.Error()))
 			usage = usage.Add(batchResponse.Usage)
 			toolExecutions += batchResponse.ToolExecutions
@@ -313,7 +320,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			}
 			unitStatus := reviewworkflow.UnitStatusFailed
 			coverageStatus := reviewworkflow.CoverageStatusFailed
-			if deferredByBudget {
+			if deferredByBudget || deferredByTime {
 				unitStatus = reviewworkflow.UnitStatusDeferred
 				coverageStatus = reviewworkflow.CoverageStatusDeferred
 			}
@@ -333,7 +340,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 				return fail("실패한 리뷰 unit을 저장하지 못했습니다", err)
 			}
 			transitionCoverage(input.coverage, unit.Hash, coverageStatus, nil)
-			if !deferredByBudget {
+			if !deferredByBudget && !deferredByTime {
 				result.failed = append(result.failed, batch...)
 			}
 			if unitRetryable {

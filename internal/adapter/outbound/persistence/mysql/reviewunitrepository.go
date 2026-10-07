@@ -199,6 +199,9 @@ func (r *ReviewExecutionStore) FinishUnit(ctx context.Context, runID uint64, run
 		}
 		if result.Status == reviewworkflow.UnitStatusDeferred {
 			coverageUpdates["reason"] = "call_budget_exhausted"
+			if result.Error == llm.ErrCompletionDeadline.Error() {
+				coverageUpdates["reason"] = "time_budget_exhausted"
+			}
 		}
 		return transaction.Model(&model.CoverageItem{}).
 			Where("review_run_id = ? AND review_unit_id = ? AND status = ?", runID, unit.ID, string(reviewworkflow.CoverageStatusPlanned)).

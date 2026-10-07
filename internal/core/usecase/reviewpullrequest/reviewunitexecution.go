@@ -16,6 +16,7 @@ type reviewUnitExecution struct {
 	config            setting.RepoConfig
 	planner           reviewBatchPlanner
 	plan              batching.Plan
+	files             []pullrequest.ChangedFile
 	promptConfig      setting.RepoConfig
 	units             []reviewworkflow.Unit
 	coverage          []reviewworkflow.CoverageItem

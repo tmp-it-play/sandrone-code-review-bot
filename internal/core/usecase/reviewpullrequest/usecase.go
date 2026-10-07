@@ -36,6 +36,9 @@ type UseCase struct {
 }
 
 func New(deps Dependencies) *UseCase {
+	if deps.ReviewTimeout <= 0 {
+		deps.ReviewTimeout = 30 * time.Minute
+	}
 	verifier := newFindingVerifier(findingVerifierDependencies{
 		verification: deps.Verification,
 		completer:    deps.Completer,
@@ -94,6 +97,9 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	progress := requestProgress(task)
 	failureResponse := llm.Response{}
 	fail := func(message string, cause error) error {
+		if errors.Is(cause, reviewworkflow.ErrPlanChanged) {
+			task.FinalAttempt = true
+		}
 		if errors.Is(cause, reviewworkflow.ErrRunSuperseded) && activeRunID != 0 && activeRunLease != "" && !publicationClaimed {
 			detail := "더 최신인 PR 상태가 현재 리뷰 실행을 대체했습니다"
 			supersedingHeadSHA := u.resolveSupersedingHeadSHA(ctx, task.Target)
@@ -182,6 +188,9 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		if executeErr != nil && task.FinalAttempt && !publicationClaimed {
 			if _, err := u.finishWorkflowWithOutcomeAndProgress(finishContext, activeRunID, activeRunLease, reviewworkflow.RunStatusFailed, review.OutcomeFailed, u.deps.Masker.Mask(executeErr.Error()), false, progress); err != nil {
 				u.deps.Logger.Error("실패한 리뷰 실행을 종료하지 못했습니다", "run", activeRunID, "error", err)
+				if errors.Is(executeErr, reviewworkflow.ErrPlanChanged) {
+					executeErr = fmt.Errorf("리뷰 계획 충돌의 종료 상태를 저장하지 못했습니다: %w", err)
+				}
 			}
 		}
 		if err := u.deps.Runs.ReleaseRun(finishContext, activeRunID, activeRunLease, u.deps.Clock.Now()); err != nil {
@@ -442,6 +451,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 	activeRunID = run.ID
 	activeRunLease = runLease
+	reviewRequest.Deadline = run.StartedAt.Add(u.deps.ReviewTimeout)
 	externalCalls := acquiredRunLease.ExternalCalls
 	if externalCalls < 0 {
 		externalCalls = 0
@@ -686,6 +696,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		config:            config,
 		planner:           planner,
 		plan:              plan,
+		files:             loaded,
 		promptConfig:      promptConfig,
 		units:             units,
 		coverage:          coverage,
@@ -703,10 +714,13 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	response := unitExecution.response
 	reviewed := unitExecution.reviewed
 	failed := unitExecution.failed
-	if len(failed) > 0 && !task.FinalAttempt && !unitExecution.budgetExhausted && unitExecution.retryable {
+	if len(failed) > 0 && !task.FinalAttempt && !unitExecution.budgetExhausted && !unitExecution.timeBudgetExhausted && unitExecution.retryable {
 		retryAt := unitExecution.retryAt
 		if retryAt.IsZero() {
 			retryAt = u.deps.Clock.Now().Add(time.Minute)
+		}
+		if retryAt.After(reviewRequest.Deadline) {
+			retryAt = reviewRequest.Deadline
 		}
 		cause := fmt.Errorf("%d개 파일의 일시 실패가 남아 있습니다", len(failed))
 		u.deps.Logger.Info("일시 실패한 리뷰 unit을 사용자 실패로 처리하지 않고 재개를 예약합니다", "target", target.Reference(), "run", run.ID, "files", len(failed), "retry_at", retryAt)
@@ -734,6 +748,14 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			}
 			u.save(ctx, task, startedAt, review.OutcomeSuperseded, detail, response, 0, 0, run.ID)
 			*outcome = review.OutcomeSuperseded
+			return nil
+		}
+		if unitExecution.timeBudgetExhausted {
+			if notifyErr := u.notify(ctx, target, task, progress, review.Notice{Kind: review.NoticeUnavailable, Message: "정해진 리뷰 시간 안에서 유효한 결과를 만들지 못해 이번 리뷰를 종료합니다."}); notifyErr != nil {
+				return fmt.Errorf("시간 예산으로 종료된 리뷰를 안내하지 못했습니다: %w", notifyErr)
+			}
+			u.save(ctx, task, startedAt, review.OutcomeFailed, detail+" time_budget_exhausted=true", response, 0, 0, run.ID)
+			*outcome = review.OutcomeFailed
 			return nil
 		}
 		if len(failed) == 0 {
