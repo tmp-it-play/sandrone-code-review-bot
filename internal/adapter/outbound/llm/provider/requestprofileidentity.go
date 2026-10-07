@@ -8,10 +8,7 @@ func (p RequestProfile) Identity(request llm.Request) llm.ProviderRequestPolicyI
 		value := request.Temperature
 		temperature = &value
 	}
-	maxOutputTokens := request.MaxOutputTokens
-	if p.OutputTokenLimit > 0 && maxOutputTokens > p.OutputTokenLimit {
-		maxOutputTokens = p.OutputTokenLimit
-	}
+	maxOutputTokens := p.outputTokens(request)
 	usableOutputTokens := maxOutputTokens
 	if p.StructuredOutputPercent > 0 && p.StructuredOutputPercent < 100 {
 		usableOutputTokens = maxOutputTokens * p.StructuredOutputPercent / 100

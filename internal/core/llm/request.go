@@ -1,5 +1,7 @@
 package llm
 
+import "time"
+
 type Request struct {
 	Messages              []Message
 	Temperature           float64
@@ -15,6 +17,7 @@ type Request struct {
 	RequireCompletePrompt bool
 	FailFastOnIncomplete  bool
 	ResponseValidation    ResponseValidation
+	Deadline              time.Time
 }
 
 func (r Request) WithMessages(messages []Message) Request {

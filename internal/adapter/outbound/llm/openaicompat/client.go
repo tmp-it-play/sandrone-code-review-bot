@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -106,7 +108,7 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 		if ctx.Err() != nil {
 			return llm.Response{}, ctx.Err()
 		}
-		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureUnavailable, Elapsed: time.Since(startedAt), Cause: err}
+		return llm.Response{}, c.transportFailure(err, time.Since(startedAt))
 	}
 	defer func() {
 		_ = httpResponse.Body.Close()
@@ -118,7 +120,7 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 		if ctx.Err() != nil {
 			return llm.Response{}, ctx.Err()
 		}
-		return llm.Response{}, &llm.Failure{Provider: c.name, Kind: llm.FailureUnavailable, Elapsed: elapsed, Cause: err}
+		return llm.Response{}, c.transportFailure(err, elapsed)
 	}
 	if httpResponse.StatusCode >= 400 {
 		providerErrorCode, providerErrorMessage := parseAPIError(raw)
@@ -187,10 +189,7 @@ func (c *Client) chatRequest(request llm.Request) chatRequest {
 		temperature := request.Temperature
 		payload.Temperature = &temperature
 	}
-	maxOutputTokens := request.MaxOutputTokens
-	if limit := c.requestProfile.OutputTokenLimit; limit > 0 && maxOutputTokens > limit {
-		maxOutputTokens = limit
-	}
+	maxOutputTokens := c.requestProfile.Identity(request).MaxOutputTokens
 	if c.requestProfile.UseMaxCompletionTokens {
 		payload.MaxCompletionTokens = maxOutputTokens
 	} else {
@@ -281,14 +280,25 @@ func classify(status int, providerErrorCode string, providerErrorMessage string)
 		return llm.FailureAuth
 	case status == 402:
 		return llm.FailureQuota
+	case status == http.StatusNotFound:
+		return llm.FailureModel
 	case status == http.StatusRequestTimeout:
 		if providerErrorCode == "3008" {
 			return llm.FailureAborted
 		}
-		return llm.FailureUnavailable
+		return llm.FailureTimeout
 	case status >= 500:
 		return llm.FailureUnavailable
 	default:
 		return llm.FailureInvalid
 	}
+}
+
+func (c *Client) transportFailure(err error, elapsed time.Duration) *llm.Failure {
+	kind := llm.FailureUnavailable
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		kind = llm.FailureTimeout
+	}
+	return &llm.Failure{Provider: c.name, Kind: kind, Elapsed: elapsed, Cause: err}
 }

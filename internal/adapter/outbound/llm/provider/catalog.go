@@ -11,7 +11,7 @@ func NewCatalog() Catalog {
 	verifiedRoles := supportedRoles()
 	promptContractRoles := supportedPromptContractRoles()
 	return Catalog{
-		order: []string{"gemini", "nvidia", "local", "openrouter", "groq", "mistral", "cloudflare-glm", "cloudflare-gemma"},
+		order: []string{"gemini", "groq", "openrouter", "nvidia", "local", "mistral", "cloudflare-glm", "cloudflare-gemma"},
 		descriptors: map[string]Descriptor{
 			"gemini": {
 				Name:           "gemini",
@@ -35,8 +35,8 @@ func NewCatalog() Catalog {
 			},
 			"openrouter": {
 				Name:           "openrouter",
-				Model:          "z-ai/glm-5.2:free",
-				DisplayName:    "GLM 5.2",
+				Model:          "nvidia/nemotron-3-super-120b-a12b:free",
+				DisplayName:    "Nemotron 3 Super 120B",
 				BaseURL:        "https://openrouter.ai/api/v1",
 				APIKeyEnv:      "OPENROUTER_API_KEY",
 				Capability:     llm.Capability{ToolCalling: true, JSONMode: true},
@@ -56,6 +56,7 @@ func NewCatalog() Catalog {
 				Capability:     llm.Capability{ToolCalling: true, JSONMode: true},
 				Profile:        llm.ProviderProfile{Roles: promptContractRoles, PublicDataAllowed: true},
 				MaxPromptChars: 180000,
+				MaxConcurrency: 1,
 			},
 			"mistral": {
 				Name:           "mistral",

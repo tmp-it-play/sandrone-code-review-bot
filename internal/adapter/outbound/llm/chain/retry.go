@@ -7,6 +7,8 @@ import (
 
 const transientRetries = 1
 
+const maximumImmediateRetryElapsed = 10 * time.Second
+
 func retryPause(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1

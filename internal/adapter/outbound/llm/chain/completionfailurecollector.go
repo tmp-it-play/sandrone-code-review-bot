@@ -36,7 +36,7 @@ func (c *completionFailureCollector) failure() *llm.CompletionFailure {
 	}
 	return &llm.CompletionFailure{
 		Attempts:        append([]llm.CompletionAttempt(nil), c.attempts...),
-		Adaptable:       c.adaptable,
+		Adaptable:       c.adaptable && !c.retryable && !c.budgetExhausted,
 		Retryable:       retryable,
 		NextAttemptAt:   nextAttemptAt,
 		BudgetExhausted: c.budgetExhausted,

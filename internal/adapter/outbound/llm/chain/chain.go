@@ -84,7 +84,7 @@ func (c *Chain) RouteCapacitiesFor(request llm.Request) []llm.RouteCapacity {
 
 func (c *Chain) PolicyHashInputs(request llm.Request) llm.PolicyHashInputs {
 	identity := llm.PolicyHashInputs{
-		Version:               "llm-routing-v5",
+		Version:               "llm-routing-v6",
 		TaskRole:              request.TaskRole,
 		DataClassification:    request.DataClassification,
 		RequestedProviders:    normalizedNames(request.Providers),
@@ -118,12 +118,26 @@ func (c *Chain) PolicyHashInputs(request llm.Request) llm.PolicyHashInputs {
 	return identity
 }
 
-func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outbound.ToolExecutor) (llm.Response, error) {
+func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outbound.ToolExecutor) (result llm.Response, resultErr error) {
 	if !request.TaskRole.Valid() || !request.DataClassification.Valid() {
 		return llm.Response{}, ErrRequestPolicyRequired
 	}
 	if request.ExternalCallBudget == nil {
 		return llm.Response{}, ErrExternalCallBudgetRequired
+	}
+	if !request.Deadline.IsZero() {
+		remaining := request.Deadline.Sub(c.clock.Now())
+		if remaining <= 0 {
+			return llm.Response{}, llm.ErrCompletionDeadline
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeoutCause(ctx, remaining, llm.ErrCompletionDeadline)
+		defer cancel()
+		defer func() {
+			if resultErr != nil && errors.Is(context.Cause(ctx), llm.ErrCompletionDeadline) {
+				resultErr = llm.ErrCompletionDeadline
+			}
+		}()
 	}
 	collector := &completionFailureCollector{}
 	routed := false
@@ -283,7 +297,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			status = failure.Status
 			if failure.Kind.TriggersCooldown() || (failure.Kind != llm.FailureAborted && failure.RetryAfter > 0) {
 				cooldownEnd := c.markProviderCooldown(ctx, candidate, failure.RetryAfter)
-				if failure.Kind == llm.FailureQuota || failure.Kind == llm.FailureRateLimited || failure.Kind == llm.FailureUnavailable {
+				if failure.Kind == llm.FailureQuota || failure.Kind == llm.FailureRateLimited || failure.Kind == llm.FailureUnavailable || failure.Kind == llm.FailureTimeout {
 					retryAt = cooldownEnd
 				}
 			}
@@ -356,7 +370,7 @@ func (c *Chain) attemptWithRetry(ctx context.Context, candidate outbound.Provide
 		}
 		lastErr = err
 		failure, ok := llm.AsFailure(err)
-		if !ok || !failure.Kind.IsTransient() || failure.RetryAfter > 0 || tryIndex == transientRetries {
+		if !ok || !failure.Kind.IsTransient() || failure.RetryAfter > 0 || tryIndex == transientRetries || request.ExternalCallBudget.Remaining() == 0 || lastAttemptElapsed >= maximumImmediateRetryElapsed || failure.Elapsed >= maximumImmediateRetryElapsed {
 			return llm.Response{Usage: usage, ToolExecutions: toolExecutions}, lastAttemptUsage, lastAttemptElapsed, err
 		}
 		c.observe(ctx, candidate, candidate.Model(), request.TaskRole, string(failure.Kind), failure.Status, lastAttemptUsage, lastAttemptElapsed, failure)

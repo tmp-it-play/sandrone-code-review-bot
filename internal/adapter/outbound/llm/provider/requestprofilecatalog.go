@@ -20,23 +20,25 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 			ForceJSONWithTools:      true,
 		}
 	case "groq/openai/gpt-oss-120b":
+		capability := llm.Capability{JSONMode: true}
 		return RequestProfile{
+			Capability:              &capability,
 			Temperature:             float64Value(1),
 			TopP:                    float64Value(1),
-			ReasoningEffort:         "medium",
+			ReasoningEffort:         "low",
 			ParallelToolCalls:       boolValue(false),
-			OutputTokenLimit:        2500,
+			OutputTokenLimit:        4096,
 			StructuredOutputPercent: 50,
 			UseMaxCompletionTokens:  true,
 		}
-	case "openrouter/z-ai/glm-5.2":
+	case "openrouter/nvidia/nemotron-3-super-120b-a12b":
 		return RequestProfile{
-			Temperature:             float64Value(1),
-			TopP:                    float64Value(0.95),
-			NestedReasoningEffort:   "high",
+			UseRequestTemperature:   true,
+			NestedReasoningEffort:   "low",
 			ExcludeReasoning:        true,
-			OutputTokenLimit:        131072,
+			OutputTokenLimit:        8192,
 			StructuredOutputPercent: 50,
+			ForceJSONWithTools:      true,
 		}
 	case "nvidia/google/gemma-4-31b-it":
 		capability := llm.Capability{JSONMode: true}
