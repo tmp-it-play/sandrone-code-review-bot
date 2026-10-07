@@ -122,7 +122,11 @@ Not only review settings such as `language`, `tone`, `allowStrongTone`, and `min
 | `maxReviewBatches`     |                      `8` | Maximum number of batches a large PR is split into for review.                                                                             |
 | `instructionFiles`     | default instruction list | List of instruction file paths and globs to read.                                                                                          |
 
-Review settings and instruction files are read from a pinned head SHA of the PR's source branch. For a `develop` → `main` PR, for example, the head commit of `develop` is used. Repository settings cannot lift the cost limits either: review batches are capped at `1`–`8`, model output at `8192` tokens, additional file reads at `6`, and posted findings at `25` in total.
+Review settings and instruction files are read from a pinned head SHA of the PR's source branch. For a `develop` → `main` PR, for example, the head commit of `develop` is used. Repository settings cannot lift the cost limits: initial review batches are capped at `1`–`8`, configured model output at `8192` tokens, additional file reads at `6`, and posted findings at `25` in total. Capacity or response format failures can trigger further splitting within the call budget. Transient outages and cooldowns do not trigger splitting.
+
+`SANDRONE_REQUEST_TIMEOUT` limits each external model request. Its default and maximum are `3m`. `SANDRONE_REVIEW_TIMEOUT` limits model processing from the start of a review run, including retry waits. Its default is `30m` and its maximum is `2h`. When this budget expires, the bot stops new model calls and finalizes available results and unreviewed coverage. Saving and publishing results require additional time. `SANDRONE_LLM_MAX_CALLS_PER_OPERATION` caps total external calls at `24`.
+
+Providers are attempted in this order: Gemini, Groq, OpenRouter, NVIDIA, Local, Mistral, and Cloudflare. Local handles summaries only. OpenRouter uses `nvidia/nemotron-3-super-120b-a12b:free`. Output budgets account for each model's reserved reasoning tokens. Long failed requests are not immediately retried with the same provider. The dashboard counts internal call budget and reservation errors separately from external provider failures.
 
 ## Tone presets
 
