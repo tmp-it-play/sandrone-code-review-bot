@@ -20,22 +20,24 @@ type ReviewRetentionWorker struct {
 	orphanAfter time.Duration
 }
 
-func NewReviewRetentionWorker(repository outbound.ReviewRetentionRepository, usage outbound.UsageRepository, clock outbound.Clock, logger *slog.Logger, retention time.Duration) *ReviewRetentionWorker {
+func NewReviewRetentionWorker(repository outbound.ReviewRetentionRepository, usage outbound.UsageRepository, clock outbound.Clock, logger *slog.Logger, retention time.Duration, reviewTimeout time.Duration) *ReviewRetentionWorker {
 	return &ReviewRetentionWorker{
 		repository:  repository,
 		usage:       usage,
 		clock:       clock,
 		logger:      logger,
 		retention:   retention,
-		interval:    24 * time.Hour,
+		interval:    5 * time.Minute,
 		batchSize:   10,
 		usageBatch:  500,
-		orphanAfter: 7 * 24 * time.Hour,
+		orphanAfter: max(3*time.Hour, 2*reviewTimeout),
 	}
 }
 
 func (w *ReviewRetentionWorker) Run(ctx context.Context) {
+	w.reconcileOrphans(ctx, w.clock.Now())
 	w.cleanup(ctx)
+	nextCleanup := w.clock.Now().Add(24 * time.Hour)
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 	for {
@@ -43,7 +45,12 @@ func (w *ReviewRetentionWorker) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			w.cleanup(ctx)
+			now := w.clock.Now()
+			w.reconcileOrphans(ctx, now)
+			if !now.Before(nextCleanup) {
+				w.cleanup(ctx)
+				nextCleanup = now.Add(24 * time.Hour)
+			}
 		}
 	}
 }
@@ -55,7 +62,7 @@ func (w *ReviewRetentionWorker) cleanup(ctx context.Context) {
 	w.cleanupUsages(ctx, legacyCutoff)
 }
 
-func (w *ReviewRetentionWorker) cleanupReviews(ctx context.Context, now time.Time, legacyCutoff time.Time) {
+func (w *ReviewRetentionWorker) reconcileOrphans(ctx context.Context, now time.Time) {
 	for {
 		orphans, err := w.repository.ReconcileOrphans(ctx, now.Add(-w.orphanAfter), now, now.Add(w.retention), w.batchSize)
 		if err != nil {
@@ -69,6 +76,9 @@ func (w *ReviewRetentionWorker) cleanupReviews(ctx context.Context, now time.Tim
 			break
 		}
 	}
+}
+
+func (w *ReviewRetentionWorker) cleanupReviews(ctx context.Context, now time.Time, legacyCutoff time.Time) {
 	for {
 		result, err := w.repository.DeleteExpired(ctx, now, legacyCutoff, w.batchSize)
 		if err != nil {

@@ -40,7 +40,7 @@ func (r *ReviewRetentionRepository) ReconcileOrphans(ctx context.Context, staleB
 					"status":           string(reviewworkflow.UnitStatusFailed),
 					"retryable":        false,
 					"retry_at":         nil,
-					"error_summary":    "7일 동안 진행되지 않아 종료됨",
+					"error_summary":    "장기간 진행이 없고 실행 lease가 만료되어 종료됨",
 					"finished_at":      terminalAt,
 					"heartbeat_at":     terminalAt,
 					"lease_token":      "",
@@ -76,7 +76,7 @@ func (r *ReviewRetentionRepository) ReconcileOrphans(ctx context.Context, staleB
 					"failed_coverage":   summary.Failed,
 					"deferred_coverage": summary.Deferred + summary.Pending,
 					"skipped_coverage":  summary.Skipped,
-					"error_summary":     "7일 동안 진행되지 않아 종료됨",
+					"error_summary":     "장기간 진행이 없고 실행 lease가 만료되어 종료됨",
 					"heartbeat_at":      terminalAt,
 					"terminal_at":       terminalAt,
 					"expires_at":        expiresAt,
@@ -107,7 +107,7 @@ func (r *ReviewRetentionRepository) ReconcileOrphans(ctx context.Context, staleB
 				if err := stopProgressCommentRefreshForUpdate(transaction, run, terminalAt); err != nil {
 					return err
 				}
-				if err := updateReviewProjection(transaction, run, review.OutcomeFailed, "7일 동안 게시 결과를 확인하지 못해 종료됨", terminalAt); err != nil {
+				if err := updateReviewProjection(transaction, run, review.OutcomeFailed, "장기간 진행이 없고 실행 lease가 만료되어 종료됨", terminalAt); err != nil {
 					return err
 				}
 			}

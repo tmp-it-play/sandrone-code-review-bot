@@ -39,32 +39,15 @@ func (r *ReviewExecutionStore) StartUnit(ctx context.Context, runID uint64, runL
 			return err
 		}
 		if reviewworkflow.UnitStatus(unit.Status) == reviewworkflow.UnitStatusSucceeded {
-			if inputHash != "" && unit.InputHash == inputHash && unit.ResultJSON != "" {
-				stored, err := storedUnitResult(unit)
-				if err == nil {
-					claim = reviewworkflow.UnitClaim{Completed: true, Reused: unit.Reused, Result: stored}
-					return nil
-				}
+			if unit.ResultJSON == "" {
+				return errors.New("완료된 리뷰 unit의 저장 결과가 비어 있습니다")
 			}
-			if err := transaction.Model(&model.ReviewUnit{}).Where("id = ? AND status = ?", unit.ID, string(reviewworkflow.UnitStatusSucceeded)).Updates(map[string]any{
-				"status":           string(reviewworkflow.UnitStatusFailed),
-				"input_hash":       "",
-				"result_json":      "",
-				"reused":           false,
-				"retryable":        false,
-				"retry_at":         nil,
-				"error_summary":    "input_changed",
-				"lease_token":      "",
-				"lease_expires_at": nil,
-			}).Error; err != nil {
+			stored, err := storedUnitResult(unit)
+			if err != nil {
 				return err
 			}
-			if err := transaction.Model(&model.CoverageItem{}).
-				Where("review_run_id = ? AND review_unit_id = ? AND status IN ?", runID, unit.ID, []string{string(reviewworkflow.CoverageStatusReviewed), string(reviewworkflow.CoverageStatusFailed)}).
-				Updates(map[string]any{"status": string(reviewworkflow.CoverageStatusPlanned), "reviewed_at": nil}).Error; err != nil {
-				return err
-			}
-			unit.Status = string(reviewworkflow.UnitStatusFailed)
+			claim = reviewworkflow.UnitClaim{Completed: true, Reused: unit.Reused, Result: stored}
+			return nil
 		}
 		retryAt := time.Time{}
 		if unit.RetryAt != nil {

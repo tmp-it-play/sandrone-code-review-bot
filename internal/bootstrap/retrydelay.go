@@ -21,11 +21,8 @@ func retryDelayForTask(attempt int, cause error, now time.Time, task *asynq.Task
 
 func retryDelayForSeed(attempt int, cause error, now time.Time, seed uint64) time.Duration {
 	var scheduled interface{ RetryAt() time.Time }
-	if errors.As(cause, &scheduled) {
-		delay := scheduled.RetryAt().Sub(now)
-		if delay > 0 {
-			return delay
-		}
+	if errors.As(cause, &scheduled) && !scheduled.RetryAt().IsZero() {
+		return max(0, scheduled.RetryAt().Sub(now))
 	}
 	return taskRetryBackoff.Delay(attempt, seed)
 }
