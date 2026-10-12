@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -111,7 +112,7 @@ func (r *WebhookInboxRepository) ClaimNext(ctx context.Context, now time.Time, l
 		entry.LeaseExpiresAt = &leaseExpiresAt
 		found = true
 		return nil
-	})
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return webhookinbox.Delivery{}, false, fmt.Errorf("다음 웹훅 delivery를 선점하지 못했습니다: %w", err)
 	}
