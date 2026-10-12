@@ -84,7 +84,7 @@ func (c *Chain) RouteCapacitiesFor(request llm.Request) []llm.RouteCapacity {
 
 func (c *Chain) PolicyHashInputs(request llm.Request) llm.PolicyHashInputs {
 	identity := llm.PolicyHashInputs{
-		Version:               "llm-routing-v6",
+		Version:               "llm-routing-v7",
 		TaskRole:              request.TaskRole,
 		DataClassification:    request.DataClassification,
 		RequestedProviders:    normalizedNames(request.Providers),
@@ -290,6 +290,9 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			adaptable = true
 		}
 		retryAt := time.Time{}
+		if invoked && errors.Is(attemptErr, ErrIncompleteResponse) {
+			retryAt = c.markProviderCooldown(ctx, candidate, &llm.Failure{Kind: llm.FailureUnavailable, RetryAfter: time.Minute})
+		}
 		if ok {
 			outcome = string(failure.Kind)
 			status = failure.Status
@@ -419,6 +422,11 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 			return models.Apply(response), nil
 		}
 		if !response.NeedsToolExecution() {
+			if !response.Completed() {
+				response.Usage = accumulated
+				response.ToolExecutions += toolExecutions
+				return models.Apply(response), nil
+			}
 			policy := candidate.RequestPolicy(request)
 			validStructuredResponse := !request.ForceJSON || validJSONObject(response.Content)
 			if validStructuredResponse {

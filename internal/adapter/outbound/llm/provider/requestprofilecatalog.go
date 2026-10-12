@@ -14,10 +14,11 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 	switch normalizedProvider + "/" + baseModel {
 	case "gemini/gemini-3.8-flash":
 		return RequestProfile{
-			ReasoningEffort:         "medium",
-			OutputTokenLimit:        65536,
-			StructuredOutputPercent: 80,
-			ForceJSONWithTools:      true,
+			ReasoningEffort:       "medium",
+			OutputTokenLimit:      65536,
+			ReasoningTokenReserve: 8192,
+			StructuredOutput:      true,
+			ForceJSONWithTools:    true,
 		}
 	case "groq/openai/gpt-oss-120b":
 		capability := llm.Capability{JSONMode: true}

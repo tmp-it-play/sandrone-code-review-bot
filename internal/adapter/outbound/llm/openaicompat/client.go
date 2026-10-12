@@ -138,7 +138,7 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 			Kind:              classify(httpResponse.StatusCode, providerErrorCode, providerErrorMessage),
 			Status:            httpResponse.StatusCode,
 			ProviderErrorCode: providerErrorCode,
-			RetryAfter:        parseRetryAfter(httpResponse.Header.Get("Retry-After"), time.Now()),
+			RetryAfter:        providerRetryAfter(httpResponse.Header.Get("Retry-After"), raw, time.Now()),
 			Elapsed:           elapsed,
 			Cause:             fmt.Errorf("%s", providerErrorMessage),
 		}

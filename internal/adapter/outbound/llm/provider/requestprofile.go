@@ -7,6 +7,7 @@ type RequestProfile struct {
 	Temperature              *float64
 	TopP                     *float64
 	ReasoningEffort          string
+	ReasoningTokenReserve    int
 	NestedReasoningEffort    string
 	ReasoningEnabled         *bool
 	ExcludeReasoning         bool

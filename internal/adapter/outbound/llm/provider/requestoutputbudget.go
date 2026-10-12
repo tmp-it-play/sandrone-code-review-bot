@@ -8,6 +8,9 @@ func (p RequestProfile) outputTokens(request llm.Request) int {
 	if p.StructuredOutputPercent > 0 && p.StructuredOutputPercent < 100 {
 		required = (required*100 + p.StructuredOutputPercent - 1) / p.StructuredOutputPercent
 	}
+	if p.ReasoningTokenReserve > 0 {
+		required = max(required, request.MaxOutputTokens) + p.ReasoningTokenReserve
+	}
 	if tokens < required {
 		tokens = required
 	}

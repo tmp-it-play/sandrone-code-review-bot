@@ -15,11 +15,29 @@ type apiError struct {
 }
 
 func parseAPIError(raw []byte) (string, string) {
+	for _, entry := range decodeAPIErrors(raw) {
+		code, message := entry.details()
+		if code != "" || message != "" {
+			return code, message
+		}
+	}
+	return "", ""
+}
+
+func decodeAPIErrors(raw []byte) []apiError {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var entries []apiError
+		if err := json.Unmarshal(trimmed, &entries); err == nil {
+			return entries
+		}
+		return nil
+	}
 	var decoded apiError
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return "", ""
+		return nil
 	}
-	return decoded.details()
+	return []apiError{decoded}
 }
 
 func (e apiError) details() (string, string) {
