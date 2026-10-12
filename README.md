@@ -126,7 +126,30 @@ sandrone:
 
 운영 환경의 `SANDRONE_REQUEST_TIMEOUT`은 외부 모델 요청 한 건의 제한 시간입니다. 기본값과 상한은 `3m`입니다. `SANDRONE_REVIEW_TIMEOUT`은 리뷰 실행 시작부터 재시도 대기까지 포함한 모델 처리 시간 예산입니다. 기본값은 `30m`, 상한은 `2h`입니다. 시간 예산을 소진하면 새 모델 호출을 중단하고 확보한 결과와 미검토 범위를 정리합니다. 결과 저장과 게시에는 별도 시간이 필요합니다. `SANDRONE_LLM_MAX_CALLS_PER_OPERATION`의 전체 호출 상한은 `24`회입니다.
 
-프로바이더는 Gemini, Groq, OpenRouter, NVIDIA, Local, Mistral, Cloudflare 순서로 시도합니다. Local은 요약 전용입니다. Groq는 JSON 결과를 안정적으로 받기 위해 추가 도구 호출을 사용하지 않습니다. OpenRouter는 `nvidia/nemotron-3-super-120b-a12b:free`를 사용합니다. 출력 예산은 각 모델의 추론 토큰 예약량을 반영합니다. 긴 요청의 실패는 같은 프로바이더로 즉시 재시도하지 않습니다. 대시보드는 앱 내부 호출 예산·예약 오류를 외부 프로바이더 실패와 별도로 집계합니다.
+프로바이더는 Groq, Gemini, OpenRouter, NVIDIA, Local, Mistral, Cloudflare 순서로 시도합니다. Local은 요약 전용입니다. Groq는 `openai/gpt-oss-120b`, Gemini는 `gemini-3.8-flash`, OpenRouter는 `nvidia/nemotron-3-super-120b-a12b:free`를 사용합니다. Groq와 OpenRouter의 리뷰 결과에는 JSON Schema를 적용합니다. Groq는 구조화 응답과 도구 호출의 병용을 지원하지 않으므로 추가 도구 호출을 사용하지 않습니다. OpenRouter는 출력 토큰이 추론에 모두 소비되는 실패를 막기 위해 추론을 끄고, 구조화 응답을 지원하는 경로만 요청합니다. 응답은 요약과 지적 배열의 존재 여부도 검증합니다.
+
+리뷰 배치는 현재 쿨다운이 아닌 프로바이더 중 작은 입력·출력 용량을 우선합니다. 초기 배치 수가 설정 상한을 넘으면 큰 용량으로 계획하고, 실행 중 호출 예산 안에서 다시 분할합니다. 단일 파일의 필수 diff가 작은 프로바이더에 맞지 않으면 큰 프로바이더로 넘깁니다. 선택적 문맥은 줄일 수 있지만 필수 diff를 잘라서 검토 완료로 처리하지 않습니다. 다른 프로바이더의 쿨다운은 사용 가능한 프로바이더에서 발생한 용량·응답 형식 문제의 분할을 막지 않습니다.
+
+같은 실행에서 완료한 검토 단위는 재시도 시 입력 hash가 달라져도 저장 결과를 보존합니다. 이미 지난 재시도 시각에는 추가 지수 백오프를 적용하지 않습니다. 프로바이더가 지정한 `Retry-After`를 우선하며 상한은 24시간입니다. 지정값이 없는 일시적인 호출 제한·서비스 장애·시간 초과의 쿨다운은 최대 1분입니다. 인증·모델·할당량 오류에는 설정된 쿨다운을 적용합니다. 긴 요청의 실패는 같은 프로바이더로 즉시 재시도하지 않습니다. 대시보드는 앱 내부 호출 예산·예약 오류를 외부 프로바이더 실패와 별도로 집계합니다.
+
+실행 lease가 만료되고 진행 기록이 `max(3h, 2 × SANDRONE_REVIEW_TIMEOUT)` 동안 갱신되지 않은 미완료 실행은 5분 간격으로 정리합니다. 게시 중인 실행과 유효한 lease는 이 정리에서 제외합니다. 성공한 검토 결과는 보존하고 미완료 범위를 실패로 기록합니다. 웹훅 선점 트랜잭션은 `READ COMMITTED`와 `FOR UPDATE SKIP LOCKED`를 사용해 동시 작업자의 범위 잠금 충돌을 줄입니다.
+
+### 무료 프로바이더 정책 확인
+
+확인일은 2026-10-12입니다. 저장소 최초 생성일은 2026-08-21이며 LLM 연동은 2026-08-23에 시작했습니다. 아래 내용은 공식 문서 기준입니다. 계정별 실제 한도와 남은 용량은 각 관리 화면 또는 API에서 확인해야 합니다.
+
+| 서비스 | 현재 조건과 개발 이후 변경 | 운영 판단 |
+|--------|----------------------------|-----------|
+| Gemini | 2026-10-08에 3.7 Flash가 deprecated 처리되어 3.8 Flash로 자동 연결됩니다. 3.8 Flash의 무료 입력·출력은 유지됩니다. 제한은 프로젝트 단위입니다. [변경 이력](https://ai.google.dev/gemini-api/docs/changelog), [요금](https://ai.google.dev/gemini-api/docs/pricing), [한도](https://ai.google.dev/gemini-api/docs/rate-limits) | 모델명을 3.8로 갱신했습니다. 최근 429만으로 계정 한도 축소를 단정하지 않습니다. |
+| Groq | GPT-OSS 120B 무료 공개 한도는 30 RPM, 1,000 RPD, 8,000 TPM, 200,000 TPD입니다. 9월에는 Qwen 3.6과 Compound 계열 변경이 있었지만 현재 사용하는 GPT-OSS 120B 종료 공지는 없습니다. [한도](https://console.groq.com/docs/rate-limits), [종료 이력](https://console.groq.com/docs/deprecations), [구조화 응답](https://console.groq.com/docs/structured-outputs) | 입력 크기와 출력 예산을 맞추고 우선 사용합니다. 다른 Groq 모델도 계정 용량을 고려해야 합니다. |
+| OpenRouter | 무료 모델에도 일일 호출 한도가 있습니다. `GET /api/v1/key`의 `free_model_daily_requests`로 계정의 사용량·상한·잔량을 확인할 수 있습니다. [한도](https://openrouter.ai/docs/api/reference/limits) | 모델을 추가해도 플랫폼 무료 호출 한도가 독립적으로 늘어나지는 않습니다. |
+| Cloudflare | 무료 Workers AI 할당은 하루 10,000 Neurons이며 00:00 UTC에 초기화됩니다. 일부 최신 대형 모델은 유료 설정이 필요합니다. [요금](https://developers.cloudflare.com/workers-ai/platform/pricing/) | GLM과 Gemma 경로는 같은 계정 할당량을 공유합니다. 새 모델을 모두 무료로 간주하지 않습니다. |
+| Mistral | Free 모드의 월간 포함 사용량과 모델별 처리량 제한을 적용합니다. 실제 한도는 관리 화면에 표시됩니다. [한도](https://docs.mistral.ai/admin/billing-usage/usage-limits) | 오류 코드만으로 분당 제한과 월간 소진을 구분하지 않습니다. 계정 정책 변경 시점은 확인되지 않았습니다. |
+| Cerebras | 현재 신규 계정 혜택은 결제 수단 확인 후 지급되는 5달러·30일 체험 크레딧입니다. [한도](https://inference-docs.cerebras.ai/support/rate-limits) | 지속적으로 갱신되는 무료 대안으로 추가하지 않습니다. 전환 날짜는 확인되지 않았습니다. |
+| Hugging Face Inference Providers | 현재 무료 사용자에게 포함된 월간 크레딧은 없습니다. [요금](https://huggingface.co/docs/inference-providers/pricing) | 과거 무료 크레딧 안내를 근거로 대체 경로에 추가하지 않습니다. 변경 날짜는 확인되지 않았습니다. |
+| GitHub Models | 2026-07-30에 서비스가 종료되었습니다. [공식 안내](https://docs.github.com/en/github-models) | 저장소 개발 시작 전 변경입니다. 현재 대체 공급자로 사용할 수 없습니다. |
+
+추가 평가 후보는 OpenRouter의 [Apodex 1.1 Mini 무료 모델](https://openrouter.ai/apodex/apodex-1.1-mini:free)입니다. 2026-10-01 공개 모델이며 구조화 응답과 도구 호출을 지원합니다. 다만 기존 OpenRouter와 무료 호출 한도를 공유하고 리뷰 품질을 검증하지 않았으므로 기본 경로에는 추가하지 않았습니다. Groq의 [GPT-OSS 20B](https://console.groq.com/docs/models)도 구조화 응답을 지원하는 같은 공급자 내 후보입니다. 두 후보 모두 독립된 무료 공급자 용량을 확보하는 대안은 아닙니다.
 
 ## 문체 프리셋
 
