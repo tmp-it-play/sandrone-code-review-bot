@@ -8,6 +8,7 @@ type RequestProfile struct {
 	TopP                     *float64
 	ReasoningEffort          string
 	NestedReasoningEffort    string
+	ReasoningEnabled         *bool
 	ExcludeReasoning         bool
 	ThinkingEnabled          *bool
 	ParallelToolCalls        *bool
@@ -16,5 +17,7 @@ type RequestProfile struct {
 	UseMaxCompletionTokens   bool
 	UseRequestTemperature    bool
 	ForceJSONWithTools       bool
+	StructuredOutput         bool
+	RequireParameters        bool
 	StripLeadingEmptyThought bool
 }

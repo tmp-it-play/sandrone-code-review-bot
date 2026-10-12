@@ -274,7 +274,11 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		FailFastOnIncomplete:  false,
 		ResponseValidation:    llm.ResponseValidation{Policy: llm.ResponseValidationReviewResult},
 	}
-	routePolicy := newReviewRoutePolicy(u.deps.Completer.RouteCapacitiesFor(reviewRequest), reviewRequest.MaxOutputTokens)
+	capacities, err := u.deps.Completer.AvailableRouteCapacities(ctx, reviewRequest)
+	if err != nil {
+		return fail("사용 가능한 리뷰 프로바이더를 확인하지 못했습니다", err)
+	}
+	routePolicy := newReviewRoutePolicy(capacities, reviewRequest.MaxOutputTokens)
 	policy := u.deps.Completer.PolicyHashInputs(reviewRequest)
 	modelPolicyHash, err := hashJSON(policy)
 	if err != nil {

@@ -22,6 +22,7 @@ type reviewUnitHashInput struct {
 	ToolContract         string
 	ResultPolicy         string
 	Validation           llm.ResponseValidation
+	ResponseSchema       *llm.ResponseSchema
 	FailFastOnIncomplete bool
 }
 
@@ -31,7 +32,7 @@ func reviewUnitInputHash(repositoryScope string, configHash string, unitHash str
 		return definitions[left].Name < definitions[right].Name
 	})
 	return hashJSON(reviewUnitHashInput{
-		Version:              "review-unit-input-v7",
+		Version:              "review-unit-input-v8",
 		RepositoryScope:      repositoryScope,
 		ConfigHash:           configHash,
 		UnitHash:             unitHash,
@@ -46,6 +47,7 @@ func reviewUnitInputHash(repositoryScope string, configHash string, unitHash str
 		ToolContract:         "tool-contract-v1",
 		ResultPolicy:         "review-result-policy-v5",
 		Validation:           request.ResponseValidation,
+		ResponseSchema:       request.ResponseSchema,
 		FailFastOnIncomplete: request.FailFastOnIncomplete,
 	})
 }

@@ -43,6 +43,8 @@ func semanticFailureReason(err error) string {
 		return "all_findings_unanchored"
 	case errors.Is(err, parsing.ErrSummaryMissing):
 		return "summary_missing"
+	case errors.Is(err, parsing.ErrFindingsMissing):
+		return "findings_missing"
 	case errors.Is(err, parsing.ErrRequiredFileNoteMissing):
 		return "required_file_note_missing"
 	default:

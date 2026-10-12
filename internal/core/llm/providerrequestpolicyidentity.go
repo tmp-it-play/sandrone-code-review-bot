@@ -5,6 +5,7 @@ type ProviderRequestPolicyIdentity struct {
 	TopP                  *float64
 	ReasoningEffort       string
 	NestedReasoningEffort string
+	ReasoningEnabled      *bool
 	ExcludeReasoning      bool
 	ThinkingEnabled       *bool
 	ParallelToolCalls     *bool
@@ -12,5 +13,7 @@ type ProviderRequestPolicyIdentity struct {
 	UsableOutputTokens    int
 	MaxCompletionTokens   bool
 	ForceJSONWithTools    bool
+	StructuredOutput      bool
+	RequireParameters     bool
 	StripEmptyThought     bool
 }

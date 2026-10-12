@@ -8,4 +8,6 @@ var ErrAllFindingsUnanchored = errors.New("게시 기준을 충족한 모든 지
 
 var ErrSummaryMissing = errors.New("요약이 없습니다")
 
+var ErrFindingsMissing = errors.New("리뷰 지적 배열이 없습니다")
+
 var ErrRequiredFileNoteMissing = errors.New("필수 파일 요약이 없습니다")

@@ -9,11 +9,13 @@ import (
 )
 
 type reviewRoutePolicy struct {
-	promptLimit     int
-	outputLimit     int
-	targetOutput    int
-	maximumFindings int
-	outputRoutes    []llm.RouteCapacity
+	promptLimit         int
+	fallbackPromptLimit int
+	fallbackOutputLimit int
+	outputLimit         int
+	targetOutput        int
+	maximumFindings     int
+	outputRoutes        []llm.RouteCapacity
 }
 
 const reviewOutputPromptRatio = 16
@@ -31,9 +33,12 @@ func newReviewRoutePolicy(capacities []llm.RouteCapacity, configuredOutput int) 
 	promptLimits := make([]int, 0, len(capacities))
 	outputLimits := make([]int, 0, len(capacities))
 	outputRoutes := make([]llm.RouteCapacity, 0, len(capacities))
+	fallbackPromptLimit := 0
+	fallbackOutputLimit := 0
 	for _, capacity := range capacities {
 		if capacity.PromptChars > 0 {
 			promptLimits = append(promptLimits, capacity.PromptChars)
+			fallbackPromptLimit = max(fallbackPromptLimit, capacity.PromptChars)
 		}
 		nominalOutput := capacity.MaxOutputTokens
 		if configuredOutput > 0 && (nominalOutput <= 0 || nominalOutput > configuredOutput) {
@@ -50,19 +55,20 @@ func newReviewRoutePolicy(capacities []llm.RouteCapacity, configuredOutput int) 
 			output = nominalOutput
 		}
 		outputLimits = append(outputLimits, output)
+		fallbackOutputLimit = max(fallbackOutputLimit, output)
 		capacity.MaxOutputTokens = nominalOutput
 		capacity.UsableOutputTokens = output
 		outputRoutes = append(outputRoutes, capacity)
 	}
-	promptLimit := resilientCapacity(promptLimits)
-	outputLimit := resilientCapacity(outputLimits)
+	promptLimit := minimumCapacity(promptLimits)
+	outputLimit := minimumCapacity(outputLimits)
 	if outputLimit <= 0 {
 		outputLimit = configuredOutput
 	}
 	if outputLimit <= 0 {
 		outputLimit = 8192
 	}
-	targetOutput := outputLimit * 3 / 4
+	targetOutput := outputLimit * 7 / 8
 	if targetOutput < 1200 {
 		targetOutput = min(outputLimit, 1200)
 	}
@@ -78,16 +84,41 @@ func newReviewRoutePolicy(capacities []llm.RouteCapacity, configuredOutput int) 
 		maximumFindings = 8
 	}
 	return reviewRoutePolicy{
-		promptLimit:     promptLimit,
-		outputLimit:     outputLimit,
-		targetOutput:    targetOutput,
-		maximumFindings: maximumFindings,
-		outputRoutes:    outputRoutes,
+		promptLimit:         promptLimit,
+		fallbackPromptLimit: fallbackPromptLimit,
+		fallbackOutputLimit: fallbackOutputLimit,
+		outputLimit:         outputLimit,
+		targetOutput:        targetOutput,
+		maximumFindings:     maximumFindings,
+		outputRoutes:        outputRoutes,
 	}
 }
 
+func (p reviewRoutePolicy) Fallback() (reviewRoutePolicy, bool) {
+	if p.fallbackPromptLimit <= p.promptLimit && p.fallbackOutputLimit <= p.outputLimit {
+		return p, false
+	}
+	p.promptLimit = max(p.promptLimit, p.fallbackPromptLimit)
+	p.outputLimit = max(p.outputLimit, p.fallbackOutputLimit)
+	p.targetOutput = max(p.targetOutput, p.outputLimit*7/8)
+	p.maximumFindings = max(1, min(8, (p.targetOutput-700)/600))
+	p.fallbackPromptLimit = 0
+	p.fallbackOutputLimit = 0
+	return p, true
+}
+
+func minimumCapacity(values []int) int {
+	minimum := 0
+	for _, value := range values {
+		if value > 0 && (minimum == 0 || value < minimum) {
+			minimum = value
+		}
+	}
+	return minimum
+}
+
 func (p reviewRoutePolicy) BatchPolicy(files []pullrequest.ChangedFile, includeFileNotes bool) reviewBatchPolicy {
-	required := estimatedReviewOutputTokens(files, includeFileNotes)
+	required := estimatedReviewOutputTokens(files, includeFileNotes, p.maximumFindings)
 	if required < 1024 {
 		required = 1024
 	}
@@ -143,7 +174,7 @@ func (p reviewRoutePolicy) ShouldSplit(files []pullrequest.ChangedFile, promptSi
 	if len(files) < 2 {
 		return false
 	}
-	return p.promptLimit > 0 && promptSize > p.promptLimit || estimatedReviewOutputTokens(files, includeFileNotes) > p.targetOutput
+	return p.promptLimit > 0 && promptSize > p.promptLimit || estimatedReviewOutputTokens(files, includeFileNotes, p.maximumFindings) > p.targetOutput
 }
 
 func (p reviewRoutePolicy) Split(files []pullrequest.ChangedFile) ([]pullrequest.ChangedFile, []pullrequest.ChangedFile) {
@@ -166,15 +197,6 @@ func (p reviewRoutePolicy) Split(files []pullrequest.ChangedFile) ([]pullrequest
 	return append([]pullrequest.ChangedFile(nil), files[:splitAt]...), append([]pullrequest.ChangedFile(nil), files[splitAt:]...)
 }
 
-func resilientCapacity(values []int) int {
-	if len(values) == 0 {
-		return 0
-	}
-	sort.Sort(sort.Reverse(sort.IntSlice(values)))
-	quorum := routeQuorum(len(values))
-	return values[quorum-1]
-}
-
 func routeQuorum(routes int) int {
 	quorum := (routes*2 + 2) / 3
 	if quorum < 1 {
@@ -183,7 +205,7 @@ func routeQuorum(routes int) int {
 	return quorum
 }
 
-func estimatedReviewOutputTokens(files []pullrequest.ChangedFile, includeFileNotes bool) int {
+func estimatedReviewOutputTokens(files []pullrequest.ChangedFile, includeFileNotes bool, maximumFindings int) int {
 	hunks := 0
 	changes := 0
 	for _, file := range files {
@@ -194,9 +216,7 @@ func estimatedReviewOutputTokens(files []pullrequest.ChangedFile, includeFileNot
 	if findings < 1 && len(files) > 0 {
 		findings = 1
 	}
-	if findings > 8 {
-		findings = 8
-	}
+	findings = min(findings, max(1, min(8, maximumFindings)))
 	fileTokens := len(files) * 70
 	if includeFileNotes {
 		fileTokens = len(files) * 150

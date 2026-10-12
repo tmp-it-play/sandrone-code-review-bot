@@ -17,6 +17,7 @@ type Request struct {
 	RequireCompletePrompt bool
 	FailFastOnIncomplete  bool
 	ResponseValidation    ResponseValidation
+	ResponseSchema        *ResponseSchema
 	Deadline              time.Time
 }
 

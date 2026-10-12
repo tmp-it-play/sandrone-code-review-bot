@@ -11,12 +11,12 @@ func NewCatalog() Catalog {
 	verifiedRoles := supportedRoles()
 	promptContractRoles := supportedPromptContractRoles()
 	return Catalog{
-		order: []string{"gemini", "groq", "openrouter", "nvidia", "local", "mistral", "cloudflare-glm", "cloudflare-gemma"},
+		order: []string{"groq", "gemini", "openrouter", "nvidia", "local", "mistral", "cloudflare-glm", "cloudflare-gemma"},
 		descriptors: map[string]Descriptor{
 			"gemini": {
 				Name:           "gemini",
-				Model:          "gemini-3.7-flash",
-				DisplayName:    "Gemini 3.7 Flash",
+				Model:          "gemini-3.8-flash",
+				DisplayName:    "Gemini 3.8 Flash",
 				BaseURL:        "https://generativelanguage.googleapis.com/v1beta/openai",
 				APIKeyEnv:      "GEMINI_API_KEY",
 				Capability:     llm.Capability{ToolCalling: true, JSONMode: true},

@@ -12,7 +12,7 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 	baseModel, _, _ := strings.Cut(normalizedModel, ":")
 
 	switch normalizedProvider + "/" + baseModel {
-	case "gemini/gemini-3.7-flash":
+	case "gemini/gemini-3.8-flash":
 		return RequestProfile{
 			ReasoningEffort:         "medium",
 			OutputTokenLimit:        65536,
@@ -30,15 +30,17 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 			OutputTokenLimit:        4096,
 			StructuredOutputPercent: 50,
 			UseMaxCompletionTokens:  true,
+			StructuredOutput:        true,
 		}
 	case "openrouter/nvidia/nemotron-3-super-120b-a12b":
 		return RequestProfile{
-			UseRequestTemperature:   true,
-			NestedReasoningEffort:   "low",
-			ExcludeReasoning:        true,
-			OutputTokenLimit:        8192,
-			StructuredOutputPercent: 50,
-			ForceJSONWithTools:      true,
+			UseRequestTemperature: true,
+			ReasoningEnabled:      boolValue(false),
+			StructuredOutput:      true,
+			RequireParameters:     true,
+			ExcludeReasoning:      true,
+			OutputTokenLimit:      8192,
+			ForceJSONWithTools:    true,
 		}
 	case "nvidia/google/gemma-4-31b-it":
 		capability := llm.Capability{JSONMode: true}

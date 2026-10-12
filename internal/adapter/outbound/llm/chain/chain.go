@@ -155,6 +155,19 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			continue
 		}
 		routed = true
+		coolingUntil, cooling, err := c.cooldown.EndsAt(ctx, candidate.Name())
+		if err != nil {
+			if ctx.Err() != nil {
+				lastResponse.Usage = usage
+				lastResponse.ToolExecutions = toolExecutions
+				return lastResponse, ctx.Err()
+			}
+			c.logger.Warn("쿨다운 상태를 읽지 못했습니다", "provider", candidate.Name(), "error", err)
+		}
+		if cooling {
+			collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: llm.CompletionAttemptCooling, RetryAt: coolingUntil, Cause: ErrNoProviderAvailable})
+			continue
+		}
 		requestPolicy := candidate.RequestPolicy(request)
 		outputLimit := requestPolicy.UsableOutputTokens
 		if outputLimit <= 0 {
@@ -185,21 +198,6 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		if !acquired {
 			collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: llm.CompletionAttemptBusy, RetryAt: c.clock.Now().Add(time.Minute), Cause: ErrNoProviderAvailable})
 			c.logger.Info("프로바이더 동시 실행 한도에 도달해 건너뜁니다", "provider", candidate.Name())
-			continue
-		}
-		coolingUntil, cooling, err := c.cooldown.EndsAt(ctx, candidate.Name())
-		if err != nil {
-			if ctx.Err() != nil {
-				release()
-				lastResponse.Usage = usage
-				lastResponse.ToolExecutions = toolExecutions
-				return lastResponse, ctx.Err()
-			}
-			c.logger.Warn("쿨다운 상태를 읽지 못했습니다", "provider", candidate.Name(), "error", err)
-		}
-		if cooling {
-			collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: llm.CompletionAttemptCooling, RetryAt: coolingUntil, Cause: ErrNoProviderAvailable})
-			release()
 			continue
 		}
 		usedBefore := request.ExternalCallBudget.Used()
@@ -296,7 +294,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			outcome = string(failure.Kind)
 			status = failure.Status
 			if failure.Kind.TriggersCooldown() || (failure.Kind != llm.FailureAborted && failure.RetryAfter > 0) {
-				cooldownEnd := c.markProviderCooldown(ctx, candidate, failure.RetryAfter)
+				cooldownEnd := c.markProviderCooldown(ctx, candidate, failure)
 				if failure.Kind == llm.FailureQuota || failure.Kind == llm.FailureRateLimited || failure.Kind == llm.FailureUnavailable || failure.Kind == llm.FailureTimeout {
 					retryAt = cooldownEnd
 				}

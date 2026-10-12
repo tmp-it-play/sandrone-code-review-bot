@@ -4,19 +4,14 @@ import (
 	"context"
 	"time"
 
+	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
 )
 
 const maximumProviderCooldown = 24 * time.Hour
 
-func (c *Chain) markProviderCooldown(ctx context.Context, failed outbound.Provider, retryAfter time.Duration) time.Time {
-	duration := c.cooldownFor
-	if retryAfter > duration {
-		duration = retryAfter
-	}
-	if duration > maximumProviderCooldown {
-		duration = maximumProviderCooldown
-	}
+func (c *Chain) markProviderCooldown(ctx context.Context, failed outbound.Provider, failure *llm.Failure) time.Time {
+	duration := providerCooldownDuration(failure, c.cooldownFor)
 	if duration <= 0 {
 		return time.Time{}
 	}
@@ -32,6 +27,16 @@ func (c *Chain) markProviderCooldown(ctx context.Context, failed outbound.Provid
 		}
 	}
 	return endsAt
+}
+
+func providerCooldownDuration(failure *llm.Failure, configured time.Duration) time.Duration {
+	if failure.RetryAfter > 0 {
+		return min(failure.RetryAfter, maximumProviderCooldown)
+	}
+	if failure.Kind == llm.FailureRateLimited || failure.Kind == llm.FailureUnavailable || failure.Kind == llm.FailureTimeout {
+		return min(max(configured, time.Second), time.Minute)
+	}
+	return min(configured, maximumProviderCooldown)
 }
 
 func (c *Chain) failureDomainProviders(failed outbound.Provider) []string {

@@ -9,6 +9,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/parsing"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/prompt"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewanalysis"
@@ -149,6 +150,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 		unitBudget := llm.NewScopedDurableExternalCallBudget(input.maxCalls, externalCalls, unitCallLimit, reserveExternalCall)
 		messages := llm.MaskMessages(input.planner.Messages(batch, input.promptConfig), e.deps.masker.Mask)
 		batchRequest := input.request.WithMessages(messages)
+		batchRequest.ResponseSchema = prompt.ReviewOutputSchema(input.includeFileNotes)
 		batchPolicy := input.planner.RoutePolicy.BatchPolicy(batch, input.includeFileNotes)
 		batchRequest.MaxOutputTokens = batchPolicy.MaxOutputTokens
 		batchRequest.RequiredOutputTokens = batchPolicy.RequiredOutputTokens
@@ -232,7 +234,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 			captureResponse()
 			transitionCoverage(input.coverage, unit.Hash, reviewworkflow.CoverageStatusReviewed, &finishedAt)
 			result.reviewed = append(result.reviewed, batch...)
-			e.deps.logger.Info("저장된 리뷰 unit 결과를 재사용했습니다", "target", input.target.Reference(), "batch", batchNumber, "unit", unit.OrderKey, "cross_run", claim.Reused)
+			e.deps.logger.Info("저장된 리뷰 unit 결과를 재사용했습니다", "target", input.target.Reference(), "batch", batchNumber, "unit", unit.OrderKey, "cross_run", claim.Reused, "input_changed", claim.Result.InputHash != inputHash)
 			continue
 		}
 		usage = usage.Add(claim.Result.Usage)

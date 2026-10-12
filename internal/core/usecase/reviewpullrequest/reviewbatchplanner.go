@@ -54,6 +54,18 @@ func (p reviewBatchPlanner) Build(files []pullrequest.ChangedFile) (batching.Pla
 		plan.Batches = append(plan.Batches, current)
 	}
 	if p.MaxReviewBatches > 0 && len(plan.Batches) > p.MaxReviewBatches {
+		if fallbackPolicy, available := p.RoutePolicy.Fallback(); available {
+			prepared := make([]pullrequest.ChangedFile, 0, len(files))
+			for _, batch := range plan.Batches {
+				prepared = append(prepared, batch...)
+			}
+			fallback := p
+			fallback.RoutePolicy = fallbackPolicy
+			fallback.ProviderLimit = fallbackPolicy.promptLimit
+			fallbackPlan, _ := fallback.Build(prepared)
+			fallbackPlan.Oversized = append(fallbackPlan.Oversized, plan.Oversized...)
+			return fallbackPlan, config
+		}
 		for _, overflow := range plan.Batches[p.MaxReviewBatches:] {
 			plan.Overflow = append(plan.Overflow, overflow...)
 		}
@@ -64,7 +76,7 @@ func (p reviewBatchPlanner) Build(files []pullrequest.ChangedFile) (batching.Pla
 
 func (p reviewBatchPlanner) Messages(files []pullrequest.ChangedFile, config setting.RepoConfig) []llm.Message {
 	batchPolicy := p.RoutePolicy.BatchPolicy(files, p.includeFileNotes())
-	return prompt.ReviewPrompt{
+	reviewPrompt := prompt.ReviewPrompt{
 		Context: prompt.Context{
 			PullRequest:  p.PullRequest,
 			Files:        p.maskedFiles(files),
@@ -77,7 +89,15 @@ func (p reviewBatchPlanner) Messages(files []pullrequest.ChangedFile, config set
 		ToolsAllowed:     p.ToolsAllowed,
 		IncludeFileNotes: p.includeFileNotes(),
 		MaxFindings:      batchPolicy.MaxFindings,
-	}.Messages()
+	}
+	messages := reviewPrompt.Messages()
+	if p.ProviderLimit > 0 && config.MaxPromptChars > 0 {
+		if excess := messagesSize(messages) - p.ProviderLimit; excess > 0 {
+			reviewPrompt.Context.Config.MaxPromptChars = max(1, config.MaxPromptChars-excess)
+			messages = reviewPrompt.Messages()
+		}
+	}
+	return messages
 }
 
 func (p reviewBatchPlanner) promptConfig() (setting.RepoConfig, int) {
@@ -132,12 +152,21 @@ func (p reviewBatchPlanner) fitSingle(file pullrequest.ChangedFile, config setti
 	if p.fits([]pullrequest.ChangedFile{file}, config, limit) {
 		return file, true
 	}
-	if file.Content == "" {
-		return file, false
+	if file.Content != "" {
+		file.Content = ""
+		file.Truncated = true
+		if p.fits([]pullrequest.ChangedFile{file}, config, limit) {
+			return file, true
+		}
 	}
-	file.Content = ""
-	file.Truncated = true
-	return file, p.fits([]pullrequest.ChangedFile{file}, config, limit)
+	fallbackLimit := p.RoutePolicy.fallbackPromptLimit
+	if p.Config.MaxPromptChars > 0 {
+		configuredLimit := p.fixedCost(config) + p.Config.MaxPromptChars
+		if fallbackLimit <= 0 || configuredLimit < fallbackLimit {
+			fallbackLimit = configuredLimit
+		}
+	}
+	return file, fallbackLimit > limit && p.fits([]pullrequest.ChangedFile{file}, config, fallbackLimit)
 }
 
 func (p reviewBatchPlanner) maskedFiles(files []pullrequest.ChangedFile) []pullrequest.ChangedFile {

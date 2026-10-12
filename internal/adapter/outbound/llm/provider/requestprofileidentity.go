@@ -18,15 +18,18 @@ func (p RequestProfile) Identity(request llm.Request) llm.ProviderRequestPolicyI
 		TopP:                  cloneFloat(p.TopP),
 		ReasoningEffort:       p.ReasoningEffort,
 		NestedReasoningEffort: p.NestedReasoningEffort,
+		ReasoningEnabled:      cloneBool(p.ReasoningEnabled),
 		ThinkingEnabled:       cloneBool(p.ThinkingEnabled),
 		ParallelToolCalls:     cloneBool(p.ParallelToolCalls),
 		MaxOutputTokens:       maxOutputTokens,
 		UsableOutputTokens:    usableOutputTokens,
 		MaxCompletionTokens:   p.UseMaxCompletionTokens,
 		ForceJSONWithTools:    p.ForceJSONWithTools,
+		StructuredOutput:      p.StructuredOutput,
+		RequireParameters:     p.RequireParameters,
 		StripEmptyThought:     p.StripLeadingEmptyThought,
 	}
-	if p.NestedReasoningEffort != "" {
+	if p.NestedReasoningEffort != "" || p.ReasoningEnabled != nil {
 		identity.ExcludeReasoning = p.ExcludeReasoning
 	}
 	return identity

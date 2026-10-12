@@ -80,6 +80,12 @@ func (c *Client) Complete(ctx context.Context, request llm.Request) (llm.Respons
 	payload := c.chatRequest(request)
 	if request.ForceJSON && c.capability.JSONMode && (len(request.Tools) == 0 || c.requestProfile.ForceJSONWithTools) {
 		payload.ResponseFormat = &responseFormat{Type: "json_object"}
+		if schema := request.ResponseSchema; schema != nil && c.requestProfile.StructuredOutput {
+			payload.ResponseFormat = &responseFormat{Type: "json_schema", JSONSchema: &responseJSONSchema{Name: schema.Name, Strict: true, Schema: schema.Schema}}
+			if c.requestProfile.RequireParameters {
+				payload.Provider = &providerPreferences{RequireParameters: true}
+			}
+		}
 	}
 	if c.capability.ToolCalling {
 		payload.Tools = toChatTools(request.Tools)
@@ -195,8 +201,8 @@ func (c *Client) chatRequest(request llm.Request) chatRequest {
 	} else {
 		payload.MaxTokens = maxOutputTokens
 	}
-	if effort := c.requestProfile.NestedReasoningEffort; effort != "" {
-		payload.Reasoning = &reasoningConfig{Effort: effort, Exclude: c.requestProfile.ExcludeReasoning}
+	if effort := c.requestProfile.NestedReasoningEffort; effort != "" || c.requestProfile.ReasoningEnabled != nil {
+		payload.Reasoning = &reasoningConfig{Effort: effort, Enabled: c.requestProfile.ReasoningEnabled, Exclude: c.requestProfile.ExcludeReasoning}
 	}
 	if enabled := c.requestProfile.ThinkingEnabled; enabled != nil {
 		payload.ChatTemplateKwargs = &chatTemplateKwargs{EnableThinking: *enabled}
