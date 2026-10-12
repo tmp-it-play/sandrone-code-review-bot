@@ -172,6 +172,7 @@ func NewApplication(config Config) (*Application, error) {
 		Runs:          reviewRuns,
 		Execution:     reviewExecutionStore,
 		Verification:  reviewVerificationStore,
+		Summaries:     mysql.NewReviewSummaryStore(database),
 		Publications:  reviewPublicationStore,
 		Findings:      findings,
 		State:         pullRequestState,

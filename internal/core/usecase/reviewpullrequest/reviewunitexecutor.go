@@ -460,6 +460,7 @@ func (e *reviewUnitExecutor) execute(ctx context.Context, input reviewUnitExecut
 		result.reviewed = append(result.reviewed, batch...)
 	}
 	result.review, result.reduced = (reviewanalysis.ResultReducer{}).Reduce(batchResults)
+	result.overviews = reviewanalysis.Overviews(batchResults)
 	captureResponse()
 	return result, nil
 }

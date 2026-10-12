@@ -11,6 +11,7 @@ import (
 
 type reviewUnitExecutionResult struct {
 	review              review.Result
+	overviews           []string
 	reduced             int
 	response            llm.Response
 	modelsUsed          map[string]struct{}

@@ -51,6 +51,9 @@ func deleteExpiredRunLifecycle(transaction *gorm.DB, runID uint64) error {
 	if err := transaction.Where("review_run_id = ?", runID).Delete(&model.ReviewVerification{}).Error; err != nil {
 		return err
 	}
+	if err := transaction.Where("review_run_id = ?", runID).Delete(&model.ReviewSummary{}).Error; err != nil {
+		return err
+	}
 	if err := transaction.Where("review_run_id = ?", runID).Delete(&model.CoverageItem{}).Error; err != nil {
 		return err
 	}

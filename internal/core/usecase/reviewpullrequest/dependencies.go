@@ -21,6 +21,7 @@ type Dependencies struct {
 	Runs          outbound.ReviewRunRepository
 	Execution     outbound.ReviewExecutionRepository
 	Verification  outbound.ReviewVerificationRepository
+	Summaries     outbound.ReviewSummaryRepository
 	Publications  outbound.ReviewPublicationRepository
 	Findings      outbound.FindingRepository
 	State         outbound.PullRequestStateRepository

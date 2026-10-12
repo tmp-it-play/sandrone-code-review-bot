@@ -66,9 +66,10 @@ func New(deps Dependencies) *UseCase {
 			logger:    deps.Logger,
 		}),
 		resultFinalizer: newReviewResultFinalizer(reviewResultFinalizerDependencies{
-			findings: deps.Findings,
-			verifier: verifier,
-			logger:   deps.Logger,
+			summaries: &reviewSummaryReducer{repository: deps.Summaries, completer: deps.Completer, masker: deps.Masker},
+			findings:  deps.Findings,
+			verifier:  verifier,
+			logger:    deps.Logger,
 		}),
 	}
 }
@@ -260,7 +261,8 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if maxCalls > 1 {
 		verifierCallReserve = 1
 	}
-	reviewerCallLimit := maxCalls - verifierCallReserve
+	reducerCallReserve := min(summaryCallReserve, max(0, maxCalls-verifierCallReserve-1))
+	reviewerCallLimit := maxCalls - verifierCallReserve - reducerCallReserve
 	callBudget := llm.NewExternalCallBudget(maxCalls)
 	reviewRequest := llm.Request{
 		Temperature:           config.Temperature,
@@ -786,22 +788,19 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		return nil
 	}
 
-	verifierCallLimit := unitExecution.externalCalls + verifierCallReserve
-	if verifierCallLimit > maxCalls {
-		verifierCallLimit = maxCalls
-	}
-	reviewRequest.ExternalCallBudget = llm.NewScopedDurableExternalCallBudget(maxCalls, unitExecution.externalCalls, verifierCallLimit, reserveExternalCall(verifierCallLimit))
+	reviewRequest.ExternalCallBudget = llm.NewScopedDurableExternalCallBudget(maxCalls, unitExecution.externalCalls, maxCalls, reserveExternalCall(maxCalls))
 	finalizedResult, finalizationErr := u.resultFinalizer.finalize(ctx, reviewResultFinalization{
-		target:      target,
-		runID:       run.ID,
-		runLease:    runLease,
-		config:      config,
-		execution:   unitExecution,
-		request:     reviewRequest,
-		paths:       pathMap,
-		trigger:     task.Trigger,
-		incremental: incremental,
-		runStatus:   runStatus,
+		target:              target,
+		runID:               run.ID,
+		runLease:            runLease,
+		config:              config,
+		execution:           unitExecution,
+		request:             reviewRequest,
+		paths:               pathMap,
+		trigger:             task.Trigger,
+		incremental:         incremental,
+		runStatus:           runStatus,
+		verifierCallReserve: verifierCallReserve,
 	})
 	failureResponse = finalizedResult.failureResponse
 	if finalizationErr != nil {

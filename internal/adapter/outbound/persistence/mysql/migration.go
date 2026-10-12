@@ -42,6 +42,7 @@ func Migrate(database *gorm.DB) error {
 			&model.ProgressCommentOwnership{},
 			&model.ReviewUnit{},
 			&model.ReviewVerification{},
+			&model.ReviewSummary{},
 			&model.CoverageItem{},
 			&model.ReviewPublication{},
 			&model.WebhookDelivery{},

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/dedupe"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/mapping"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewanalysis"
@@ -51,12 +52,15 @@ func (f *reviewResultFinalizer) finalize(ctx context.Context, input reviewResult
 	}
 	findings, duplicates := dedupe.DuplicateFilter{Known: known}.Apply(findings)
 	findings, omittedFindings := publishedFindingBudget(findings)
+	verifierRequest := input.request
+	budget := input.request.ExternalCallBudget
+	verifierRequest.ExternalCallBudget = llm.NewScopedDurableExternalCallBudget(budget.Limit(), budget.Used(), min(budget.Used()+input.verifierCallReserve, budget.Limit()), budget.Reserve)
 	verification, err := f.deps.verifier.verify(ctx, findingVerification{
 		runID:             input.runID,
 		runLease:          input.runLease,
 		findings:          findings,
 		files:             input.execution.reviewed,
-		request:           input.request,
+		request:           verifierRequest,
 		reviewerProviders: input.execution.reviewerProviders,
 		paths:             input.paths,
 	})
@@ -110,7 +114,19 @@ func (f *reviewResultFinalizer) finalize(ctx context.Context, input reviewResult
 		"final", len(findings),
 		"min_severity", string(input.config.MinSeverity))
 
+	summary, err := f.deps.summaries.reduce(ctx, input)
+	usage = usage.Add(summary.Response.Usage)
+	toolExecutions += summary.Response.ToolExecutions
+	trackReviewModel(modelsUsed, summary.Response.Provider, summary.Response.Model)
+	multipleModels = multipleModels || summary.Response.ModelLabel == "복수 모델"
+	captureFailureResponse()
+	if err != nil {
+		result.errorMessage = "최종 요약을 만들거나 저장하지 못했습니다"
+		return result, err
+	}
+	f.deps.logger.Info("최종 리뷰 요약", "run", input.runID, "sources", len(input.execution.overviews), "fallback", summary.Fallback)
 	draft := review.Result{Summary: input.execution.review.Summary, Findings: findings}
+	draft.Summary.Overview = summary.Overview
 	response.Usage = usage
 	response.ToolExecutions = toolExecutions
 	if multipleModels || len(modelsUsed) > 1 {

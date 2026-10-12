@@ -12,7 +12,6 @@ func agenticReviewSchema(includeFileNotes bool, maxFindings int) string {
 	if includeFileNotes {
 		files = ",\n    \"files\": [{\"path\": \"파일 경로\", \"note\": \"이 파일에서 무엇이 바뀌었는지 한 문장\"}]"
 		fileRule = "\n변경 파일이 8개 이하이므로 summary.files에 이번 요청의 모든 파일 경로와 비어 있지 않은 note를 정확히 한 번씩 포함한다."
-		overviewRule = "변경 전체를 3~6문장으로 요약한다."
 	}
 	return `출력은 아래 JSON 하나만 낸다. 코드 블록 표시, 인사, 감탄, 설명을 JSON 밖에 덧붙이지 않는다.
 JSON 키, severity 값, 파일 경로는 번역하거나 문체에 맞게 바꾸지 않는다.

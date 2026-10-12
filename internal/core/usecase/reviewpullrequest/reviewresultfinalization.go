@@ -9,14 +9,15 @@ import (
 )
 
 type reviewResultFinalization struct {
-	target      pullrequest.Target
-	runID       uint64
-	runLease    string
-	config      setting.RepoConfig
-	execution   reviewUnitExecutionResult
-	request     llm.Request
-	paths       *promptPathMap
-	trigger     review.Trigger
-	incremental bool
-	runStatus   reviewworkflow.RunStatus
+	target              pullrequest.Target
+	runID               uint64
+	runLease            string
+	config              setting.RepoConfig
+	execution           reviewUnitExecutionResult
+	request             llm.Request
+	paths               *promptPathMap
+	trigger             review.Trigger
+	incremental         bool
+	runStatus           reviewworkflow.RunStatus
+	verifierCallReserve int
 }
