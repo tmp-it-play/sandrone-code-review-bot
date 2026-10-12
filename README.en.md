@@ -19,7 +19,7 @@ Sandrone Code Review Bot is an AI code review bot that summarizes the changes in
 - It reads the repository's `AGENTS.md`, `CLAUDE.md`, contribution guide, and similar files, and applies the project's rules to the review.
 - It reviews large PRs in several batches, and tells you when files were left unreviewed.
 - It does not repost an issue it has already raised, nor a failure notice for the same job.
-- It retries transient external failures with exponential backoff.
+- It automatically retries temporary external failures.
 - You can request a review, a summary, or a follow-up reply with a command or a bot mention.
 - Review language, tone, severity, and target files are configurable per repository.
 
@@ -119,14 +119,12 @@ Not only review settings such as `language`, `tone`, `allowStrongTone`, and `min
 | `summaryPlacement`     |            `new-comment` | Where the summary goes. One of `new-comment`, `update-comment`, `pr-body`.                                                                 |
 | `providers`            |                      all | List of provider names to use for reviews. Leave it empty to allow every available provider.                                               |
 | `maxInstructionChars`  |                  `20000` | Total number of characters that can be read from the repository instructions.                                                              |
-| `maxReviewBatches`     |                      `8` | Maximum number of batches a large PR is split into for review.                                                                             |
+| `maxReviewBatches`     |                      `8` | Maximum number of initial review batches for a large PR. Set a value from `1` to `8`.                                                                             |
 | `instructionFiles`     | default instruction list | List of instruction file paths and globs to read.                                                                                          |
 
-Review settings and instruction files are read from a pinned head SHA of the PR's source branch. For a `develop` → `main` PR, for example, the head commit of `develop` is used. Repository settings cannot lift the cost limits: initial review batches are capped at `1`–`8`, configured model output at `8192` tokens, additional file reads at `6`, and posted findings at `25` in total. Capacity or response format failures can trigger further splitting within the call budget. Transient outages and cooldowns do not trigger splitting.
+Review settings and instruction files are read from the PR's source branch. For a `develop` → `main` PR, for example, the bot uses the settings from the `develop` commit being reviewed.
 
-`SANDRONE_REQUEST_TIMEOUT` limits each external model request. Its default and maximum are `3m`. `SANDRONE_REVIEW_TIMEOUT` limits model processing from the start of a review run, including retry waits. Its default is `30m` and its maximum is `2h`. When this budget expires, the bot stops new model calls and finalizes available results and unreviewed coverage. Saving and publishing results require additional time. `SANDRONE_LLM_MAX_CALLS_PER_OPERATION` caps total external calls at `24`.
-
-Providers are attempted in this order: Gemini, Groq, OpenRouter, NVIDIA, Local, Mistral, and Cloudflare. Local handles summaries only. OpenRouter uses `nvidia/nemotron-3-super-120b-a12b:free`. Output budgets account for each model's reserved reasoning tokens. Long failed requests are not immediately retried with the same provider. The dashboard counts internal call budget and reservation errors separately from external provider failures.
+A single review can leave up to 25 inline comments. Large PRs are reviewed in several batches. Usage limits or temporary outages at external AI services can delay a review. The results identify any files that could not be reviewed.
 
 ## Tone presets
 
@@ -145,7 +143,7 @@ In Korean these presets also select the speech level, with `professional`, `inte
 
 With `sandrone`, when the strong tone is on, pointed rhetorical questions, dry sarcasm, and brief irritation may appear only in the body of well-founded findings and in replies about unresolved defects. Even then they target only the code and the PR, and are not applied to summaries, finding titles, or code suggestions.
 
-The Korean `sandrone` prompt includes short in-game phrases as a rhythm reference for the speaking style. It is constrained from copying those lines verbatim or pulling the original work's characters and events into a review.
+The Sandrone tone is inspired by the character's speaking style. It does not reproduce dialogue, characters, or events from the original work in reviews.
 
 The Sandrone tone is used only in repositories that select it explicitly, like this:
 
