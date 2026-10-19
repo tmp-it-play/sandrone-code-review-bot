@@ -155,6 +155,12 @@ allowStrongTone: true
 
 `sandrone` is not the default; without configuration the `professional` tone is used.
 
+Before publication, PR summaries and finalized reviews receive an additional writing-style pass using the same `language`, `tone`, and `allowStrongTone` settings. Only the overview, file descriptions, and finding bodies are edited; titles, severity, code locations, evidence, and code suggestions remain unchanged. Findings shown in the summary instead of inline comments use the same pass. Headings, tables, severity badges, and notices follow the selected style and Korean, English, or Japanese language setting.
+
+The pass shares the operation's LLM call budget and reserves up to two calls in advance. Large results are split to fit output limits, with at most four calls and 45 seconds for the entire editing stage. Failed or invalid edits and portions that exceed the available budget retain their original text. Both accepted edits and fallback decisions are persisted, so publication retries for the same result reuse them. Additional token usage is included in the review totals.
+
+The existing automatic schema migration adds `review_summaries.text_revision_json` and `pull_request_states.summary_text_revision_json`. Existing results are preserved; unfinished work without an editing checkpoint receives the pass when it resumes. Editing checkpoints follow the existing review and summary retention lifecycle.
+
 
 ## License
 
