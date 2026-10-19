@@ -31,6 +31,7 @@ type PullRequestState struct {
 	SummaryExternalCalls     int        `gorm:"not null;default:0"`
 	SummaryResultInputHash   string     `gorm:"size:64;not null;default:''"`
 	SummaryCanonicalContent  string     `gorm:"type:longtext"`
+	SummaryTextRevisionJSON  string     `gorm:"type:mediumtext"`
 	SummaryProvider          string     `gorm:"size:100;not null;default:''"`
 	SummaryModel             string     `gorm:"size:200;not null;default:''"`
 	SummaryModelLabel        string     `gorm:"size:200;not null;default:''"`

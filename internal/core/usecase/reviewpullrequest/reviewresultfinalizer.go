@@ -127,6 +127,16 @@ func (f *reviewResultFinalizer) finalize(ctx context.Context, input reviewResult
 	f.deps.logger.Info("최종 리뷰 요약", "run", input.runID, "sources", len(input.execution.overviews), "fallback", summary.Fallback)
 	draft := review.Result{Summary: input.execution.review.Summary, Findings: findings}
 	draft.Summary.Overview = summary.Overview
+	draft, revisionResponse, err := f.refineText(ctx, input, draft)
+	usage = usage.Add(revisionResponse.Usage)
+	toolExecutions += revisionResponse.ToolExecutions
+	trackReviewModel(modelsUsed, revisionResponse.Provider, revisionResponse.Model)
+	multipleModels = multipleModels || revisionResponse.ModelLabel == "복수 모델"
+	captureFailureResponse()
+	if err != nil {
+		result.errorMessage = "최종 문체 보정 결과를 저장하거나 복원하지 못했습니다"
+		return result, err
+	}
 	response.Usage = usage
 	response.ToolExecutions = toolExecutions
 	if multipleModels || len(modelsUsed) > 1 {
@@ -135,7 +145,7 @@ func (f *reviewResultFinalizer) finalize(ctx context.Context, input reviewResult
 		response.ModelLabel = "복수 모델"
 	}
 	attribution := attributionOf(response)
-	style := review.Style{Emoji: input.config.Emoji, Tone: string(input.config.Tone)}
+	style := review.Style{Emoji: input.config.Emoji, Tone: string(input.config.Tone), Language: input.config.Language}
 	view := review.SummaryView{
 		Summary:         draft.Summary,
 		Fallback:        draft.Fallback(),

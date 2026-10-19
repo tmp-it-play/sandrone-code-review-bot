@@ -20,4 +20,5 @@ type reviewResultFinalization struct {
 	incremental         bool
 	runStatus           reviewworkflow.RunStatus
 	verifierCallReserve int
+	reducerCallReserve  int
 }

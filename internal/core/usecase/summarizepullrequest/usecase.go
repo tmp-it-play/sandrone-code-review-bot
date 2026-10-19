@@ -17,6 +17,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/selection"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/setting"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/refinepublication"
 )
 
 type UseCase struct {
@@ -281,7 +282,8 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 	})
 
 	completionRequest.Messages = plan.Messages
-	completionRequest.ExternalCallBudget = callBudget
+	revisionCallReserve := min(refinepublication.CallReserve, max(0, maxCalls-1))
+	completionRequest.ExternalCallBudget = llm.NewScopedDurableExternalCallBudget(maxCalls, callBudget.Used(), maxCalls-revisionCallReserve, callBudget.Reserve)
 	inputHash, err := llm.CompletionInputHash(completionRequest, u.deps.Completer.PolicyHashInputs(completionRequest), plan.ResultPolicy)
 	if err != nil {
 		return failClaimed("요약 모델 입력 식별자를 만들지 못했습니다", err)
@@ -352,6 +354,12 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 		response = checkpoint.MetadataResponse()
 	}
 
+	completionRequest.ExternalCallBudget = callBudget
+	summary, revisionResponse, err := u.refineText(ctx, target, task.OperationKey, publicationLease, summary, config, completionRequest)
+	response = llm.MergeResponseMetadata(response, revisionResponse)
+	if err != nil {
+		return failClaimed("요약 문체 보정 결과를 저장하거나 복원하지 못했습니다", err, response)
+	}
 	body := summaryBodyWithMarker(u.deps.Renderer.SummaryBody(review.SummaryView{
 		Summary: summary,
 		Attribution: review.Attribution{
@@ -362,7 +370,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.SummaryJob) error {
 			CompletionTokens: response.Usage.CompletionTokens,
 			TotalTokens:      response.Usage.TotalTokens,
 		},
-		Style:   review.Style{Emoji: config.Emoji, Tone: string(config.Tone)},
+		Style:   review.Style{Emoji: config.Emoji, Tone: string(config.Tone), Language: config.Language},
 		Trigger: task.Trigger,
 	}), u.deps.Renderer.Marker(), publicationMarker, u.deps.Renderer.SummaryMarker())
 	releasePublicationLease = false

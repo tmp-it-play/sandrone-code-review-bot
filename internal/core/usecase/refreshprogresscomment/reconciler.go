@@ -114,7 +114,12 @@ func (r *Reconciler) apply(ctx context.Context, refresh progresscomment.Refresh,
 	if now.Before(refresh.CreateNotBefore) {
 		return false, nil
 	}
-	_, createErr := r.deps.Publisher.CreateComment(ctx, refresh.Target, r.deps.Renderer.ProgressBody(refresh.Marker))
+	config, err := r.deps.Settings.RepoConfig(ctx, refresh.Target)
+	if err != nil {
+		return false, err
+	}
+	style := review.Style{Language: config.Language, Tone: string(config.Tone), Emoji: config.Emoji}
+	_, createErr := r.deps.Publisher.CreateComment(ctx, refresh.Target, r.deps.Renderer.ProgressBody(refresh.Marker, style))
 	if createErr == nil {
 		return true, r.deps.Checks.Show(ctx, refresh.Target, refresh.Marker, message)
 	}

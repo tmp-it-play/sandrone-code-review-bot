@@ -234,7 +234,12 @@ func (q *ProgressQueue) ensureProgressComment(ctx context.Context, task job.Revi
 	}
 	key := progressKey(task)
 	message := review.ProgressMessage(task.ProgressMessageTheme, key, 0)
-	_, createErr := q.deps.Publisher.CreateComment(producerContext, task.Target, q.deps.Renderer.ProgressBody(marker))
+	config, configErr := q.deps.Settings.RepoConfig(producerContext, task.Target)
+	if configErr != nil {
+		return errors.Join(configErr, q.completeProgressMutation(ctx, marker, leaseToken))
+	}
+	style := review.Style{Language: config.Language, Tone: string(config.Tone), Emoji: config.Emoji}
+	_, createErr := q.deps.Publisher.CreateComment(producerContext, task.Target, q.deps.Renderer.ProgressBody(marker, style))
 	if createErr == nil {
 		if checkErr := q.deps.Checks.Show(producerContext, task.Target, marker, message); checkErr != nil {
 			q.deps.Logger.Warn("진행 체크를 만들지 못해 갱신 주기에서 다시 시도합니다", "target", task.Target.Reference(), "error", checkErr)

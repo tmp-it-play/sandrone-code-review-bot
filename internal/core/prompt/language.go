@@ -1,14 +1,14 @@
 package prompt
 
-import "strings"
+import "github.com/it-play/sandrone-code-review-bot/internal/core/setting"
 
 func languageName(code string) string {
-	switch strings.ToLower(strings.TrimSpace(code)) {
-	case "", "ko", "ko-kr", "korean":
+	switch setting.LanguageCode(code) {
+	case "ko":
 		return "한국어"
-	case "en", "en-us", "english":
+	case "en":
 		return "영어"
-	case "ja", "jp", "ja-jp", "jp-jp", "japanese":
+	case "ja":
 		return "일본어"
 	default:
 		return code

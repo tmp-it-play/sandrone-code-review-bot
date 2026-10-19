@@ -98,7 +98,7 @@ func NewCatalog() Catalog {
 				ModelEnv:       "LOCAL_AI_MODEL",
 				Optional:       true,
 				Capability:     llm.Capability{JSONMode: true},
-				Profile:        llm.ProviderProfile{Roles: []llm.TaskRole{llm.TaskRoleSummary}, PublicDataAllowed: true, FailureDomain: "local-ai"},
+				Profile:        llm.ProviderProfile{Roles: []llm.TaskRole{llm.TaskRoleSummary, llm.TaskRoleEditor}, PublicDataAllowed: true, FailureDomain: "local-ai"},
 				MaxPromptChars: 4500,
 				MaxConcurrency: 1,
 			},
@@ -123,6 +123,7 @@ func supportedRoles() []llm.TaskRole {
 		llm.TaskRoleReviewer,
 		llm.TaskRoleVerifier,
 		llm.TaskRoleReducer,
+		llm.TaskRoleEditor,
 		llm.TaskRoleSummary,
 		llm.TaskRoleReply,
 	}
@@ -130,6 +131,7 @@ func supportedRoles() []llm.TaskRole {
 
 func supportedPromptContractRoles() []llm.TaskRole {
 	return []llm.TaskRole{
+		llm.TaskRoleEditor,
 		llm.TaskRoleReviewer,
 		llm.TaskRoleSummary,
 		llm.TaskRoleReply,

@@ -33,16 +33,16 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 	var builder strings.Builder
 	prose := reviewProseFor(view.Style)
 	builder.WriteString(r.Marker())
-	builder.WriteString("\n## Pull Request 요약\n\n")
+	fmt.Fprintf(&builder, "\n## %s\n\n", prose.summaryHeading)
 	if overview := strings.TrimSpace(view.Summary.Overview); overview != "" {
 		builder.WriteString(overview)
 		builder.WriteString("\n\n")
 	}
 	if view.OmittedFindings > 0 {
-		fmt.Fprintf(&builder, "> 출력 크기 상한으로 우선순위가 낮은 지적 %d건을 생략했습니다.\n\n", view.OmittedFindings)
+		fmt.Fprintf(&builder, "> "+prose.omittedFindings+"\n\n", view.OmittedFindings)
 	}
 	if len(view.Summary.Files) > 0 {
-		builder.WriteString(r.fileTable(view.Summary.Files))
+		builder.WriteString(r.fileTable(view.Summary.Files, view.Style))
 		builder.WriteString("\n")
 	}
 	if view.Trigger != review.TriggerCommandSummary && view.InlineCount == 0 && len(view.Fallback) == 0 {
@@ -59,11 +59,12 @@ func (r Renderer) SummaryBody(view review.SummaryView) string {
 	return builder.String()
 }
 
-func (r Renderer) ProgressBody(marker string) string {
+func (r Renderer) ProgressBody(marker string, style review.Style) string {
 	var builder strings.Builder
+	prose := reviewProseFor(style)
 	builder.WriteString("> [!NOTE]\n")
-	builder.WriteString("> 인라인 리뷰 코멘트에서 `/pr-review-reply`를 입력하면 해당 지적의 해결 여부를 다시 확인하고 답합니다.\n\n")
-	builder.WriteString("<sub>[Sandrone Code Review Bot 저장소 바로가기](https://github.com/it-play/sandrone-code-review-bot)</sub>\n\n")
+	fmt.Fprintf(&builder, "> %s\n\n", prose.replyHint)
+	fmt.Fprintf(&builder, "<sub>[%s](https://github.com/it-play/sandrone-code-review-bot)</sub>\n\n", prose.repositoryLink)
 	builder.WriteString(strings.TrimSpace(marker))
 	return builder.String()
 }
@@ -77,7 +78,7 @@ func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribut
 	}
 	builder.WriteString("\n\n")
 	builder.WriteString(strings.TrimSpace(finding.Body))
-	appendOccurrenceLocations(&builder, finding)
+	appendOccurrenceLocations(&builder, finding, style)
 	if suggestion := normalizeSuggestion(finding.Suggestion); strings.TrimSpace(suggestion) != "" {
 		fence := fenceFor(suggestion)
 		if finding.SuggestionApplies() {
@@ -88,7 +89,7 @@ func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribut
 			builder.WriteString("\n")
 			builder.WriteString(fence)
 		} else {
-			builder.WriteString("\n\n제안:\n\n")
+			fmt.Fprintf(&builder, "\n\n%s\n\n", reviewProseFor(style).suggestion)
 			builder.WriteString(fence)
 			builder.WriteString("\n")
 			builder.WriteString(suggestion)
@@ -96,7 +97,7 @@ func (r Renderer) InlineBody(finding review.Finding, attribution review.Attribut
 			builder.WriteString(fence)
 		}
 	}
-	if footer := attributionLine(review.Attribution{Model: attribution.Model, Label: attribution.Label}); footer != "" {
+	if footer := attributionLine(review.Attribution{Model: attribution.Model, Label: attribution.Label}, style); footer != "" {
 		builder.WriteString("\n\n")
 		builder.WriteString(footer)
 	}
@@ -127,22 +128,23 @@ func alertKind(kind review.NoticeKind) string {
 	}
 }
 
-func (r Renderer) ReplyBody(text string, attribution review.Attribution) string {
+func (r Renderer) ReplyBody(text string, attribution review.Attribution, style review.Style) string {
 	body := strings.TrimSpace(text)
-	footer := attributionLine(attribution)
+	footer := attributionLine(attribution, style)
 	if footer == "" {
 		return body
 	}
 	return fmt.Sprintf("%s\n\n%s", body, footer)
 }
 
-func (r Renderer) fileTable(notes []review.FileNote) string {
+func (r Renderer) fileTable(notes []review.FileNote, style review.Style) string {
 	var builder strings.Builder
+	prose := reviewProseFor(style)
 	collapse := len(notes) > fileTableToggleThreshold
 	if collapse {
-		fmt.Fprintf(&builder, "<details>\n<summary>파일별 변경 내용 %d개</summary>\n\n", len(notes))
+		fmt.Fprintf(&builder, "<details>\n<summary>"+prose.fileCount+"</summary>\n\n", len(notes))
 	}
-	builder.WriteString("| 파일 | 변경 내용 |\n| --- | --- |\n")
+	fmt.Fprintf(&builder, "| %s | %s |\n| --- | --- |\n", prose.fileHeader, prose.changesHeader)
 	for _, note := range notes {
 		fmt.Fprintf(&builder, "| `%s` | %s |\n", note.Path, escapeCell(note.Note))
 	}
@@ -154,7 +156,7 @@ func (r Renderer) fileTable(notes []review.FileNote) string {
 
 func (r Renderer) fallbackSection(findings []review.Finding, style review.Style) string {
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "<details>\n<summary>인라인으로 달지 못한 지적 %d건</summary>\n\n", len(findings))
+	fmt.Fprintf(&builder, "<details>\n<summary>"+reviewProseFor(style).fallbackCount+"</summary>\n\n", len(findings))
 	for _, finding := range findings {
 		location := finding.File
 		if finding.Line > 0 {
@@ -168,7 +170,7 @@ func (r Renderer) fallbackSection(findings []review.Finding, style review.Style)
 		}
 		builder.WriteString("\n\n")
 		builder.WriteString(strings.TrimSpace(finding.Body))
-		appendOccurrenceLocations(&builder, finding)
+		appendOccurrenceLocations(&builder, finding, style)
 		if suggestion := normalizeSuggestion(finding.Suggestion); strings.TrimSpace(suggestion) != "" {
 			fence := fenceFor(suggestion)
 			builder.WriteString("\n\n")
@@ -184,7 +186,7 @@ func (r Renderer) fallbackSection(findings []review.Finding, style review.Style)
 	return builder.String()
 }
 
-func appendOccurrenceLocations(builder *strings.Builder, finding review.Finding) {
+func appendOccurrenceLocations(builder *strings.Builder, finding review.Finding, style review.Style) {
 	locations := make([]string, 0, 5)
 	omitted := 0
 	for _, occurrence := range finding.Occurrences {
@@ -211,18 +213,19 @@ func appendOccurrenceLocations(builder *strings.Builder, finding review.Finding)
 	if len(locations) == 0 {
 		return
 	}
-	builder.WriteString("\n\n같은 원인의 다른 위치: ")
+	prose := reviewProseFor(style)
+	builder.WriteString("\n\n" + prose.otherLocations)
 	builder.WriteString(strings.Join(locations, ", "))
 	if omitted > 0 {
-		fmt.Fprintf(builder, " 외 %d곳", omitted)
+		fmt.Fprintf(builder, prose.moreLocations, omitted)
 	}
 }
 
 func (r Renderer) footer(view review.SummaryView) string {
 	if view.Incremental {
-		return attributionLine(view.Attribution, "직전 리뷰 이후 변경분")
+		return attributionLine(view.Attribution, view.Style, reviewProseFor(view.Style).incremental)
 	}
-	return attributionLine(view.Attribution)
+	return attributionLine(view.Attribution, view.Style)
 }
 
 func escapeCell(text string) string {

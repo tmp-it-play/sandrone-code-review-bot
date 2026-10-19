@@ -187,7 +187,7 @@ func NewApplication(config Config) (*Application, error) {
 	})
 	reviewRetention := maintenance.NewReviewRetentionWorker(reviewRetentionRepository, usageRepository, clock, logger, config.ReviewRetention, config.ReviewTimeout)
 	reviewPublication := maintenance.NewReviewPublicationWorker(reviewRuns, reviewPublicationStore, reviewPublicationCandidates, publicationInvalidations, pullRequests, publisher, progressChecks, reviews, clock, logger, config.ReviewRetention)
-	progressComment := maintenance.NewProgressCommentWorker(reviewRuns, publisher, renderer, progressChecks, clock, logger)
+	progressComment := maintenance.NewProgressCommentWorker(reviewRuns, publisher, renderer, settingSource, progressChecks, clock, logger)
 	occurrenceBootstrap := maintenance.NewFindingOccurrenceBootstrapWorker(occurrenceBootstrapRepository, logger)
 	summaryUseCase := summarizepullrequest.New(summarizepullrequest.Dependencies{
 		Source:       pullRequests,

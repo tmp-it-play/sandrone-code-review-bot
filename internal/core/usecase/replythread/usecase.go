@@ -265,7 +265,7 @@ func (u *UseCase) Execute(ctx context.Context, task job.ReplyJob) error {
 		PromptTokens:     response.Usage.PromptTokens,
 		CompletionTokens: response.Usage.CompletionTokens,
 		TotalTokens:      response.Usage.TotalTokens,
-	})
+	}, review.Style{Language: config.Language, Tone: string(config.Tone), Emoji: config.Emoji})
 	if publicationMarker != "" {
 		replyBody = strings.TrimRight(replyBody, "\n") + "\n" + publicationMarker
 	}

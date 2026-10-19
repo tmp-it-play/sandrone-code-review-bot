@@ -1,6 +1,6 @@
 package prompt
 
-import "strings"
+import "github.com/it-play/sandrone-code-review-bot/internal/core/setting"
 
 const sandroneCoreToneGuide = `산드로네식 사고와 태도:
 - 실행 경로와 조건을 분석하고 확인된 결론을 자신 있게 말한다. 불확실하면 문맥과 도구로 검증하며 허세를 부리지 않는다.
@@ -26,8 +26,8 @@ const sandroneOtherRegisterGuide = `선택한 어조: 산드로네
 `
 
 func sandroneToneGuide(language string) string {
-	switch strings.ToLower(strings.TrimSpace(language)) {
-	case "", "ko", "ko-kr", "korean":
+	switch setting.LanguageCode(language) {
+	case "ko":
 		return sandroneKoreanRegisterGuide + sandroneCoreToneGuide + sandroneDialogueReferenceGuide
 	default:
 		return sandroneOtherRegisterGuide + sandroneCoreToneGuide

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -54,11 +53,8 @@ func (r *reviewSummaryReducer) reduce(ctx context.Context, input reviewResultFin
 		return checkpoint, nil
 	}
 	checkpoint.InputHash = inputHash
-	checkpoint.Overview = "변경 내용 요약을 제공하지 못했습니다. 검토 결과는 아래에 표시합니다."
+	checkpoint.Overview = summaryFallback(input.config)
 	checkpoint.Fallback = true
-	if !strings.HasPrefix(strings.ToLower(input.config.Language), "ko") {
-		checkpoint.Overview = "A change summary is unavailable. Review results are shown below."
-	}
 	if len(input.execution.overviews) == 1 {
 		if overview, err := reviewsummary.CanonicalOverview(input.execution.overviews[0]); err == nil {
 			checkpoint.Overview = overview
@@ -69,7 +65,7 @@ func (r *reviewSummaryReducer) reduce(ctx context.Context, input reviewResultFin
 	if parentBudget == nil {
 		return checkpoint, errors.New("최종 요약 호출 예산이 없습니다")
 	}
-	request.ExternalCallBudget = llm.NewScopedDurableExternalCallBudget(parentBudget.Limit(), parentBudget.Used(), min(parentBudget.Used()+summaryCallReserve, parentBudget.Limit()), parentBudget.Reserve)
+	request.ExternalCallBudget = llm.NewScopedDurableExternalCallBudget(parentBudget.Limit(), parentBudget.Used(), min(parentBudget.Used()+input.reducerCallReserve, parentBudget.Limit()), parentBudget.Reserve)
 	sourceLength := 0
 	for _, overview := range input.execution.overviews {
 		sourceLength += utf8.RuneCountInString(overview)

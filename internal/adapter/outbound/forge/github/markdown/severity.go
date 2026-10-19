@@ -14,7 +14,11 @@ var severityEmoji = map[review.Severity]string{
 }
 
 func severityBadge(severity review.Severity, style review.Style) string {
-	badge := fmt.Sprintf("**`%s`**", severity.Label())
+	label := reviewProseFor(style).severities[severity]
+	if label == "" {
+		label = string(severity)
+	}
+	badge := fmt.Sprintf("**`%s`**", label)
 	if !style.Emoji {
 		return badge
 	}

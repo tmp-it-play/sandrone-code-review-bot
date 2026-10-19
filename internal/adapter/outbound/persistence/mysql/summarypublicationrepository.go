@@ -304,6 +304,9 @@ func (r *SummaryPublicationRepository) SaveSummaryCompletion(ctx context.Context
 		values["summary_canonical_content"] = aggregate.CanonicalContent
 		values["summary_finish_reason"] = aggregate.FinishReason
 		values["summary_result_completed_at"] = aggregate.CompletedAt
+		if state.SummaryResultInputHash != aggregate.InputHash {
+			values["summary_text_revision_json"] = ""
+		}
 		updated := transaction.Model(&model.PullRequestState{}).Where("id = ?", state.ID).Updates(values)
 		if updated.Error != nil {
 			return updated.Error
@@ -461,6 +464,7 @@ func summaryCompletionResetValues() map[string]any {
 		"summary_completed_at":        nil,
 		"summary_result_input_hash":   "",
 		"summary_canonical_content":   "",
+		"summary_text_revision_json":  "",
 		"summary_provider":            "",
 		"summary_model":               "",
 		"summary_model_label":         "",

@@ -7,6 +7,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/textrevision"
 )
 
 type SummaryPublicationRepository interface {
@@ -15,6 +16,8 @@ type SummaryPublicationRepository interface {
 	SummaryCompletion(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, inputHash string, currentAt time.Time) (publication.CompletionCheckpoint, bool, error)
 	RecordSummaryCompletionAttempt(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, response llm.Response, recordedAt time.Time) (publication.CompletionCheckpoint, error)
 	SaveSummaryCompletion(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, checkpoint publication.CompletionCheckpoint) (publication.CompletionCheckpoint, error)
+	SummaryTextRevision(context.Context, pullrequest.Target, string, string, string) (textrevision.Checkpoint, bool, error)
+	SaveSummaryTextRevision(context.Context, pullrequest.Target, string, string, textrevision.Checkpoint) error
 	RenewSummaryPublication(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, leaseExpiresAt time.Time) error
 	CompleteSummaryPublication(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string, completedAt time.Time) error
 	ReleaseSummaryPublication(ctx context.Context, target pullrequest.Target, operationKey string, leaseToken string) error

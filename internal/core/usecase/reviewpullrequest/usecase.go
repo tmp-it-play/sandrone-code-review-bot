@@ -20,6 +20,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/selection"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/setting"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/refinepublication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/usecase/reviewpublication"
 )
 
@@ -67,6 +68,8 @@ func New(deps Dependencies) *UseCase {
 		}),
 		resultFinalizer: newReviewResultFinalizer(reviewResultFinalizerDependencies{
 			summaries: &reviewSummaryReducer{repository: deps.Summaries, completer: deps.Completer, masker: deps.Masker},
+			revisions: deps.Summaries,
+			refiner:   refinepublication.New(deps.Completer, deps.Masker, deps.Logger),
 			findings:  deps.Findings,
 			verifier:  verifier,
 			logger:    deps.Logger,
@@ -261,8 +264,9 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	if maxCalls > 1 {
 		verifierCallReserve = 1
 	}
-	reducerCallReserve := min(summaryCallReserve, max(0, maxCalls-verifierCallReserve-1))
-	reviewerCallLimit := maxCalls - verifierCallReserve - reducerCallReserve
+	revisionCallReserve := min(refinepublication.CallReserve, max(0, maxCalls-verifierCallReserve-1))
+	reducerCallReserve := min(summaryCallReserve, max(0, maxCalls-verifierCallReserve-revisionCallReserve-1))
+	reviewerCallLimit := maxCalls - verifierCallReserve - reducerCallReserve - revisionCallReserve
 	callBudget := llm.NewExternalCallBudget(maxCalls)
 	reviewRequest := llm.Request{
 		Temperature:           config.Temperature,
@@ -801,6 +805,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		incremental:         incremental,
 		runStatus:           runStatus,
 		verifierCallReserve: verifierCallReserve,
+		reducerCallReserve:  reducerCallReserve,
 	})
 	failureResponse = finalizedResult.failureResponse
 	if finalizationErr != nil {

@@ -6,26 +6,34 @@ import (
 )
 
 type reviewProse struct {
-	noFindings string
+	summaryHeading  string
+	noFindings      string
+	omittedFindings string
+	fileCount       string
+	fileHeader      string
+	changesHeader   string
+	fallbackCount   string
+	suggestion      string
+	otherLocations  string
+	moreLocations   string
+	incremental     string
+	input           string
+	output          string
+	total           string
+	tokens          string
+	multipleModels  string
+	replyHint       string
+	repositoryLink  string
+	severities      map[review.Severity]string
 }
 
 func reviewProseFor(style review.Style) reviewProse {
-	switch setting.Tone(style.Tone) {
-	case setting.ToneIntelligent:
-		return reviewProse{
-			noFindings: "검토한 범위에서는 지적할 만한 문제가 확인되지 않았습니다.",
-		}
-	case setting.TonePolite:
-		return reviewProse{
-			noFindings: "검토한 범위에서는 따로 말씀드릴 문제가 없어요.",
-		}
-	case setting.ToneSandrone:
-		return reviewProse{
-			noFindings: "검토한 범위에선 따로 짚을 결함이 없어.",
-		}
+	switch setting.LanguageCode(style.Language) {
+	case "ko":
+		return koreanReviewProse(setting.Tone(style.Tone))
+	case "ja":
+		return japaneseReviewProse(setting.Tone(style.Tone))
 	default:
-		return reviewProse{
-			noFindings: "검토한 범위에서는 별도로 지적할 문제가 없습니다.",
-		}
+		return englishReviewProse(setting.Tone(style.Tone))
 	}
 }
