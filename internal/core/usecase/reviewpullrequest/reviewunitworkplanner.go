@@ -3,7 +3,6 @@ package reviewpullrequest
 import (
 	"fmt"
 
-	"github.com/it-play/sandrone-code-review-bot/internal/core/batching"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 )
@@ -11,21 +10,23 @@ import (
 const maximumAdaptiveReviewDepth = 4
 
 type reviewUnitWorkPlanner struct {
-	filesByPath map[string]pullrequest.ChangedFile
-	coverage    []reviewworkflow.CoverageItem
+	filesByPath   map[string]pullrequest.ChangedFile
+	coverage      []reviewworkflow.CoverageItem
+	failedParents map[string]string
 }
 
-func newReviewUnitWorkPlanner(files []pullrequest.ChangedFile, plan batching.Plan, coverage []reviewworkflow.CoverageItem) *reviewUnitWorkPlanner {
+func newReviewUnitWorkPlanner(files []pullrequest.ChangedFile, coverage []reviewworkflow.CoverageItem, splitUnits []reviewworkflow.Unit) *reviewUnitWorkPlanner {
 	filesByPath := map[string]pullrequest.ChangedFile{}
 	for _, file := range files {
 		filesByPath[file.Path] = file
 	}
-	for _, batch := range plan.Batches {
-		for _, file := range batch {
-			filesByPath[file.Path] = file
+	failedParents := make(map[string]string)
+	for _, unit := range splitUnits {
+		if unit.ErrorSummary != "" {
+			failedParents[unit.Hash] = unit.ParentHash
 		}
 	}
-	return &reviewUnitWorkPlanner{filesByPath: filesByPath, coverage: coverage}
+	return &reviewUnitWorkPlanner{filesByPath: filesByPath, coverage: coverage, failedParents: failedParents}
 }
 
 func (p *reviewUnitWorkPlanner) Build(units []reviewworkflow.Unit) ([]reviewUnitWork, error) {
@@ -41,37 +42,46 @@ func (p *reviewUnitWorkPlanner) Build(units []reviewworkflow.Unit) ([]reviewUnit
 }
 
 func (p *reviewUnitWorkPlanner) Split(work reviewUnitWork, policy reviewRoutePolicy) (reviewUnitSplit, bool, error) {
-	if work.unit.Depth >= maximumAdaptiveReviewDepth || len(work.files) < 2 {
+	if len(work.files) < 2 || p.refinementDepth(work.unit) >= maximumAdaptiveReviewDepth {
 		return reviewUnitSplit{}, false, nil
 	}
 	left, right, found := p.partition(work, policy)
 	if !found {
 		return reviewUnitSplit{}, false, nil
 	}
+	split, err := p.splitGroups(work, left, right)
+	return split, err == nil, err
+}
+
+func (p *reviewUnitWorkPlanner) refinementDepth(unit reviewworkflow.Unit) int {
+	depth := 0
+	for parent := unit.ParentHash; parent != "" && depth < maximumAdaptiveReviewDepth; {
+		ancestor, failed := p.failedParents[parent]
+		if !failed {
+			break
+		}
+		depth++
+		parent = ancestor
+	}
+	return depth
+}
+
+func (p *reviewUnitWorkPlanner) splitGroups(work reviewUnitWork, left, right []pullrequest.ChangedFile) (reviewUnitSplit, error) {
 	groups := [][]pullrequest.ChangedFile{left, right}
-	result := reviewUnitSplit{children: make([]reviewworkflow.Unit, 0, 2), assignments: make([]reviewworkflow.CoverageAssignment, 0), works: make([]reviewUnitWork, 0, 2)}
+	result := reviewUnitSplit{children: make([]reviewworkflow.Unit, 0, 2)}
 	for index, files := range groups {
 		paths := filePaths(files)
 		keys := p.coverageKeys(work.unit.Hash, paths)
 		child, err := reviewworkflow.NewChildUnit(work.unit, index, reviewworkflow.NewUnitSpec(paths, keys))
 		if err != nil {
-			return reviewUnitSplit{}, false, err
+			return reviewUnitSplit{}, err
 		}
 		result.children = append(result.children, child)
-		result.works = append(result.works, reviewUnitWork{unit: child, files: files})
 		for _, key := range keys {
 			result.assignments = append(result.assignments, reviewworkflow.CoverageAssignment{CoverageKey: key, UnitHash: child.Hash})
 		}
 	}
-	return result, true, nil
-}
-
-func (p *reviewUnitWorkPlanner) CanSplit(work reviewUnitWork, policy reviewRoutePolicy) bool {
-	if work.unit.Depth >= maximumAdaptiveReviewDepth || len(work.files) < 2 {
-		return false
-	}
-	_, _, found := p.partition(work, policy)
-	return found
+	return result, nil
 }
 
 func (p *reviewUnitWorkPlanner) ApplySplit(split reviewUnitSplit) {
@@ -108,7 +118,7 @@ func (p *reviewUnitWorkPlanner) work(unit reviewworkflow.Unit) (reviewUnitWork, 
 			p.coverage[index].UnitHash = unit.Hash
 		}
 	}
-	return reviewUnitWork{unit: unit, files: files}, nil
+	return reviewUnitWork{unit: unit, files: (semanticFilePlanner{}).Order(files)}, nil
 }
 
 func (p *reviewUnitWorkPlanner) partition(work reviewUnitWork, policy reviewRoutePolicy) ([]pullrequest.ChangedFile, []pullrequest.ChangedFile, bool) {

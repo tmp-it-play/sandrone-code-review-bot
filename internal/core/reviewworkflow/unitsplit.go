@@ -7,6 +7,7 @@ type UnitSplit struct {
 	ParentLeaseToken string
 	ParentInputHash  string
 	ParentResult     UnitResult
+	CompletedPrefix  *UnitResult
 	Children         []Unit
 	Assignments      []CoverageAssignment
 	RefinedAt        time.Time

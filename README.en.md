@@ -124,7 +124,7 @@ Not only review settings such as `language`, `tone`, `allowStrongTone`, and `min
 
 Review settings and instruction files are read from the PR's source branch. For a `develop` → `main` PR, for example, the bot uses the settings from the `develop` commit being reviewed.
 
-A single review can leave up to 25 inline comments. Large PRs are reviewed in several batches. Usage limits or temporary outages at external AI services can delay a review. The results identify any files that could not be reviewed.
+A single review can leave up to 25 inline comments. For large PRs, each model receives a batch of outstanding files sized to its input and output limits. Completed files are skipped when a review resumes. Usage limits or temporary outages at external AI services can delay a review. The results identify any files that could not be reviewed.
 
 ## Tone presets
 

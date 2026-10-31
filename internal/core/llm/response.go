@@ -9,6 +9,7 @@ type Response struct {
 	FinishReason   string
 	Usage          Usage
 	ToolExecutions int
+	ReviewedItems  int
 }
 
 func (r Response) NeedsToolExecution() bool {

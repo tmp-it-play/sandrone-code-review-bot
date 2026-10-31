@@ -75,6 +75,7 @@ func (c *Chain) RouteCapacitiesFor(request llm.Request) []llm.RouteCapacity {
 			Provider:           candidate.Name(),
 			Model:              candidate.Model(),
 			PromptChars:        candidate.PromptLimit(),
+			ToolCalling:        candidate.Capability().ToolCalling,
 			MaxOutputTokens:    policy.MaxOutputTokens,
 			UsableOutputTokens: policy.UsableOutputTokens,
 		})
@@ -84,7 +85,7 @@ func (c *Chain) RouteCapacitiesFor(request llm.Request) []llm.RouteCapacity {
 
 func (c *Chain) PolicyHashInputs(request llm.Request) llm.PolicyHashInputs {
 	identity := llm.PolicyHashInputs{
-		Version:               "llm-routing-v7",
+		Version:               "llm-routing-v8",
 		TaskRole:              request.TaskRole,
 		DataClassification:    request.DataClassification,
 		RequestedProviders:    normalizedNames(request.Providers),
@@ -140,6 +141,10 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		}()
 	}
 	collector := &completionFailureCollector{}
+	var definitions []llm.Tool
+	if executor != nil && request.ExternalCallBudget.Remaining() >= 2 {
+		definitions = executor.Definitions()
+	}
 	routed := false
 	toolExecutions := 0
 	usage := llm.Usage{}
@@ -180,12 +185,32 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			continue
 		}
 		var tools []llm.Tool
-		if executor != nil && candidate.Capability().ToolCalling && request.ExternalCallBudget.Remaining() >= 2 {
-			tools = executor.Definitions()
+		if candidate.Capability().ToolCalling && request.ExternalCallBudget.Remaining() >= 2 {
+			tools = definitions
 		}
 		fits := fitsWithinTrimBudget(request.Messages, candidate.PromptLimit()-llm.ToolsSize(tools))
-		if request.RequireCompletePrompt {
-			fits = requestFits(request.Messages, tools, candidate.PromptLimit())
+		candidateRequest := request
+		candidateRequest.Tools = tools
+		windowItems := 0
+		if request.PlanWindow != nil {
+			budget := candidate.PromptLimit() - llm.ToolsSize(tools)
+			if candidate.PromptLimit() <= 0 {
+				budget = 0
+			}
+			fits = false
+			if budget > 0 || candidate.PromptLimit() <= 0 {
+				window, usable := request.PlanWindow(budget, outputLimit)
+				if usable && window.Items > 0 && window.RequiredOutputTokens <= outputLimit && requestFits(window.Messages, tools, candidate.PromptLimit()) {
+					candidateRequest.Messages = window.Messages
+					candidateRequest.FitMessages = window.FitMessages
+					candidateRequest.MaxOutputTokens = window.MaxOutputTokens
+					candidateRequest.RequiredOutputTokens = window.RequiredOutputTokens
+					windowItems = window.Items
+					fits = true
+				}
+			}
+		} else if request.RequireCompletePrompt {
+			candidateRequest.Messages, fits = fitCompletePrompt(request, request.Messages, tools, candidate.PromptLimit())
 		}
 		if !fits {
 			cause := fmt.Errorf("프로바이더 입력 한도 %d자를 초과했습니다", candidate.PromptLimit())
@@ -201,7 +226,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			continue
 		}
 		usedBefore := request.ExternalCallBudget.Used()
-		response, observedUsage, observedElapsed, attemptErr := c.attemptWithRetry(ctx, candidate, request, executor)
+		response, observedUsage, observedElapsed, attemptErr := c.attemptWithRetry(ctx, candidate, candidateRequest, executor)
 		invoked := request.ExternalCallBudget.Used() > usedBefore
 		usage = usage.Add(response.Usage)
 		toolExecutions += response.ToolExecutions
@@ -231,6 +256,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			attemptErr = validateSemanticResponse(request.ResponseValidation, response.Content)
 		}
 		if attemptErr == nil {
+			response.ReviewedItems = windowItems
 			response.Usage = usage
 			response.ToolExecutions = toolExecutions
 			if len(invokedProviders) > 1 {
@@ -296,6 +322,10 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		if ok {
 			outcome = string(failure.Kind)
 			status = failure.Status
+			if failure.Kind == llm.FailureInputLimit {
+				attemptKind = llm.CompletionAttemptPromptLimit
+				adaptable = true
+			}
 			if failure.Kind.TriggersCooldown() || (failure.Kind != llm.FailureAborted && failure.RetryAfter > 0) {
 				cooldownEnd := c.markProviderCooldown(ctx, candidate, failure)
 				if failure.Kind == llm.FailureQuota || failure.Kind == llm.FailureRateLimited || failure.Kind == llm.FailureUnavailable || failure.Kind == llm.FailureTimeout {
@@ -384,21 +414,24 @@ func (c *Chain) attemptWithRetry(ctx context.Context, candidate outbound.Provide
 
 func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, request llm.Request, executor outbound.ToolExecutor) (llm.Response, error) {
 	messages := append([]llm.Message{}, request.Messages...)
-	var tools []llm.Tool
-	if executor != nil && candidate.Capability().ToolCalling && request.ExternalCallBudget.Remaining() >= 2 {
-		tools = executor.Definitions()
+	tools := request.Tools
+	if request.ExternalCallBudget.Remaining() < 2 {
+		tools = nil
 	}
 	accumulated := llm.Usage{}
 	toolExecutions := 0
 	models := newCompletionModelTracker()
 	for round := 0; round < c.maxToolRounds; round++ {
-		if request.RequireCompletePrompt && !requestFits(messages, tools, candidate.PromptLimit()) {
-			return llm.Response{Usage: accumulated, ToolExecutions: toolExecutions}, ErrCompletePromptLimitExceeded
-		}
 		attempt := request
 		attempt.Messages = messages
 		attempt.Tools = tools
-		if !request.RequireCompletePrompt {
+		if request.RequireCompletePrompt {
+			fitted, fits := fitCompletePrompt(request, messages, tools, candidate.PromptLimit())
+			if !fits {
+				return llm.Response{Usage: accumulated, ToolExecutions: toolExecutions}, ErrCompletePromptLimitExceeded
+			}
+			attempt.Messages = fitted
+		} else {
 			if fitted, trimmed := trimMessages(attempt.Messages, candidate.PromptLimit()-llm.ToolsSize(tools)); trimmed {
 				attempt.Messages = fitted
 				c.logger.Warn("프로바이더 입력 한도에 맞추어 프롬프트를 줄였습니다", "provider", candidate.Name(), "limit", candidate.PromptLimit())
@@ -465,9 +498,13 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 	final := request
 	final.Messages = messages
 	final.Tools = nil
-	if request.RequireCompletePrompt && !messagesFit(final.Messages, candidate.PromptLimit()) {
-		return llm.Response{Usage: accumulated, ToolExecutions: toolExecutions}, ErrCompletePromptLimitExceeded
-	} else if !request.RequireCompletePrompt {
+	if request.RequireCompletePrompt {
+		fitted, fits := fitCompletePrompt(request, messages, nil, candidate.PromptLimit())
+		if !fits {
+			return llm.Response{Usage: accumulated, ToolExecutions: toolExecutions}, ErrCompletePromptLimitExceeded
+		}
+		final.Messages = fitted
+	} else {
 		if fitted, trimmed := trimMessages(final.Messages, candidate.PromptLimit()); trimmed {
 			final.Messages = fitted
 		}

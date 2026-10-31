@@ -18,8 +18,13 @@ func validateUnitSplitInput(split reviewworkflow.UnitSplit) error {
 	if split.ParentHash == "" || split.ParentLeaseToken == "" || split.ParentInputHash == "" {
 		return errors.New("부모 unit 식별자, lease, input hash가 필요합니다")
 	}
-	if split.ParentResult.Status != reviewworkflow.UnitStatusFailed {
-		return errors.New("실패 결과만 분할할 수 있습니다")
+	if split.CompletedPrefix != nil {
+		prefix := split.CompletedPrefix
+		if split.ParentResult.Status != reviewworkflow.UnitStatusSplit || prefix.Status != reviewworkflow.UnitStatusSucceeded || prefix.InputHash == "" || prefix.FinishedAt.IsZero() {
+			return errors.New("부분 검토 결과와 완료 시각이 필요합니다")
+		}
+	} else if split.ParentResult.Status != reviewworkflow.UnitStatusFailed {
+		return errors.New("실패 결과만 재분할할 수 있습니다")
 	}
 	if split.ParentResult.InputHash != "" && split.ParentResult.InputHash != split.ParentInputHash {
 		return errors.New("부모 unit input hash가 실패 결과와 다릅니다")

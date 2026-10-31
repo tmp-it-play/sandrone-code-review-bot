@@ -30,6 +30,7 @@ func (e *reviewUnitExecutor) refineUnit(ctx context.Context, input reviewUnitExe
 		return nil, true, err
 	}
 	planner.ApplySplit(refinement)
+	planner.failedParents[work.unit.Hash] = work.unit.ParentHash
 	childWorks, err := planner.Build(stored)
 	if err != nil {
 		return nil, true, err

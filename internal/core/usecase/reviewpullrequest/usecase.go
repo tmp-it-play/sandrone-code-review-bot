@@ -295,11 +295,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		FailFastOnIncomplete:  false,
 		ResponseValidation:    llm.ResponseValidation{Policy: llm.ResponseValidationReviewResult},
 	}
-	capacities, err := u.deps.Completer.AvailableRouteCapacities(ctx, reviewRequest)
-	if err != nil {
-		return fail("사용 가능한 리뷰 프로바이더를 확인하지 못했습니다", err)
-	}
-	routePolicy := newReviewRoutePolicy(capacities, reviewRequest.MaxOutputTokens)
+	capacities := u.deps.Completer.RouteCapacitiesFor(reviewRequest)
 	policy := u.deps.Completer.PolicyHashInputs(reviewRequest)
 	modelPolicyHash, err := hashJSON(policy)
 	if err != nil {
@@ -694,7 +690,12 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 	}
 
 	inventory := inventoryOf(files)
-	toolsAllowed := config.MaxExtraReads > 0 && u.deps.Tools != nil
+	executor := u.unitExecutor.toolExecutor(target, config.MaxExtraReads, pathMap)
+	toolSize := 0
+	if executor != nil {
+		toolSize = llm.ToolsSize(executor.Definitions())
+	}
+	routePolicy := newReviewRoutePolicy(capacities, reviewRequest.MaxOutputTokens, toolSize)
 	planner := reviewBatchPlanner{
 		PullRequest:       request,
 		Inventory:         inventory,
@@ -703,8 +704,8 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		Config:            config,
 		Incremental:       incremental,
 		Extra:             task.Instruction,
-		ToolsAllowed:      toolsAllowed,
-		ProviderLimit:     routePolicy.promptLimit,
+		ToolsAllowed:      toolSize > 0,
+		ProviderLimit:     routePolicy.fallbackPromptLimit,
 		MaxReviewBatches:  config.Sandrone.MaxReviewBatches,
 		RoutePolicy:       routePolicy,
 		Mask:              u.deps.Masker.Mask,

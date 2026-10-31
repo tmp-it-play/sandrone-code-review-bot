@@ -29,7 +29,7 @@ func reviewOutputTokens(configured int) int {
 	return configured
 }
 
-func newReviewRoutePolicy(capacities []llm.RouteCapacity, configuredOutput int) reviewRoutePolicy {
+func newReviewRoutePolicy(capacities []llm.RouteCapacity, configuredOutput, toolSize int) reviewRoutePolicy {
 	promptLimits := make([]int, 0, len(capacities))
 	outputLimits := make([]int, 0, len(capacities))
 	outputRoutes := make([]llm.RouteCapacity, 0, len(capacities))
@@ -37,6 +37,12 @@ func newReviewRoutePolicy(capacities []llm.RouteCapacity, configuredOutput int) 
 	fallbackOutputLimit := 0
 	for _, capacity := range capacities {
 		if capacity.PromptChars > 0 {
+			if capacity.ToolCalling {
+				capacity.PromptChars -= toolSize
+				if capacity.PromptChars <= 0 {
+					continue
+				}
+			}
 			promptLimits = append(promptLimits, capacity.PromptChars)
 			fallbackPromptLimit = max(fallbackPromptLimit, capacity.PromptChars)
 		}
@@ -60,7 +66,11 @@ func newReviewRoutePolicy(capacities []llm.RouteCapacity, configuredOutput int) 
 		capacity.UsableOutputTokens = output
 		outputRoutes = append(outputRoutes, capacity)
 	}
-	promptLimit := minimumCapacity(promptLimits)
+	sort.Sort(sort.Reverse(sort.IntSlice(promptLimits)))
+	promptLimit := 0
+	if len(promptLimits) > 0 {
+		promptLimit = promptLimits[routeQuorum(len(promptLimits))-1]
+	}
 	outputLimit := minimumCapacity(outputLimits)
 	if outputLimit <= 0 {
 		outputLimit = configuredOutput
@@ -175,6 +185,15 @@ func (p reviewRoutePolicy) ShouldSplit(files []pullrequest.ChangedFile, promptSi
 		return false
 	}
 	return p.promptLimit > 0 && promptSize > p.promptLimit || estimatedReviewOutputTokens(files, includeFileNotes, p.maximumFindings) > p.targetOutput
+}
+
+func (p reviewRoutePolicy) fitsRoute(promptSize, requiredOutput int) bool {
+	for _, route := range p.outputRoutes {
+		if (route.PromptChars <= 0 || promptSize <= route.PromptChars) && requiredOutput <= route.UsableOutputTokens {
+			return true
+		}
+	}
+	return len(p.outputRoutes) == 0
 }
 
 func (p reviewRoutePolicy) Split(files []pullrequest.ChangedFile) ([]pullrequest.ChangedFile, []pullrequest.ChangedFile) {

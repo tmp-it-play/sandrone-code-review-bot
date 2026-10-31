@@ -7,5 +7,4 @@ import (
 type reviewUnitSplit struct {
 	children    []reviewworkflow.Unit
 	assignments []reviewworkflow.CoverageAssignment
-	works       []reviewUnitWork
 }

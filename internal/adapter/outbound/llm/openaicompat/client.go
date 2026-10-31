@@ -278,6 +278,12 @@ func classify(status int, providerErrorCode string, providerErrorMessage string)
 	text := strings.ToLower(providerErrorMessage)
 	switch {
 	case status == 429:
+		switch strings.ToLower(providerErrorCode) {
+		case "insufficient_quota":
+			return llm.FailureQuota
+		case "rate_limit_exceeded":
+			return llm.FailureRateLimited
+		}
 		if strings.Contains(text, "quota") || strings.Contains(text, "exceeded your current") {
 			return llm.FailureQuota
 		}
@@ -286,6 +292,8 @@ func classify(status int, providerErrorCode string, providerErrorMessage string)
 		return llm.FailureAuth
 	case status == 402:
 		return llm.FailureQuota
+	case status == http.StatusRequestEntityTooLarge:
+		return llm.FailureInputLimit
 	case status == http.StatusNotFound:
 		return llm.FailureModel
 	case status == http.StatusRequestTimeout:

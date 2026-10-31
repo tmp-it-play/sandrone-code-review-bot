@@ -25,11 +25,9 @@ type reviewBatchPlanner struct {
 	Paths             *promptPathMap
 }
 
-const toolPromptReserve = 3072
-
 const maximumDetailedFileSummaryChanges = 8
 
-func (p reviewBatchPlanner) Build(files []pullrequest.ChangedFile) (batching.Plan, setting.RepoConfig) {
+func (p *reviewBatchPlanner) Build(files []pullrequest.ChangedFile) (batching.Plan, setting.RepoConfig) {
 	config, limit := p.promptConfig()
 	plan := batching.Plan{}
 	current := make([]pullrequest.ChangedFile, 0, len(files))
@@ -55,21 +53,20 @@ func (p reviewBatchPlanner) Build(files []pullrequest.ChangedFile) (batching.Pla
 	}
 	if p.MaxReviewBatches > 0 && len(plan.Batches) > p.MaxReviewBatches {
 		if fallbackPolicy, available := p.RoutePolicy.Fallback(); available {
-			prepared := make([]pullrequest.ChangedFile, 0, len(files))
-			for _, batch := range plan.Batches {
-				prepared = append(prepared, batch...)
-			}
-			fallback := p
-			fallback.RoutePolicy = fallbackPolicy
-			fallback.ProviderLimit = fallbackPolicy.promptLimit
-			fallbackPlan, _ := fallback.Build(prepared)
-			fallbackPlan.Oversized = append(fallbackPlan.Oversized, plan.Oversized...)
-			return fallbackPlan, config
+			p.RoutePolicy = fallbackPolicy
+			return p.Build(files)
 		}
 		for _, overflow := range plan.Batches[p.MaxReviewBatches:] {
 			plan.Overflow = append(plan.Overflow, overflow...)
 		}
 		plan.Batches = plan.Batches[:p.MaxReviewBatches]
+	}
+	if len(plan.Batches) > 1 {
+		var pending []pullrequest.ChangedFile
+		for _, batch := range plan.Batches {
+			pending = append(pending, batch...)
+		}
+		plan.Batches = [][]pullrequest.ChangedFile{pending}
 	}
 	return plan, config
 }
@@ -125,11 +122,7 @@ func (p reviewBatchPlanner) promptConfig() (setting.RepoConfig, int) {
 func (p reviewBatchPlanner) fixedCost(config setting.RepoConfig) int {
 	context := prompt.Context{Config: config}
 	messages := prompt.ReviewPrompt{Context: context, Extra: p.Extra, ToolsAllowed: p.ToolsAllowed, IncludeFileNotes: p.includeFileNotes(), MaxFindings: p.RoutePolicy.maximumFindings}.Messages()
-	fixed := messagesSize(messages) - len(context.Render())
-	if p.ToolsAllowed {
-		fixed += toolPromptReserve
-	}
-	return fixed
+	return messagesSize(messages) - len(context.Render())
 }
 
 func (p reviewBatchPlanner) includeFileNotes() bool {
@@ -142,31 +135,23 @@ func (p reviewBatchPlanner) includeFileNotes() bool {
 
 func (p reviewBatchPlanner) fits(files []pullrequest.ChangedFile, config setting.RepoConfig, limit int) bool {
 	promptSize := messagesSize(p.Messages(files, config))
-	if p.RoutePolicy.ShouldSplit(files, promptSize, p.includeFileNotes()) {
+	fileNotes := p.includeFileNotes()
+	if p.RoutePolicy.ShouldSplit(files, promptSize, fileNotes) {
 		return false
 	}
-	return limit <= 0 || promptSize <= limit
+	return (limit <= 0 || promptSize <= limit) && p.RoutePolicy.fitsRoute(promptSize, p.RoutePolicy.BatchPolicy(files, fileNotes).RequiredOutputTokens)
 }
 
 func (p reviewBatchPlanner) fitSingle(file pullrequest.ChangedFile, config setting.RepoConfig, limit int) (pullrequest.ChangedFile, bool) {
-	if p.fits([]pullrequest.ChangedFile{file}, config, limit) {
-		return file, true
-	}
-	if file.Content != "" {
-		file.Content = ""
-		file.Truncated = true
+	for {
 		if p.fits([]pullrequest.ChangedFile{file}, config, limit) {
 			return file, true
 		}
-	}
-	fallbackLimit := p.RoutePolicy.fallbackPromptLimit
-	if p.Config.MaxPromptChars > 0 {
-		configuredLimit := p.fixedCost(config) + p.Config.MaxPromptChars
-		if fallbackLimit <= 0 || configuredLimit < fallbackLimit {
-			fallbackLimit = configuredLimit
+		if file.Content == "" {
+			return file, false
 		}
+		file = file.WithSourceLimit(len(file.Content) / 2)
 	}
-	return file, fallbackLimit > limit && p.fits([]pullrequest.ChangedFile{file}, config, fallbackLimit)
 }
 
 func (p reviewBatchPlanner) maskedFiles(files []pullrequest.ChangedFile) []pullrequest.ChangedFile {

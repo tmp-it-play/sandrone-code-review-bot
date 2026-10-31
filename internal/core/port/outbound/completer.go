@@ -11,6 +11,5 @@ type Completer interface {
 	PromptBudget(providers []string) int
 	PromptBudgetFor(request llm.Request) int
 	RouteCapacitiesFor(request llm.Request) []llm.RouteCapacity
-	AvailableRouteCapacities(ctx context.Context, request llm.Request) ([]llm.RouteCapacity, error)
 	PolicyHashInputs(request llm.Request) llm.PolicyHashInputs
 }

@@ -72,6 +72,11 @@ func (r *ReviewExecutionStore) SplitUnit(ctx context.Context, runID uint64, runL
 				return errors.New("분할할 coverage 연결이 충돌했습니다")
 			}
 		}
+		if prefix := split.CompletedPrefix; prefix != nil {
+			if err := finishReviewedPrefix(transaction, &childEntries[0], *prefix); err != nil {
+				return err
+			}
+		}
 		if err := finishSplitParent(transaction, parent, split, splitHash); err != nil {
 			return err
 		}

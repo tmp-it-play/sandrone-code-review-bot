@@ -4,6 +4,8 @@ import "time"
 
 type Request struct {
 	Messages              []Message
+	FitMessages           func(int) ([]Message, bool)         `json:"-"`
+	PlanWindow            func(int, int) (PromptWindow, bool) `json:"-"`
 	Temperature           float64
 	MaxOutputTokens       int
 	RequiredOutputTokens  int
@@ -23,5 +25,7 @@ type Request struct {
 
 func (r Request) WithMessages(messages []Message) Request {
 	r.Messages = messages
+	r.FitMessages = nil
+	r.PlanWindow = nil
 	return r
 }

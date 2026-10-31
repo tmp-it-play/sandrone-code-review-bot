@@ -10,6 +10,7 @@ const (
 	FailureModel       FailureKind = "model_unavailable"
 	FailureAborted     FailureKind = "aborted"
 	FailureInvalid     FailureKind = "invalid"
+	FailureInputLimit  FailureKind = "input_limit"
 	FailureAuth        FailureKind = "auth"
 )
 

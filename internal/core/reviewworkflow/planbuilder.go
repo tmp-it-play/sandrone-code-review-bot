@@ -30,11 +30,14 @@ func (b PlanBuilder) Build(files []pullrequest.ChangedFile, chosen selection.Sel
 		keys := make([]string, 0)
 		paths := make([]string, 0, len(batch))
 		for _, file := range batch {
-			paths = append(paths, file.Path)
+			before := len(keys)
 			for _, item := range itemsByPath[file.Path] {
 				if item.Status == CoverageStatusPlanned {
 					keys = append(keys, item.Key)
 				}
+			}
+			if len(keys) > before {
+				paths = append(paths, file.Path)
 			}
 		}
 		if len(keys) == 0 {
