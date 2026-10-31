@@ -12,6 +12,12 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 	baseModel, _, _ := strings.Cut(normalizedModel, ":")
 
 	switch normalizedProvider + "/" + baseModel {
+	case "flash-next/flash-next":
+		return RequestProfile{
+			Temperature:      float64Value(0),
+			ThinkingEnabled:  boolValue(false),
+			OutputTokenLimit: 4096,
+		}
 	case "gemini/gemini-3.8-flash":
 		return RequestProfile{
 			ReasoningEffort:       "medium",

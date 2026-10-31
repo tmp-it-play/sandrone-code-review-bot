@@ -126,6 +126,8 @@ Review settings and instruction files are read from the PR's source branch. For 
 
 A single review can leave up to 25 inline comments. For large PRs, each model receives a batch of outstanding files sized to its input and output limits. Completed files are skipped when a review resumes. Usage limits or temporary outages at external AI services can delay a review. The results identify any files that could not be reviewed.
 
+Setting `FLASH_NEXT_API_KEY` enables [Flash Next](https://jeb.https.gsmsv.site/models/flash-next/docs) as the last fallback. It supports file reads and one concurrent request for reviews, summaries, replies, and text editing. Private code is sent only if the operator explicitly adds `flash-next` to `SANDRONE_PRIVATE_CODE_PROVIDERS`.
+
 ## Tone presets
 
 The following values are available for `tone`.

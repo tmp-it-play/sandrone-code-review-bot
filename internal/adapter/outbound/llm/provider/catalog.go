@@ -11,8 +11,20 @@ func NewCatalog() Catalog {
 	verifiedRoles := supportedRoles()
 	promptContractRoles := supportedPromptContractRoles()
 	return Catalog{
-		order: []string{"groq", "gemini", "openrouter", "nvidia", "local", "mistral", "cloudflare-glm", "cloudflare-gemma"},
+		order: []string{"groq", "gemini", "openrouter", "nvidia", "local", "mistral", "cloudflare-glm", "cloudflare-gemma", "flash-next"},
 		descriptors: map[string]Descriptor{
+			"flash-next": {
+				Name:           "flash-next",
+				Model:          "flash-next",
+				DisplayName:    "Qwen3.8 Flash Next",
+				BaseURL:        "https://jeb.https.gsmsv.site/v1",
+				APIKeyEnv:      "FLASH_NEXT_API_KEY",
+				Optional:       true,
+				Capability:     llm.Capability{ToolCalling: true},
+				Profile:        llm.ProviderProfile{Roles: promptContractRoles, PublicDataAllowed: true},
+				MaxPromptChars: 180000,
+				MaxConcurrency: 1,
+			},
 			"gemini": {
 				Name:           "gemini",
 				Model:          "gemini-3.8-flash",

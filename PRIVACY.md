@@ -1,6 +1,6 @@
 # Sandrone Code Review Bot 개인정보처리방침
 
-시행일: 2026년 9월 1일
+시행일: 2026년 10월 31일
 
 Sandrone Code Review Bot(이하 "앱")은 `it-play`가 개발하고 운영하는 GitHub App입니다. 이 방침은 앱이 GitHub 저장소와 Pull Request를 처리할 때 어떤 정보를 사용하고 보관하는지 설명합니다.
 
@@ -26,7 +26,7 @@ Sandrone Code Review Bot(이하 "앱")은 `it-play`가 개발하고 운영하는
 
 ## 외부 처리자
 
-앱은 리뷰 결과를 생성하기 위해 필요한 범위의 Pull Request 및 저장소 내용을 설정된 AI 모델 제공자에게 전송할 수 있습니다. 현재 지원하는 외부 제공자는 Google Gemini, NVIDIA API, OpenRouter, Groq, Mistral AI 및 Cloudflare Workers AI이며, 운영 환경의 로컬 모델이 사용될 수도 있습니다. 실제 요청에는 해당 작업에 선택된 제공자만 사용됩니다.
+앱은 리뷰 결과를 생성하기 위해 필요한 범위의 Pull Request 및 저장소 내용을 설정된 AI 모델 제공자에게 전송할 수 있습니다. 현재 지원하는 외부 제공자는 Google Gemini, NVIDIA API, OpenRouter, Groq, Mistral AI, Cloudflare Workers AI 및 [JEB Flash Next](https://jeb.https.gsmsv.site/models/flash-next/docs)이며, 운영 환경의 로컬 모델이 사용될 수도 있습니다. 실제 요청에는 해당 작업에 선택된 제공자만 사용됩니다.
 
 비공개 저장소 내용은 운영 설정에서 비공개 코드 처리가 명시적으로 허용된 제공자에게만 전송됩니다. 외부 제공자가 처리하는 정보에는 각 제공자의 약관과 개인정보처리방침도 적용됩니다.
 
@@ -65,7 +65,7 @@ Sandrone Code Review Bot(이하 "앱")은 `it-play`가 개발하고 운영하는
 
 # Sandrone Code Review Bot Privacy Policy
 
-Effective date: September 1, 2026
+Effective date: October 31, 2026
 
 Sandrone Code Review Bot (the "App") is developed and operated by `it-play`. This policy explains how the App processes information when it reviews GitHub pull requests.
 
@@ -91,7 +91,7 @@ We use this information only to:
 
 ## Service providers
 
-The App may send the minimum pull request and repository content needed to generate a result to configured AI model providers. Supported external providers currently include Google Gemini, NVIDIA API, OpenRouter, Groq, Mistral AI, and Cloudflare Workers AI. A locally operated model may also be used. Only providers selected for the particular request are used.
+The App may send the minimum pull request and repository content needed to generate a result to configured AI model providers. Supported external providers currently include Google Gemini, NVIDIA API, OpenRouter, Groq, Mistral AI, Cloudflare Workers AI, and [JEB Flash Next](https://jeb.https.gsmsv.site/models/flash-next/docs). A locally operated model may also be used. Only providers selected for the particular request are used.
 
 Private-repository content is sent only to providers that the operator has explicitly allowed to process private code. Each external provider's own terms and privacy policy also apply to information it processes.
 
