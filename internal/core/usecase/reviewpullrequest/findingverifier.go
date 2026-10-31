@@ -8,6 +8,8 @@ import (
 
 	"github.com/it-play/sandrone-code-review-bot/internal/core/findingverification"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 )
 
@@ -20,20 +22,71 @@ func newFindingVerifier(deps findingVerifierDependencies) *findingVerifier {
 }
 
 func (v *findingVerifier) verify(ctx context.Context, input findingVerification) (findingVerificationResult, error) {
-	result := findingVerificationResult{}
-	excluded := make([]string, 0, len(input.reviewerProviders))
-	for name := range input.reviewerProviders {
-		excluded = append(excluded, name)
-	}
-	sort.Strings(excluded)
 	request := input.request
-	request.Messages = llm.MaskMessages((findingverification.PromptBuilder{}).Messages(input.paths.PromptFindings(input.findings), input.paths.PromptFiles(input.files)), v.deps.masker.Mask)
 	request.TaskRole = llm.TaskRoleVerifier
-	request.ExcludedProviders = excluded
+	request.RequireCompletePrompt = true
 	request.MaxOutputTokens = 4096
 	request.ForceJSON = true
 	request.ResponseValidation = llm.ResponseValidation{}
+	request.ExcludedProviders = make([]string, 0, len(input.reviewerProviders))
+	for name := range input.reviewerProviders {
+		request.ExcludedProviders = append(request.ExcludedProviders, name)
+	}
+	sort.Strings(request.ExcludedProviders)
 	policy := v.deps.completer.PolicyHashInputs(request)
+	limit := input.promptLimit
+	largest := 0
+	for _, provider := range policy.EligibleProviders {
+		if provider.PromptLimit <= 0 {
+			largest = 0
+			break
+		}
+		largest = max(largest, provider.PromptLimit)
+	}
+	if largest > 0 && (limit <= 0 || largest < limit) {
+		limit = largest
+	}
+	files, findings := input.files, input.findings
+	for budget := findingverification.MaxSourceBytes; ; budget /= 2 {
+		input.files = findingverification.EvidenceFiles(findings, files, budget)
+		input.findings = findingsWithSource(findings, input.files)
+		request.Messages = llm.MaskMessages((findingverification.PromptBuilder{}).Messages(input.paths.PromptFindings(input.findings), input.paths.PromptFiles(input.files)), v.deps.masker.Mask)
+		if budget == 0 || limit <= 0 || llm.MessagesSize(request.Messages) <= limit {
+			break
+		}
+	}
+	result, err := v.verifyCandidates(ctx, input, request, policy)
+	result.rejected += len(findings) - len(input.findings)
+	if !result.confirmed {
+		direct := make([]review.Finding, 0, len(result.findings))
+		for _, candidate := range result.findings {
+			if candidate.RequiresFileScope {
+				result.rejected++
+				continue
+			}
+			direct = append(direct, candidate)
+		}
+		result.findings = direct
+	}
+	return result, err
+}
+
+func findingsWithSource(findings []review.Finding, files []pullrequest.ChangedFile) []review.Finding {
+	complete := make(map[string]bool, len(files))
+	for _, file := range files {
+		complete[file.Path] = file.SourceScope() == "complete"
+	}
+	candidates := make([]review.Finding, 0, len(findings))
+	for _, candidate := range findings {
+		if !candidate.RequiresFileScope || complete[candidate.File] {
+			candidates = append(candidates, candidate)
+		}
+	}
+	return candidates
+}
+
+func (v *findingVerifier) verifyCandidates(ctx context.Context, input findingVerification, request llm.Request, policy llm.PolicyHashInputs) (findingVerificationResult, error) {
+	result := findingVerificationResult{}
 	inputHash, candidateIDs, err := verificationInputHash(request, policy, input.findings)
 	if err != nil {
 		result.rejected = len(input.findings)
@@ -58,6 +111,7 @@ func (v *findingVerifier) verify(ctx context.Context, input findingVerification)
 		supported, checkpointErr := findingsFromVerificationCheckpoint(input.findings, candidateIDs, checkpoint.SupportedOccurrenceIDs)
 		if checkpointErr == nil {
 			v.deps.logger.Info("저장된 finding verifier 결과를 재사용했습니다", "run", input.runID)
+			result.confirmed = true
 			result.findings = supported
 			result.response = checkpointResponse
 			result.rejected = len(input.findings) - len(supported)
@@ -70,6 +124,13 @@ func (v *findingVerifier) verify(ctx context.Context, input findingVerification)
 		v.deps.logger.Info("독립 finding verifier로 사용할 다른 프로바이더가 없어 결정론적 검증 결과를 사용합니다")
 		result.findings = input.findings
 		result.response = checkpointResponse
+		return result, nil
+	}
+	if input.promptLimit > 0 && llm.MessagesSize(request.Messages) > input.promptLimit {
+		v.deps.logger.Warn("필수 검증 근거가 저장소 입력 한도를 넘어 독립 검증을 생략합니다", "limit", input.promptLimit)
+		result.findings = input.findings
+		result.response = checkpointResponse
+		result.unavailable = true
 		return result, nil
 	}
 	if request.ExternalCallBudget == nil || request.ExternalCallBudget.Remaining() == 0 {
@@ -133,6 +194,7 @@ func (v *findingVerifier) verify(ctx context.Context, input findingVerification)
 		result.used = true
 		return result, fmt.Errorf("finding verifier 결과를 저장하지 못했습니다: %w", err)
 	}
+	result.confirmed = true
 	result.findings = supported
 	result.response = checkpoint.MetadataResponse()
 	result.rejected = len(input.findings) - len(supported)

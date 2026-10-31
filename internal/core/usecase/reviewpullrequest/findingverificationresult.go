@@ -9,6 +9,7 @@ type findingVerificationResult struct {
 	findings    []review.Finding
 	response    llm.Response
 	rejected    int
+	confirmed   bool
 	used        bool
 	unavailable bool
 }

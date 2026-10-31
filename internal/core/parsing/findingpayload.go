@@ -8,15 +8,16 @@ import (
 )
 
 type findingPayload struct {
-	File       string `json:"file"`
-	Line       int    `json:"line"`
-	EndLine    int    `json:"endLine"`
-	Severity   string `json:"severity"`
-	Title      string `json:"title"`
-	Body       string `json:"body"`
-	Suggestion string `json:"suggestion"`
-	Evidence   string `json:"evidence"`
-	RootCause  string `json:"rootCause"`
+	File              string `json:"file"`
+	Line              int    `json:"line"`
+	EndLine           int    `json:"endLine"`
+	Severity          string `json:"severity"`
+	Title             string `json:"title"`
+	Body              string `json:"body"`
+	Suggestion        string `json:"suggestion"`
+	Evidence          string `json:"evidence"`
+	RootCause         string `json:"rootCause"`
+	RequiresFileScope *bool  `json:"requiresFileScope"`
 }
 
 func (p findingPayload) toDomain() (review.Finding, bool) {
@@ -28,15 +29,16 @@ func (p findingPayload) toDomain() (review.Finding, bool) {
 		return review.Finding{}, false
 	}
 	finding := review.Finding{
-		File:       strings.TrimSpace(p.File),
-		Line:       p.Line,
-		EndLine:    p.EndLine,
-		Severity:   severity,
-		Title:      strings.TrimSpace(p.Title),
-		Body:       strings.TrimSpace(p.Body),
-		Suggestion: p.Suggestion,
-		Evidence:   p.Evidence,
-		RootCause:  strings.TrimSpace(p.RootCause),
+		File:              strings.TrimSpace(p.File),
+		Line:              p.Line,
+		EndLine:           p.EndLine,
+		Severity:          severity,
+		Title:             strings.TrimSpace(p.Title),
+		Body:              strings.TrimSpace(p.Body),
+		Suggestion:        p.Suggestion,
+		Evidence:          p.Evidence,
+		RootCause:         strings.TrimSpace(p.RootCause),
+		RequiresFileScope: p.RequiresFileScope == nil || *p.RequiresFileScope,
 	}
 	return finding, finding.IsValid()
 }

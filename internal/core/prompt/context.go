@@ -103,9 +103,9 @@ func (c Context) renderFiles() string {
 	var builder strings.Builder
 	builder.WriteString("<changed_files>\n")
 	for _, file := range c.Files {
-		fmt.Fprintf(&builder, "<file path=\"%s\" status=\"%s\" additions=\"%d\" deletions=\"%d\">\n", file.Path, file.Status, file.Additions, file.Deletions)
+		fmt.Fprintf(&builder, "<file path=\"%s\" status=\"%s\" additions=\"%d\" deletions=\"%d\" head_source=\"%s\">\n", file.Path, file.Status, file.Additions, file.Deletions, file.SourceScope())
 		if strings.TrimSpace(file.Patch) != "" {
-			builder.WriteString("<diff>\n")
+			fmt.Fprintf(&builder, "<diff truncated=\"%t\">\n", file.PatchTruncated)
 			builder.WriteString(strings.TrimRight(file.Patch, "\r\n"))
 			builder.WriteString("\n</diff>\n")
 		}

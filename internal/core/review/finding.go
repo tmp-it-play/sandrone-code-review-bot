@@ -3,20 +3,21 @@ package review
 import "strings"
 
 type Finding struct {
-	File         string
-	Line         int
-	EndLine      int
-	Severity     Severity
-	Title        string
-	Body         string
-	Suggestion   string
-	Evidence     string
-	RootCause    string
-	RootCauseID  Fingerprint
-	OccurrenceID Fingerprint
-	Occurrences  []Occurrence
-	Placement    Placement
-	Snapped      bool
+	File              string
+	Line              int
+	EndLine           int
+	Severity          Severity
+	Title             string
+	Body              string
+	Suggestion        string
+	Evidence          string
+	RootCause         string
+	RequiresFileScope bool
+	RootCauseID       Fingerprint
+	OccurrenceID      Fingerprint
+	Occurrences       []Occurrence
+	Placement         Placement
+	Snapped           bool
 }
 
 func (f Finding) IsValid() bool {

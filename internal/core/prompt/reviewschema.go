@@ -31,11 +31,13 @@ findings는 중요도가 높은 순서로 최대 ` + fmt.Sprintf("%d", maxFindin
       "body": "무엇이 왜 문제인지와 근거",
       "suggestion": "line이 가리키는 줄을 그대로 대체할 코드 또는 빈 문자열",
       "evidence": "diff에서 + 기호를 제외하고 들여쓰기까지 정확히 복사한 추가·변경 줄 전체",
+      "requiresFileScope": false,
       "rootCause": "같은 원인의 모든 발생 위치에서 동일하게 쓸 짧고 구체적인 원인 식별문"
     }
   ]
 }
 summary.overview는 ` + overviewRule + fileRule + `
+requiresFileScope는 누락된 import·선언·등록처럼 변경 줄 외부에 정의가 없음을 확인해야 성립하는 지적이면 true, 변경 줄만으로 증명되는 지적이면 false다.
 evidence는 <changed_files> 안의 diff에서 line부터 endLine까지 실제 추가된 연속 줄만 적는다. 가능한 가장 작은 범위를 쓰고, 한 줄로 충분하면 endLine은 0으로 둔다.
 evidence에는 diff의 + 기호를 빼고 공백과 들여쓰기를 그대로 복사한다. 삭제 줄, 문맥 줄, current_content, read_file 결과나 diff 밖의 줄은 finding의 위치 근거로 쓰지 않는다.
 evidence가 실제 추가 줄과 한 글자라도 다르면 finding을 만들지 않는다.

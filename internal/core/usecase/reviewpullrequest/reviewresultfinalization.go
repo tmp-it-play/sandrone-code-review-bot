@@ -14,6 +14,7 @@ type reviewResultFinalization struct {
 	runLease            string
 	config              setting.RepoConfig
 	execution           reviewUnitExecutionResult
+	sources             []pullrequest.ChangedFile
 	request             llm.Request
 	paths               *promptPathMap
 	trigger             review.Trigger

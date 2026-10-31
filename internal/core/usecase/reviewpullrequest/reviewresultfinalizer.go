@@ -56,10 +56,11 @@ func (f *reviewResultFinalizer) finalize(ctx context.Context, input reviewResult
 	budget := input.request.ExternalCallBudget
 	verifierRequest.ExternalCallBudget = llm.NewScopedDurableExternalCallBudget(budget.Limit(), budget.Used(), min(budget.Used()+input.verifierCallReserve, budget.Limit()), budget.Reserve)
 	verification, err := f.deps.verifier.verify(ctx, findingVerification{
+		promptLimit:       input.config.MaxPromptChars,
 		runID:             input.runID,
 		runLease:          input.runLease,
 		findings:          findings,
-		files:             input.execution.reviewed,
+		files:             input.sources,
 		request:           verifierRequest,
 		reviewerProviders: input.execution.reviewerProviders,
 		paths:             input.paths,

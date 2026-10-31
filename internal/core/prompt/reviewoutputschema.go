@@ -20,7 +20,7 @@ func ReviewOutputSchema(includeFileNotes bool) *llm.ResponseSchema {
 		summaryRequired = append(summaryRequired, "files")
 	}
 	return &llm.ResponseSchema{
-		Name: "review_result_v1",
+		Name: "review_result_v2",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -37,9 +37,9 @@ func ReviewOutputSchema(includeFileNotes bool) *llm.ResponseSchema {
 						"properties": map[string]any{
 							"file": text, "line": integer, "endLine": integer,
 							"severity": map[string]any{"type": "string", "enum": []string{"critical", "major", "minor", "nit"}},
-							"title":    text, "body": text, "suggestion": text, "evidence": text, "rootCause": text,
+							"title":    text, "body": text, "suggestion": text, "evidence": text, "rootCause": text, "requiresFileScope": map[string]any{"type": "boolean"},
 						},
-						"required":             []string{"file", "line", "endLine", "severity", "title", "body", "suggestion", "evidence", "rootCause"},
+						"required":             []string{"file", "line", "endLine", "severity", "title", "body", "suggestion", "evidence", "rootCause", "requiresFileScope"},
 						"additionalProperties": false,
 					},
 				},

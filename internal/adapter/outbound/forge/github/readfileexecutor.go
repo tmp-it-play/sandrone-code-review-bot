@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"unicode/utf8"
 
@@ -29,6 +30,8 @@ func (e *ReadFileExecutor) Definitions() []llm.Tool {
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"end_line":   map[string]any{"type": "integer", "minimum": 1, "description": "마지막 줄 번호(포함). 생략하면 출력 한도까지 읽는다."},
+				"start_line": map[string]any{"type": "integer", "minimum": 1, "description": "읽기 시작할 1부터의 줄 번호. 기본은 첫 줄."},
 				"path": map[string]any{
 					"type":        "string",
 					"description": "저장소 루트 기준 파일 경로",
@@ -52,7 +55,9 @@ func (e *ReadFileExecutor) Execute(ctx context.Context, call llm.ToolCall) (stri
 	e.mutex.Unlock()
 
 	var arguments struct {
-		Path string `json:"path"`
+		Path      string `json:"path"`
+		StartLine *int   `json:"start_line"`
+		EndLine   *int   `json:"end_line"`
 	}
 	if err := json.Unmarshal([]byte(call.Arguments), &arguments); err != nil {
 		return "인자를 해석하지 못했다. path를 문자열로 넘긴다.", nil
@@ -60,11 +65,42 @@ func (e *ReadFileExecutor) Execute(ctx context.Context, call llm.ToolCall) (stri
 	if arguments.Path == "" {
 		return "path가 비어 있다.", nil
 	}
+	start := 1
+	if arguments.StartLine != nil {
+		start = *arguments.StartLine
+	}
+	if start < 1 || arguments.EndLine != nil && *arguments.EndLine < start {
+		return "줄 범위가 올바르지 않다.", nil
+	}
 	body, err := e.content.File(ctx, e.target, arguments.Path, e.ref)
 	if err != nil {
 		return fmt.Sprintf("%s 파일을 읽지 못했다.", arguments.Path), nil
 	}
 	body = e.masker.Mask(body)
+	if start > 1 || arguments.EndLine != nil {
+		for line := 1; line < start; line++ {
+			_, tail, found := strings.Cut(body, "\n")
+			if !found || tail == "" {
+				return "요청한 시작 줄이 파일 끝을 넘었다.", nil
+			}
+			body = tail
+		}
+		if arguments.EndLine != nil {
+			end := 0
+			for line := start; ; line++ {
+				newline := strings.IndexByte(body[end:], '\n')
+				if newline < 0 {
+					break
+				}
+				end += newline + 1
+				if line == *arguments.EndLine {
+					body = body[:end]
+					break
+				}
+			}
+		}
+		body = fmt.Sprintf("[파일 일부: 원문 %d번째 줄부터]\n%s", start, body)
+	}
 	if e.maxChars > 0 && len(body) > e.maxChars {
 		limit := e.maxChars
 		for limit > 0 && !utf8.RuneStart(body[limit]) {

@@ -814,6 +814,7 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 		runLease:            runLease,
 		config:              config,
 		execution:           unitExecution,
+		sources:             loaded,
 		request:             reviewRequest,
 		paths:               pathMap,
 		trigger:             task.Trigger,
@@ -1046,12 +1047,8 @@ func (u *UseCase) loadSources(ctx context.Context, target pullrequest.Target, fi
 				}
 				return nil, fmt.Errorf("%s source를 읽지 못했습니다: %w", u.deps.Masker.Mask(file.Path), err)
 			}
-			content = u.deps.Masker.Mask(content)
-			if len(content) > limit {
-				content = truncateUTF8(content, limit)
-				file.Truncated = true
-			}
-			file.Content = content
+			file.Content = u.deps.Masker.Mask(content)
+			file = file.WithSourceLimit(limit)
 		}
 		loaded = append(loaded, file)
 	}

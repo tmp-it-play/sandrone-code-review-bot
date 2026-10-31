@@ -7,6 +7,7 @@ import (
 )
 
 type findingVerification struct {
+	promptLimit       int
 	runID             uint64
 	runLease          string
 	findings          []review.Finding
