@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
@@ -87,7 +89,14 @@ func (r *Reconciler) reconcileRun(ctx context.Context, run reviewworkflow.Run) e
 			detail := "저장된 리뷰 게시 payload 재개 직전에 base 또는 head가 변경되었습니다"
 			invalidation := r.publicationInvalidation(run, detail, nil)
 			return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusSuperseded, detail, r.resolveSupersedingHeadSHA(ctx, target), false, invalidation)
+		} else if errors.Is(err, reviewworkflow.ErrPublicationAttemptsExhausted) {
+			r.deps.Checks.Complete(ctx, target, summaryProgressMarkers(storedPublication, storedPublication.Payload.Body), progresscomment.CheckConclusionNeutral, reviewworkflow.ErrPublicationAttemptsExhausted.Error())
+			return r.finishWithLease(ctx, run, leaseToken, reviewworkflow.RunStatusFailed, err.Error(), "", false, nil)
 		} else if err != nil {
+			var scheduled interface{ RetryAt() time.Time }
+			if errors.As(err, &scheduled) {
+				return err
+			}
 			return r.resolveUnverified(ctx, run, leaseToken, err)
 		}
 	} else if published {

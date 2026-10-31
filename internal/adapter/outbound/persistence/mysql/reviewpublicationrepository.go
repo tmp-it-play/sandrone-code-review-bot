@@ -229,11 +229,12 @@ func (r *ReviewPublicationStore) CompleteReviewPublication(ctx context.Context, 
 		updated := transaction.Model(&model.ReviewPublication{}).
 			Where("review_run_id = ? AND status = ?", runID, reviewworkflow.ReviewPublicationStatusPrepared).
 			Updates(map[string]any{
-				"status":       reviewworkflow.ReviewPublicationStatusCompleted,
-				"channel":      channel,
-				"external_id":  externalID,
-				"completed_at": completedAt,
-				"updated_at":   completedAt,
+				"status":          reviewworkflow.ReviewPublicationStatusCompleted,
+				"next_attempt_at": nil,
+				"channel":         channel,
+				"external_id":     externalID,
+				"completed_at":    completedAt,
+				"updated_at":      completedAt,
 			})
 		if updated.Error != nil {
 			return updated.Error

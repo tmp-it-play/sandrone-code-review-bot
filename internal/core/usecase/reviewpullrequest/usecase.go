@@ -14,6 +14,7 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/leaseheartbeat"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/llm"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/port/outbound"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
@@ -123,6 +124,20 @@ func (u *UseCase) execute(ctx context.Context, task job.ReviewJob, outcome *revi
 			return nil
 		}
 		if publicationClaimed {
+			if errors.Is(cause, reviewworkflow.ErrPublicationAttemptsExhausted) {
+				detail := u.deps.Masker.Mask(cause.Error())
+				status, err := u.finishWorkflowWithOutcome(ctx, activeRunID, activeRunLease, reviewworkflow.RunStatusFailed, review.OutcomeFailed, detail, false)
+				if err != nil {
+					return errors.Join(cause, err)
+				}
+				if status == reviewworkflow.RunStatusFailed {
+					u.deps.Checks.Complete(ctx, task.Target, progress.Markers(), progresscomment.CheckConclusionNeutral, reviewworkflow.ErrPublicationAttemptsExhausted.Error())
+					*outcome = review.OutcomeFailed
+				} else {
+					*outcome = reviewOutcomeOf(status)
+				}
+				return nil
+			}
 			if task.FinalAttempt && !publicationEffectsStarted && !publicationWasResumed {
 				detail := u.deps.Masker.Mask(message + ": " + cause.Error())
 				actualStatus, finishErr := u.finishWorkflowWithOutcomeAndProgress(ctx, activeRunID, activeRunLease, reviewworkflow.RunStatusFailed, review.OutcomeFailed, detail, false, progress)

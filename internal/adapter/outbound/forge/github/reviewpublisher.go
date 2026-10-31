@@ -30,21 +30,37 @@ func (p *ReviewPublisher) VerifyTarget(ctx context.Context, target pullrequest.T
 	return verifyTarget(ctx, client, target)
 }
 
+func (p *ReviewPublisher) FindReview(ctx context.Context, target pullrequest.Target, marker string) (int64, bool, error) {
+	client, err := p.clients.Client(ctx, target.InstallationID)
+	if err != nil {
+		return 0, false, err
+	}
+	existing, err := findReview(ctx, client, target, marker)
+	if err != nil || existing == nil {
+		return 0, false, err
+	}
+	return existing.GetID(), true, nil
+}
+
 func (p *ReviewPublisher) SubmitReview(ctx context.Context, target pullrequest.Target, marker string, body string, comments []review.InlineComment) (int64, error) {
 	client, err := p.clients.Client(ctx, target.InstallationID)
 	if err != nil {
 		return 0, err
 	}
-	reviewID, exists, err := findReview(ctx, client, target, marker)
+	existing, err := findReview(ctx, client, target, marker)
 	if err != nil {
 		return 0, err
 	}
-	if exists {
+	if existing != nil {
+		reviewID := existing.GetID()
 		verifiedTarget, verifyErr := verifyTarget(ctx, client, target)
 		if verifyErr != nil {
 			return 0, verifyErr
 		}
 		target = verifiedTarget
+		if existing.GetBody() == review.SanitizePublicBody(body) {
+			return reviewID, nil
+		}
 		if _, _, err := client.PullRequests.UpdateReview(ctx, target.Owner, target.Repository, target.Number, reviewID, review.SanitizePublicBody(body)); err != nil {
 			return 0, fmt.Errorf("기존 리뷰 본문을 갱신하지 못했습니다: %w", withGitHubRetryAt(err))
 		}
@@ -80,9 +96,9 @@ func (p *ReviewPublisher) SubmitReview(ctx context.Context, target pullrequest.T
 	created, _, err := client.PullRequests.CreateReview(ctx, target.Owner, target.Repository, target.Number, request)
 	if err != nil {
 		createErr := fmt.Errorf("리뷰를 제출하지 못했습니다: %w", withGitHubRetryAt(err))
-		reconciledID, exists, reconcileErr := findReview(ctx, client, target, marker)
-		if reconcileErr == nil && exists {
-			return reconciledID, nil
+		existing, reconcileErr := findReview(ctx, client, target, marker)
+		if reconcileErr == nil && existing != nil {
+			return existing.GetID(), nil
 		}
 		if reconcileErr == nil && inlineReviewRejected(err) {
 			return 0, errors.Join(publication.ErrInlineReviewRejected, createErr)
@@ -178,11 +194,15 @@ func (p *ReviewPublisher) InvalidateReview(ctx context.Context, target pullreque
 func invalidateMarker(ctx context.Context, client *gh.Client, target pullrequest.Target, marker string, reason string) error {
 	cleanupErr := invalidateReviewMarker(ctx, client, target, marker, reason)
 	invalidBody := strings.TrimSpace(reason) + "\n\n" + marker
-	commentIDs, err := findComments(ctx, client, target, marker)
+	comments, err := findComments(ctx, client, target, marker)
 	if err != nil {
 		cleanupErr = errors.Join(cleanupErr, err)
 	} else {
-		for _, commentID := range commentIDs {
+		for _, comment := range comments {
+			if comment.Body == invalidBody {
+				continue
+			}
+			commentID := comment.ID
 			if _, _, editErr := client.Issues.EditComment(ctx, target.Owner, target.Repository, commentID, &gh.IssueComment{Body: gh.Ptr(invalidBody)}); editErr != nil {
 				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("오래된 리뷰 코멘트 %d를 무효화하지 못했습니다: %w", commentID, editErr))
 			}
@@ -250,7 +270,7 @@ func (p *ReviewPublisher) FindComment(ctx context.Context, target pullrequest.Ta
 	return findComment(ctx, client, target, marker)
 }
 
-func (p *ReviewPublisher) FindComments(ctx context.Context, target pullrequest.Target, marker string) ([]int64, error) {
+func (p *ReviewPublisher) FindComments(ctx context.Context, target pullrequest.Target, marker string) ([]pullrequest.Comment, error) {
 	client, err := p.clients.Client(ctx, target.InstallationID)
 	if err != nil {
 		return nil, err
@@ -263,12 +283,12 @@ func reviewExists(ctx context.Context, client *gh.Client, target pullrequest.Tar
 	return len(items) > 0, err
 }
 
-func findReview(ctx context.Context, client *gh.Client, target pullrequest.Target, marker string) (int64, bool, error) {
+func findReview(ctx context.Context, client *gh.Client, target pullrequest.Target, marker string) (*gh.PullRequestReview, error) {
 	items, err := findReviews(ctx, client, target, marker)
 	if err != nil || len(items) == 0 {
-		return 0, false, err
+		return nil, err
 	}
-	return items[len(items)-1].GetID(), true, nil
+	return items[len(items)-1], nil
 }
 
 func findReviews(ctx context.Context, client *gh.Client, target pullrequest.Target, marker string) ([]*gh.PullRequestReview, error) {
@@ -277,7 +297,7 @@ func findReviews(ctx context.Context, client *gh.Client, target pullrequest.Targ
 	for {
 		reviews, response, err := client.PullRequests.ListReviews(ctx, target.Owner, target.Repository, target.Number, options)
 		if err != nil {
-			return nil, fmt.Errorf("리뷰 목록을 읽지 못했습니다: %w", err)
+			return nil, fmt.Errorf("리뷰 목록을 읽지 못했습니다: %w", withGitHubRetryAt(err))
 		}
 		for _, item := range reviews {
 			if item.GetUser().GetType() == "Bot" && strings.Contains(item.GetBody(), marker) {
@@ -313,12 +333,12 @@ func findComment(ctx context.Context, client *gh.Client, target pullrequest.Targ
 		return 0, false, err
 	}
 	found := comments[len(comments)-1]
-	return found, true, nil
+	return found.ID, true, nil
 }
 
-func findComments(ctx context.Context, client *gh.Client, target pullrequest.Target, marker string) ([]int64, error) {
+func findComments(ctx context.Context, client *gh.Client, target pullrequest.Target, marker string) ([]pullrequest.Comment, error) {
 	options := &gh.IssueListCommentsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
-	found := make([]int64, 0)
+	found := make([]pullrequest.Comment, 0)
 	for {
 		comments, response, listErr := client.Issues.ListComments(ctx, target.Owner, target.Repository, target.Number, options)
 		if listErr != nil {
@@ -326,7 +346,7 @@ func findComments(ctx context.Context, client *gh.Client, target pullrequest.Tar
 		}
 		for _, comment := range comments {
 			if comment.GetUser().GetType() == "Bot" && strings.Contains(comment.GetBody(), marker) {
-				found = append(found, comment.GetID())
+				found = append(found, pullrequest.Comment{ID: comment.GetID(), Body: comment.GetBody()})
 			}
 		}
 		if response == nil || response.NextPage == 0 {

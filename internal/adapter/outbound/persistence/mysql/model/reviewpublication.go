@@ -17,6 +17,9 @@ type ReviewPublication struct {
 	Status           string    `gorm:"size:20;not null;index"`
 	Channel          string    `gorm:"size:24"`
 	ExternalID       int64
+	Attempts         int `gorm:"not null;default:0"`
+	NextAttemptAt    *time.Time
+	LastFailure      string `gorm:"type:text"`
 	PreparedAt       time.Time
 	CompletedAt      *time.Time
 	ExpiresAt        time.Time `gorm:"not null;index"`

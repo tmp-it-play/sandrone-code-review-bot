@@ -11,13 +11,16 @@ import (
 
 func (r *Reconciler) replaceTerminalProgressComment(ctx context.Context, target pullrequest.Target, marker string, reason string) error {
 	body := strings.TrimSpace(reason) + "\n\n" + strings.TrimSpace(marker)
-	commentIDs, err := r.deps.Publisher.FindComments(ctx, target, marker)
+	comments, err := r.deps.Publisher.FindComments(ctx, target, marker)
 	if err != nil {
 		return err
 	}
 	var updateErr error
-	for _, commentID := range commentIDs {
-		updateErr = errors.Join(updateErr, r.deps.Publisher.UpdateComment(ctx, target, commentID, body))
+	for _, comment := range comments {
+		if comment.Body == body {
+			continue
+		}
+		updateErr = errors.Join(updateErr, r.deps.Publisher.UpdateComment(ctx, target, comment.ID, body))
 	}
 	r.deps.Checks.Complete(context.WithoutCancel(ctx), target, []string{marker}, progresscomment.CheckConclusionNeutral, reason)
 	return updateErr

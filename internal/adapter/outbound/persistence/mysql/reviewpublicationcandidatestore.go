@@ -37,6 +37,7 @@ func (s *ReviewPublicationCandidateStore) PublicationCandidates(ctx context.Cont
 	var entries []model.ReviewRun
 	if err := s.database.WithContext(ctx).
 		Where("id > ? AND id <= ? AND status = ? AND heartbeat_at <= ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?)", afterID, throughID, string(reviewworkflow.RunStatusPublishing), before, before).
+		Where("NOT EXISTS (SELECT 1 FROM review_publications p WHERE p.review_run_id = review_runs.id AND p.status = ? AND p.next_attempt_at > ?)", reviewworkflow.ReviewPublicationStatusPrepared, before).
 		Order("id ASC").Limit(limit).Find(&entries).Error; err != nil {
 		return nil, fmt.Errorf("게시 조정 대상 리뷰 실행을 읽지 못했습니다: %w", err)
 	}

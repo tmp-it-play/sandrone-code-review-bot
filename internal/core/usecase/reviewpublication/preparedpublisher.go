@@ -8,11 +8,14 @@ import (
 	"github.com/it-play/sandrone-code-review-bot/internal/core/progresscomment"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/publication"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/pullrequest"
+	"github.com/it-play/sandrone-code-review-bot/internal/core/review"
 	"github.com/it-play/sandrone-code-review-bot/internal/core/reviewworkflow"
 )
 
 const reviewSummaryMutationLease = 35 * time.Minute
 const reviewSummaryMutationTimeout = 30 * time.Minute
+
+var errFallbackAlreadyPublished = errors.New("요약 코멘트에 인라인 지적이 이미 게시되어 있습니다")
 
 type PreparedPublisher struct {
 	deps Dependencies
@@ -24,38 +27,61 @@ func New(deps Dependencies) *PreparedPublisher {
 
 func (p *PreparedPublisher) Publish(ctx context.Context, target pullrequest.Target, runID uint64, runLeaseToken string, prepared reviewworkflow.ReviewPublication) error {
 	if prepared.Status == reviewworkflow.ReviewPublicationStatusCompleted {
-		if prepared.PayloadHash == "" {
-			return nil
-		}
-		if prepared.Channel == reviewworkflow.ReviewPublicationChannelComment && len(prepared.Payload.Comments) > 0 {
-			verifiedTarget, err := p.deps.Publisher.VerifyTarget(ctx, target)
-			if err != nil {
-				return err
-			}
-			target = verifiedTarget
-			_, err = p.publishSummary(ctx, target, prepared, prepared.Payload.FallbackBody)
-			return err
-		}
-		_, _, err := p.publishEffects(ctx, target, prepared)
-		return err
+		return nil
 	}
 	if prepared.Status != reviewworkflow.ReviewPublicationStatusPrepared {
 		return errors.New("게시할 수 없는 리뷰 publication 상태입니다")
 	}
-	channel, externalID, err := p.publishEffects(ctx, target, prepared)
+	attempt, err := p.deps.Receipts.BeginPublicationAttempt(ctx, runID, runLeaseToken)
+	if errors.Is(err, reviewworkflow.ErrPublicationAttemptsExhausted) {
+		return p.confirmFinalAttempt(ctx, target, runID, runLeaseToken, err)
+	}
 	if err != nil {
 		return err
 	}
-	return p.Complete(ctx, runID, runLeaseToken, prepared.Marker, channel, externalID, prepared.ExpiresAt)
+	prepared.Channel = attempt.Channel
+	channel, externalID, err := p.publishEffects(ctx, target, prepared, runLeaseToken)
+	if err == nil {
+		p.deps.Checks.Complete(context.WithoutCancel(ctx), target, summaryProgressMarkers(prepared, prepared.Payload.Body), progresscomment.CheckConclusionSuccess, reviewCompletedCheckMessage)
+		err = p.Complete(ctx, runID, runLeaseToken, prepared.Marker, channel, externalID, prepared.ExpiresAt)
+	}
+	if err == nil || errors.Is(err, publication.ErrTargetChanged) || errors.Is(err, reviewworkflow.ErrRunSuperseded) {
+		return err
+	}
+	var retryAfter time.Time
+	var scheduled interface{ RetryAt() time.Time }
+	if errors.As(err, &scheduled) {
+		retryAfter = scheduled.RetryAt()
+	}
+	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	next, storeErr := p.deps.Receipts.RecordPublicationFailure(storeCtx, runID, runLeaseToken, attempt.Number, retryAfter, err.Error())
+	if storeErr != nil {
+		return errors.Join(storeErr, err)
+	}
+	if attempt.Number == reviewworkflow.MaxPublicationAttempts {
+		if !next.IsZero() {
+			return &publication.RetryAtError{At: next, Cause: err}
+		}
+		return p.confirmFinalAttempt(storeCtx, target, runID, runLeaseToken, errors.Join(reviewworkflow.ErrPublicationAttemptsExhausted, err))
+	}
+	return &publication.RetryAtError{At: next, Cause: err}
 }
 
-func (p *PreparedPublisher) publishEffects(ctx context.Context, target pullrequest.Target, prepared reviewworkflow.ReviewPublication) (string, int64, error) {
+func (p *PreparedPublisher) publishEffects(ctx context.Context, target pullrequest.Target, prepared reviewworkflow.ReviewPublication, leaseToken string) (string, int64, error) {
 	verifiedTarget, err := p.deps.Publisher.VerifyTarget(ctx, target)
 	if err != nil {
 		return "", 0, err
 	}
 	target = verifiedTarget
-	commentID, err := p.publishSummary(ctx, target, prepared, prepared.Payload.Body)
+	if prepared.Channel == reviewworkflow.ReviewPublicationChannelComment {
+		id, err := p.publishSummaryComment(ctx, target, prepared, prepared.Payload.FallbackBody)
+		return prepared.Channel, id, err
+	}
+	commentID, err := p.publishSummaryComment(ctx, target, prepared, prepared.Payload.Body)
+	if errors.Is(err, errFallbackAlreadyPublished) {
+		return p.selectAndPublishFallback(ctx, target, prepared, leaseToken)
+	}
 	if err != nil {
 		return "", 0, err
 	}
@@ -73,16 +99,7 @@ func (p *PreparedPublisher) publishEffects(ctx context.Context, target pullreque
 	}
 	if errors.Is(submitErr, publication.ErrInlineReviewRejected) {
 		p.deps.Logger.Warn("인라인 리뷰를 제출하지 못해 요약 코멘트에 지적을 포함합니다", "target", target.Reference(), "error", submitErr)
-		verifiedTarget, verifyErr := p.deps.Publisher.VerifyTarget(ctx, target)
-		if verifyErr != nil {
-			return "", 0, errors.Join(submitErr, verifyErr)
-		}
-		target = verifiedTarget
-		fallbackID, commentErr := p.publishSummary(ctx, target, prepared, prepared.Payload.FallbackBody)
-		if commentErr != nil {
-			return "", 0, errors.Join(submitErr, commentErr)
-		}
-		return reviewworkflow.ReviewPublicationChannelComment, fallbackID, nil
+		return p.selectAndPublishFallback(ctx, target, prepared, leaseToken)
 	}
 	if submitErr != nil {
 		return "", 0, submitErr
@@ -90,12 +107,16 @@ func (p *PreparedPublisher) publishEffects(ctx context.Context, target pullreque
 	return reviewworkflow.ReviewPublicationChannelReview, reviewID, nil
 }
 
-func (p *PreparedPublisher) publishSummary(ctx context.Context, target pullrequest.Target, prepared reviewworkflow.ReviewPublication, body string) (int64, error) {
-	commentID, err := p.publishSummaryComment(ctx, target, prepared, body)
-	if err == nil {
-		p.deps.Checks.Complete(context.WithoutCancel(ctx), target, summaryProgressMarkers(prepared, body), progresscomment.CheckConclusionSuccess, reviewCompletedCheckMessage)
+func (p *PreparedPublisher) selectAndPublishFallback(ctx context.Context, target pullrequest.Target, prepared reviewworkflow.ReviewPublication, token string) (string, int64, error) {
+	if err := p.deps.Receipts.SelectPublicationFallback(ctx, prepared.RunID, token); err != nil {
+		return "", 0, err
 	}
-	return commentID, err
+	verified, err := p.deps.Publisher.VerifyTarget(ctx, target)
+	if err != nil {
+		return "", 0, err
+	}
+	id, err := p.publishSummaryComment(ctx, verified, prepared, prepared.Payload.FallbackBody)
+	return reviewworkflow.ReviewPublicationChannelComment, id, err
 }
 
 func (p *PreparedPublisher) publishSummaryComment(ctx context.Context, target pullrequest.Target, prepared reviewworkflow.ReviewPublication, body string) (int64, error) {
@@ -161,36 +182,51 @@ func (p *PreparedPublisher) updateSummaryComments(ctx context.Context, target pu
 		}
 		markers = append(markers, progressMarker)
 	}
-	commentIDs := make([]int64, 0)
+	comments := make([]pullrequest.Comment, 0)
 	seen := make(map[int64]struct{})
 	for _, marker := range markers {
 		if marker == "" {
 			continue
 		}
-		foundIDs, err := p.deps.Publisher.FindComments(ctx, target, marker)
+		foundComments, err := p.deps.Publisher.FindComments(ctx, target, marker)
 		if err != nil {
 			return 0, false, false, err
 		}
-		for _, commentID := range foundIDs {
+		for _, comment := range foundComments {
+			commentID := comment.ID
 			if _, exists := seen[commentID]; exists {
 				continue
 			}
 			seen[commentID] = struct{}{}
-			commentIDs = append(commentIDs, commentID)
+			comments = append(comments, comment)
 		}
 	}
-	if len(commentIDs) == 0 {
+	if len(comments) == 0 {
 		return 0, false, false, nil
 	}
 	var updateErr error
 	mutationAttempted := false
-	for _, commentID := range commentIDs {
+	publicBody := review.SanitizePublicBody(body)
+	if len(prepared.Payload.Comments) > 0 && body == prepared.Payload.Body {
+		fallback := review.SanitizePublicBody(prepared.Payload.FallbackBody)
+		if fallback != publicBody {
+			for _, comment := range comments {
+				if comment.Body == fallback {
+					return comment.ID, true, false, errFallbackAlreadyPublished
+				}
+			}
+		}
+	}
+	for _, comment := range comments {
+		if comment.Body == publicBody {
+			continue
+		}
 		mutationAttempted = true
-		if err := p.deps.Publisher.UpdateComment(ctx, target, commentID, body); err != nil {
+		if err := p.deps.Publisher.UpdateComment(ctx, target, comment.ID, publicBody); err != nil {
 			updateErr = errors.Join(updateErr, err)
 		}
 	}
-	return commentIDs[len(commentIDs)-1], true, mutationAttempted, updateErr
+	return comments[len(comments)-1].ID, true, mutationAttempted, updateErr
 }
 
 func summaryProgressMarkers(prepared reviewworkflow.ReviewPublication, body string) []string {

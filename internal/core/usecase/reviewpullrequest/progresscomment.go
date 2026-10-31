@@ -211,6 +211,12 @@ func (u *UseCase) findProgressComment(ctx context.Context, target pullrequest.Ta
 }
 
 func (u *UseCase) reconcileTerminalProgress(ctx context.Context, target pullrequest.Target, run reviewworkflow.Run, progress *progressSession) error {
+	if run.Status == reviewworkflow.RunStatusFailed {
+		exhausted, err := u.deps.Publications.PublicationAttemptsExhausted(ctx, run.ID)
+		if err != nil || exhausted {
+			return err
+		}
+	}
 	notice, reconcile := terminalProgressNotice(run.Status)
 	if !reconcile {
 		return nil
