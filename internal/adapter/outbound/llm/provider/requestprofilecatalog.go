@@ -39,7 +39,7 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 			UseMaxCompletionTokens:  true,
 			StructuredOutput:        true,
 		}
-	case "openrouter/nvidia/nemotron-3-super-120b-a12b":
+	case "openrouter/nvidia/nemotron-3.5-super-vl":
 		return RequestProfile{
 			UseRequestTemperature: true,
 			ReasoningEnabled:      boolValue(false),
@@ -67,6 +67,7 @@ func RequestProfileFor(providerName string, model string) RequestProfile {
 		}
 	case "cloudflare-glm/@cf/zai-org/glm-4.7-flash", "cloudflare-gemma/@cf/google/gemma-4-26b-a4b-it":
 		return RequestProfile{
+			ThinkingEnabled:        boolValue(false),
 			ParallelToolCalls:      boolValue(false),
 			OutputTokenLimit:       8192,
 			UseMaxCompletionTokens: true,
