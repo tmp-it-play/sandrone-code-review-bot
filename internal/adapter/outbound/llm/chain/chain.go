@@ -85,7 +85,7 @@ func (c *Chain) RouteCapacitiesFor(request llm.Request) []llm.RouteCapacity {
 
 func (c *Chain) PolicyHashInputs(request llm.Request) llm.PolicyHashInputs {
 	identity := llm.PolicyHashInputs{
-		Version:               "llm-routing-v8",
+		Version:               "llm-routing-v9",
 		TaskRole:              request.TaskRole,
 		DataClassification:    request.DataClassification,
 		RequestedProviders:    normalizedNames(request.Providers),
@@ -343,6 +343,9 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: attemptKind, RetryAt: retryAt, Invoked: invoked, Adaptable: adaptable, Cause: attemptErr})
 		logFields := []any{"provider", candidate.Name(), "outcome", outcome, "status", status, "reason", reason}
 		logFields = append(logFields, providerFailureLogFields(failure)...)
+		if invoked && (outcome == "incomplete" || outcome == "invalid_json" || outcome == "invalid_semantic_response") {
+			logFields = append(logFields, responseFailureLogFields(candidateRequest, response, candidate.RequestPolicy(candidateRequest), observedElapsed)...)
+		}
 		c.logger.Warn("프로바이더 호출에 실패해 다음으로 넘어간다", logFields...)
 		release()
 		if request.FailFastOnIncomplete && errors.Is(attemptErr, ErrIncompleteResponse) {
@@ -470,8 +473,6 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 				response.ToolExecutions += toolExecutions
 				return models.Apply(response), nil
 			}
-			messages = append(messages, llm.Message{Role: llm.RoleUser, Content: "도구를 호출하지 말고 요청한 JSON 객체만 최종 응답으로 반환하세요."})
-			tools = nil
 			break
 		}
 		messages = append(messages, llm.Message{
@@ -492,14 +493,14 @@ func (c *Chain) attempt(ctx context.Context, candidate outbound.Provider, reques
 			})
 		}
 		if request.ExternalCallBudget.Remaining() < 2 {
-			tools = nil
+			break
 		}
 	}
 	final := request
-	final.Messages = messages
+	final.Messages = finalResponseMessages(messages, request.ForceJSON)
 	final.Tools = nil
 	if request.RequireCompletePrompt {
-		fitted, fits := fitCompletePrompt(request, messages, nil, candidate.PromptLimit())
+		fitted, fits := fitCompletePrompt(request, final.Messages, nil, candidate.PromptLimit())
 		if !fits {
 			return llm.Response{Usage: accumulated, ToolExecutions: toolExecutions}, ErrCompletePromptLimitExceeded
 		}
