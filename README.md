@@ -126,7 +126,7 @@ sandrone:
 
 한 번의 리뷰에는 최대 25개의 인라인 코멘트를 남깁니다. 큰 PR은 아직 검토하지 않은 파일부터 처리합니다. 모델이 바뀌면 그 모델의 입력·출력 한도에 맞춰 남은 파일로 묶음을 다시 구성합니다. 완료된 파일은 재시도에서도 제외합니다. 외부 AI 서비스의 사용량 제한이나 일시적인 장애로 리뷰가 지연될 수 있으며, 검토하지 못한 파일이 있으면 결과에 표시합니다.
 
-운영자가 `FLASH_NEXT_API_KEY`를 설정하면 [Flash Next](https://jeb.https.gsmsv.site/models/flash-next/docs)가 마지막 예비 모델로 활성화됩니다. 파일 읽기 도구를 지원하고 한 번에 한 요청을 처리합니다. 리뷰·요약·답글·문체 보정에만 사용하며, 비공개 코드는 `SANDRONE_PRIVATE_CODE_PROVIDERS`에 `flash-next`를 명시해야 전송됩니다.
+운영자가 `FLASH_NEXT_API_KEY`를 설정하면 [Flash Next](https://jeb.https.gsmsv.site/models/flash-next/docs)가 Groq·Gemini 다음 순서로 활성화됩니다. 파일 읽기 도구를 지원하고 한 번에 한 요청을 처리합니다. 리뷰·요약·답글·문체 보정에만 사용하며, 비공개 코드는 `SANDRONE_PRIVATE_CODE_PROVIDERS`에 `flash-next`를 명시해야 전송됩니다.
 
 ## 문체 프리셋
 

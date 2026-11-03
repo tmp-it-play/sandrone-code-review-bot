@@ -11,7 +11,7 @@ func NewCatalog() Catalog {
 	verifiedRoles := supportedRoles()
 	promptContractRoles := supportedPromptContractRoles()
 	return Catalog{
-		order: []string{"groq", "gemini", "openrouter", "nvidia", "local", "mistral", "cloudflare-glm", "cloudflare-gemma", "flash-next"},
+		order: []string{"groq", "gemini", "flash-next", "openrouter", "nvidia", "local", "mistral", "cloudflare-glm", "cloudflare-gemma"},
 		descriptors: map[string]Descriptor{
 			"flash-next": {
 				Name:           "flash-next",
