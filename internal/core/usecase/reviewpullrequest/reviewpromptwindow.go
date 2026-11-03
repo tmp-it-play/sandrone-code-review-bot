@@ -26,11 +26,11 @@ func (w reviewPromptWindow) plan(limit, output int) (llm.PromptWindow, bool) {
 		n := low + (high-low)/2
 		part := w
 		part.files = w.files[:n]
-		if n > 1 && estimatedReviewOutputTokens(part.files, w.planner.includeFileNotes(), w.planner.RoutePolicy.maximumFindings) > w.planner.RoutePolicy.targetOutput {
+		messages := part.messages(part.files)
+		if w.planner.RoutePolicy.ShouldSplit(part.files, messagesSize(messages), w.planner.includeFileNotes()) {
 			high = n - 1
 			continue
 		}
-		messages := part.messages(part.files)
 		if limit > 0 && messagesSize(messages) > limit {
 			if n > 1 {
 				high = n - 1

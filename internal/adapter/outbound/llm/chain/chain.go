@@ -85,7 +85,7 @@ func (c *Chain) RouteCapacitiesFor(request llm.Request) []llm.RouteCapacity {
 
 func (c *Chain) PolicyHashInputs(request llm.Request) llm.PolicyHashInputs {
 	identity := llm.PolicyHashInputs{
-		Version:               "llm-routing-v9",
+		Version:               "llm-routing-v10",
 		TaskRole:              request.TaskRole,
 		DataClassification:    request.DataClassification,
 		RequestedProviders:    normalizedNames(request.Providers),
@@ -178,12 +178,6 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 		if outputLimit <= 0 {
 			outputLimit = requestPolicy.MaxOutputTokens
 		}
-		if request.RequiredOutputTokens > 0 && outputLimit < request.RequiredOutputTokens {
-			cause := fmt.Errorf("프로바이더 출력 한도 %d token이 필요한 %d token보다 작습니다", outputLimit, request.RequiredOutputTokens)
-			collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: llm.CompletionAttemptOutputLimit, Adaptable: true, Cause: cause})
-			c.logger.Info("출력 한도가 요청에 부족해 프로바이더를 건너뜁니다", "provider", candidate.Name(), "limit", outputLimit, "required", request.RequiredOutputTokens)
-			continue
-		}
 		var tools []llm.Tool
 		if candidate.Capability().ToolCalling && request.ExternalCallBudget.Remaining() >= 2 {
 			tools = definitions
@@ -200,7 +194,7 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 			fits = false
 			if budget > 0 || candidate.PromptLimit() <= 0 {
 				window, usable := request.PlanWindow(budget, outputLimit)
-				if usable && window.Items > 0 && window.RequiredOutputTokens <= outputLimit && requestFits(window.Messages, tools, candidate.PromptLimit()) {
+				if usable && window.Items > 0 && requestFits(window.Messages, tools, candidate.PromptLimit()) {
 					candidateRequest.Messages = window.Messages
 					candidateRequest.FitMessages = window.FitMessages
 					candidateRequest.MaxOutputTokens = window.MaxOutputTokens
@@ -219,11 +213,28 @@ func (c *Chain) Complete(ctx context.Context, request llm.Request, executor outb
 				"provider", candidate.Name(), "limit", candidate.PromptLimit())
 			continue
 		}
+		requestPolicy = candidate.RequestPolicy(candidateRequest)
+		outputLimit = requestPolicy.UsableOutputTokens
+		if outputLimit <= 0 {
+			outputLimit = requestPolicy.MaxOutputTokens
+		}
+		if candidateRequest.RequiredOutputTokens > 0 && outputLimit < candidateRequest.RequiredOutputTokens {
+			cause := fmt.Errorf("프로바이더 출력 한도 %d token이 필요한 %d token보다 작습니다", outputLimit, candidateRequest.RequiredOutputTokens)
+			collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: llm.CompletionAttemptOutputLimit, Adaptable: true, Cause: cause})
+			c.logger.Info("출력 한도가 요청에 부족해 프로바이더를 건너뜁니다", "provider", candidate.Name(), "limit", outputLimit, "required", candidateRequest.RequiredOutputTokens)
+			continue
+		}
 		release, acquired := c.acquireProvider(candidate)
 		if !acquired {
 			collector.add(llm.CompletionAttempt{Provider: candidate.Name(), Model: candidate.Model(), Kind: llm.CompletionAttemptBusy, RetryAt: c.clock.Now().Add(time.Minute), Cause: ErrNoProviderAvailable})
 			c.logger.Info("프로바이더 동시 실행 한도에 도달해 건너뜁니다", "provider", candidate.Name())
 			continue
+		}
+		if windowItems > 0 {
+			c.logger.Info("모델 한도에 맞춰 검토할 파일 범위를 선택했습니다",
+				"provider", candidate.Name(), "files", windowItems,
+				"prompt_bytes", llm.RequestSize(candidateRequest.Messages, tools), "prompt_limit", candidate.PromptLimit(),
+				"max_output_tokens", requestPolicy.MaxOutputTokens, "usable_output_tokens", outputLimit)
 		}
 		usedBefore := request.ExternalCallBudget.Used()
 		response, observedUsage, observedElapsed, attemptErr := c.attemptWithRetry(ctx, candidate, candidateRequest, executor)
